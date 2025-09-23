@@ -19,8 +19,11 @@ flake8==6.1.0
 #-- Section 5: Authentication
 bcrypt>=4.0.0
 
-#-- Section 6: HTTP Client for AI APIs
+#-- Section 6: HTTP Client & FastAPI Dependencies
 aiohttp>=3.8.0
+
+# FastAPI file upload support - REQUIRED for chat file uploads
+python-multipart>=0.0.6
 
 #-- Section 7: File Processing - PRODUCTION READY with Version Constraints
 # Constrain numpy to avoid OpenCV compatibility issues
