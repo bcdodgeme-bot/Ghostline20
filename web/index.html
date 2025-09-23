@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syntax Prime V2 - AI Assistant</title>
+    <link rel="icon" type="image/png" href="static/favicon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Auth Check -->
+    <script>
+        if (!sessionStorage.getItem('syntaxprime_auth')) {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="3" x2="9" y2="21"/>
+                    </svg>
+                </button>
+                <div class="logo-header">
+                    <div class="logo-icon">
+                        <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 32px; height: 32px; object-fit: contain;">
+                    </div>
+                    <div class="logo-text">
+                        <span class="logo-name">Syntax Prime</span>
+                        <span class="logo-version">v2.0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="header-center">
+                <div class="personality-selector">
+                    <select id="personalitySelect">
+                        <option value="syntaxprime">SyntaxPrime</option>
+                        <option value="syntaxbot">SyntaxBot</option>
+                        <option value="nilexe">Nil.exe</option>
+                        <option value="ggpt">GGPT</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <button class="header-button" id="newChatBtn" title="New Conversation">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                        <polyline points="9,22 9,12 15,12 15,22"/>
+                    </svg>
+                </button>
+                <button class="header-button" id="settingsBtn" title="Settings">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="m12 1 0 6m0 6 0 6m11-5-6 0m-6 0-6 0"/>
+                    </svg>
+                </button>
+                <button class="header-button" id="logoutBtn" title="Logout">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16,17 21,12 16,7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-section">
+                    <div class="sidebar-header">
+                        <h3>Bookmarks</h3>
+                        <span class="bookmark-count" id="bookmarkCount">0</span>
+                    </div>
+                    <div class="bookmarks-list" id="bookmarksList">
+                        <div class="no-bookmarks">
+                            <p>No bookmarks yet</p>
+                            <small>Use "Remember This" to create your first bookmark</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <div class="sidebar-header">
+                        <h3>Recent Conversations</h3>
+                    </div>
+                    <div class="conversations-list" id="conversationsList">
+                        <div class="loading-conversations">Loading conversations...</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Chat Area -->
+            <main class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="welcome-message">
+                        <div class="welcome-icon">
+                            <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 80px; height: 80px; object-fit: contain;">
+                        </div>
+                        <h2>Welcome to Syntax Prime V2</h2>
+                        <p>Your sarcastic AI assistant with perfect memory and 38% more attitude.</p>
+                        <div class="welcome-features">
+                            <div class="feature-item">
+                                <span class="feature-icon">🧠</span>
+                                <span>250K Context Memory</span>
+                            </div>
+                            <div class="feature-item">
+                                <span class="feature-icon">📚</span>
+                                <span>21K Knowledge Base</span>
+                            </div>
+                            <div class="feature-item">
+                                <span class="feature-icon">🎭</span>
+                                <span>4 Unique Personalities</span>
+                            </div>
+                            <div class="feature-item">
+                                <span class="feature-icon">🔖</span>
+                                <span>Smart Bookmarks</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Input -->
+                <div class="chat-input-container">
+                    <div class="file-upload-area" id="fileUploadArea" style="display: none;">
+                        <div class="uploaded-files" id="uploadedFiles"></div>
+                    </div>
+                    
+                    <div class="chat-input-wrapper">
+                        <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.md,.csv" style="display: none;">
+                        
+                        <button class="input-button file-button" id="fileButton" title="Upload Files">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.64 16.2a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                            </svg>
+                        </button>
+                        
+                        <div class="input-field-container">
+                            <textarea 
+                                id="messageInput" 
+                                placeholder="Message Syntax Prime..."
+                                rows="1"
+                                maxlength="8000"
+                            ></textarea>
+                            <div class="input-footer">
+                                <span class="char-count" id="charCount">0/8000</span>
+                                <div class="input-actions">
+                                    <button class="input-action" id="rememberBtn" title="Remember This" style="display: none;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5Z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button class="send-button" id="sendButton" disabled>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2 11 13"/>
+                                <path d="m22 2-7 20-4-9-9-4z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="bookmarkModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Remember This</h3>
+                <button class="modal-close" id="closeBookmarkModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>What should we name this bookmark?</p>
+                <input type="text" id="bookmarkName" placeholder="Enter bookmark name..." maxlength="100">
+                <div class="bookmark-preview" id="bookmarkPreview"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelBookmark">Cancel</button>
+                <button class="btn btn-primary" id="saveBookmark">Save Bookmark</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="settingsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="modal-close" id="closeSettingsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label>Default Personality</label>
+                    <select id="defaultPersonality">
+                        <option value="syntaxprime">SyntaxPrime</option>
+                        <option value="syntaxbot">SyntaxBot</option>
+                        <option value="nilexe">Nil.exe</option>
+                        <option value="ggpt">GGPT</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label>Auto-save Conversations</label>
+                    <input type="checkbox" id="autoSave" checked>
+                </div>
+                <div class="setting-group">
+                    <label>Show Typing Indicators</label>
+                    <input type="checkbox" id="showTyping" checked>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="saveSettings">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Drag & Drop Overlay -->
+    <div class="drag-overlay" id="dragOverlay" style="display: none;">
+        <div class="drag-content">
+            <div class="drag-icon">📁</div>
+            <h3>Drop files to upload</h3>
+            <p>Images, PDFs, text files, and CSV files are supported</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

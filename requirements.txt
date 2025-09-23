@@ -1,0 +1,33 @@
+# Syntax Prime V2 - Core Dependencies - 9/23/25
+
+#-- Section 1: Web Framework - 9/23/25
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+#-- Section 2: Database - 9/23/25
+asyncpg==0.29.0
+
+#-- Section 3: Environment & Configuration - 9/23/25
+python-dotenv==1.0.0
+
+#-- Section 4: Development Tools - 9/23/25
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+flake8==6.1.0
+
+#-- Section 5: Optional Enhancements - 9/23/25
+# For enhanced logging (uncomment if needed)
+# structlog==23.2.0
+
+# File processing - PRODUCTION READY
+pillow>=10.0.0          # Image processing and manipulation
+pdfplumber>=0.7.6       # PDF text and table extraction  
+pandas>=2.0.0           # CSV analysis and data profiling
+python-magic>=0.4.27    # File type detection
+opencv-python>=4.8.0    # Computer vision and image analysis
+pytesseract>=0.3.10     # OCR text extraction from images
+chardet>=5.2.0          # Character encoding detection
+numpy>=1.24.0           # Numerical computing for image processing
+
+bcrypt>=4.0.0  # Password hashing

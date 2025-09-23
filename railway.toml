@@ -1,0 +1,12 @@
+# Syntax Prime V2 - Railway Deployment Configuration
+# Optimized for FastAPI + AI Brain + Slack Integration + File Processing
+
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

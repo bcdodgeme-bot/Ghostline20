@@ -1,0 +1,77 @@
+# Syntax Prime V2 - Production Dockerfile for Railway Deployment
+# Optimized for FastAPI + AI Brain + File Processing + Static Web Interface
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies for file processing and OCR
+RUN apt-get update && apt-get install -y \
+    # Essential build tools
+    gcc \
+    g++ \
+    # For python-magic file type detection
+    libmagic1 \
+    # For OpenCV image processing
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    # For OCR with pytesseract
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    # For PDF processing
+    poppler-utils \
+    # For image processing optimization
+    libjpeg-dev \
+    zlib1g-dev \
+    # Cleanup to reduce image size
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash app
+USER app
+
+# Set user-specific paths
+ENV PATH="/home/app/.local/bin:$PATH"
+ENV PYTHONPATH="/app:$PYTHONPATH"
+
+# Copy requirements first for Docker layer caching
+COPY --chown=app:app requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Copy application code
+COPY --chown=app:app . .
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /home/app/uploads /home/app/logs /home/app/.cache
+
+# Set environment variables for Railway
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV HOST=0.0.0.0
+ENV PORT=${PORT:-8000}
+
+# Expose the port (Railway will set the PORT environment variable)
+EXPOSE $PORT
+
+# Health check for Railway
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:${PORT:-8000}/health')"
+
+# Production startup command
+CMD uvicorn app:app \
+    --host 0.0.0.0 \
+    --port ${PORT:-8000} \
+    --workers 1 \
+    --loop uvloop \
+    --http httptools \
+    --log-level info \
+    --access-log \
+    --no-server-header
