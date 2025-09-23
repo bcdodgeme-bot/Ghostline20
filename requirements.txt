@@ -1,4 +1,4 @@
-# Syntax Prime V2 - Core Dependencies - 9/23/25
+# Syntax Prime V2 - Updated Requirements with Version Constraints - 9/23/25
 
 #-- Section 1: Web Framework - 9/23/25
 fastapi==0.104.1
@@ -16,18 +16,33 @@ pytest-asyncio==0.21.1
 black==23.11.0
 flake8==6.1.0
 
-#-- Section 5: Optional Enhancements - 9/23/25
-# For enhanced logging (uncomment if needed)
-# structlog==23.2.0
+#-- Section 5: Authentication
+bcrypt>=4.0.0
 
-# File processing - PRODUCTION READY
-pillow>=10.0.0          # Image processing and manipulation
-pdfplumber>=0.7.6       # PDF text and table extraction  
-pandas>=2.0.0           # CSV analysis and data profiling
-python-magic>=0.4.27    # File type detection
-opencv-python>=4.8.0    # Computer vision and image analysis
-pytesseract>=0.3.10     # OCR text extraction from images
-chardet>=5.2.0          # Character encoding detection
-numpy>=1.24.0           # Numerical computing for image processing
+#-- Section 6: HTTP Client for AI APIs
+aiohttp>=3.8.0
 
-bcrypt>=4.0.0  # Password hashing
+#-- Section 7: File Processing - PRODUCTION READY with Version Constraints
+# Constrain numpy to avoid OpenCV compatibility issues
+numpy>=1.24.0,<2.0.0
+
+# OpenCV with headless version for server environments
+opencv-python-headless>=4.8.0,<4.11.0
+
+# Image processing and manipulation
+pillow>=10.0.0
+
+# PDF text and table extraction  
+pdfplumber>=0.7.6
+
+# CSV analysis and data profiling
+pandas>=2.0.0
+
+# File type detection
+python-magic>=0.4.27
+
+# OCR text extraction from images
+pytesseract>=0.3.10
+
+# Character encoding detection
+chardet>=5.2.0

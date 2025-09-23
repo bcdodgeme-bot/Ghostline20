@@ -1,5 +1,5 @@
 # Syntax Prime V2 - Production Dockerfile for Railway Deployment
-# Optimized for FastAPI + AI Brain + File Processing + Static Web Interface
+# Fixed with correct Debian Trixie package names
 
 FROM python:3.11-slim
 
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     g++ \
     # For python-magic file type detection
     libmagic1 \
-    # For OpenCV image processing (updated package names for Debian Trixie)
+    # For OpenCV image processing (correct Debian Trixie packages)
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -31,9 +31,11 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     # Additional dependencies for OpenCV
     libgtk-3-0 \
-    libavcodec58 \
-    libavformat58 \
-    libswscale5 \
+    # FFmpeg libraries (correct Trixie package names)
+    libavcodec61 \
+    libavformat61 \
+    libswscale8 \
+    libavutil59 \
     # Cleanup to reduce image size
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
