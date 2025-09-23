@@ -13,21 +13,27 @@ RUN apt-get update && apt-get install -y \
     g++ \
     # For python-magic file type detection
     libmagic1 \
-    # For OpenCV image processing
+    # For OpenCV image processing (updated package names for Debian Trixie)
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    libxrender1 \
+    libgl1-mesa-dri \
+    libglu1-mesa \
     # For OCR with pytesseract
     tesseract-ocr \
     tesseract-ocr-eng \
     # For PDF processing
     poppler-utils \
     # For image processing optimization
-    libjpeg-dev \
+    libjpeg62-turbo-dev \
     zlib1g-dev \
+    libpng-dev \
+    # Additional dependencies for OpenCV
+    libgtk-3-0 \
+    libavcodec58 \
+    libavformat58 \
+    libswscale5 \
     # Cleanup to reduce image size
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
