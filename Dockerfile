@@ -73,13 +73,5 @@ EXPOSE $PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:${PORT:-8000}/health')"
 
-# Production startup command
-CMD uvicorn app:app \
-    --host 0.0.0.0 \
-    --port ${PORT:-8000} \
-    --workers 1 \
-    --loop uvloop \
-    --http httptools \
-    --log-level info \
-    --access-log \
-    --no-server-header
+# Production startup command with Railway port handling
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --loop uvloop --http httptools --log-level info --access-log --no-server-header"]
