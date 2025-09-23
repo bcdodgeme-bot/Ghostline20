@@ -1,7 +1,8 @@
 # modules/ai/router.py
 """
-AI Brain Main Router for Syntax Prime V2
+AI Brain Main Router for Syntax Prime V2 - FIXED
 Ties together all AI components into FastAPI endpoints
+FIX: Use proper UUID for default user ID
 """
 
 import asyncio
@@ -67,10 +68,12 @@ class AIBrainOrchestrator:
     """
     
     def __init__(self):
-        self.default_user_id = "carl-default-user"  # Single user system
+        # FIXED: Use proper UUID format for default user
+        self.default_user_id = str(uuid.uuid4())  # Generate a proper UUID
+        logger.info(f"AI Brain initialized with default user ID: {self.default_user_id}")
         self.fallback_attempts = 2
         
-    async def process_chat_message(self, 
+    async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
         """
@@ -131,7 +134,7 @@ class AIBrainOrchestrator:
             if knowledge_sources:
                 knowledge_context = self._build_knowledge_context(knowledge_sources)
                 ai_messages.append({
-                    "role": "system", 
+                    "role": "system",
                     "content": f"RELEVANT KNOWLEDGE:\n{knowledge_context}"
                 })
             
@@ -231,7 +234,7 @@ class AIBrainOrchestrator:
         
         return "\n\n".join(context_parts)
     
-    async def _get_ai_response_with_fallback(self, 
+    async def _get_ai_response_with_fallback(self,
                                            messages: List[Dict],
                                            max_tokens: int,
                                            temperature: float) -> tuple[str, str]:
@@ -272,7 +275,7 @@ class AIBrainOrchestrator:
                 logger.error(f"Both AI providers failed: {fallback_error}")
                 raise Exception(f"All AI providers failed. Primary: {e}, Fallback: {fallback_error}")
     
-    async def process_feedback(self, 
+    async def process_feedback(self,
                              feedback_request: FeedbackRequest,
                              user_id: str = None) -> FeedbackResponse:
         """Process user feedback for learning"""
@@ -363,12 +366,45 @@ async def get_personalities():
 async def get_conversations(limit: int = 50):
     """Get conversation threads"""
     memory_manager = get_memory_manager(orchestrator.default_user_id)
-    conversations = await memory_manager.get_last_500_conversations()
     
-    return {
-        "conversations": conversations[:limit],
-        "total_available": len(conversations)
-    }
+    try:
+        # Get conversations using the proper database approach
+        conversations_query = """
+        SELECT id, title, platform, status, message_count, 
+               created_at, updated_at, last_message_at
+        FROM conversation_threads
+        WHERE user_id = $1
+        ORDER BY last_message_at DESC
+        LIMIT $2
+        """
+        
+        from ..core.database import db_manager
+        threads = await db_manager.fetch_all(conversations_query, orchestrator.default_user_id, limit)
+        
+        conversations = []
+        for thread in threads:
+            conversations.append({
+                'thread_id': thread['id'],
+                'title': thread['title'] or f"Conversation {thread['created_at'].strftime('%m/%d')}" if thread['created_at'] else 'New Conversation',
+                'platform': thread['platform'],
+                'status': thread['status'],
+                'message_count': thread['message_count'] or 0,
+                'created_at': thread['created_at'].isoformat() if thread['created_at'] else None,
+                'updated_at': thread['updated_at'].isoformat() if thread['updated_at'] else None,
+                'last_message_at': thread['last_message_at'].isoformat() if thread['last_message_at'] else None
+            })
+        
+        return {
+            "conversations": conversations,
+            "total_available": len(conversations)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get conversations: {e}")
+        return {
+            "conversations": [],
+            "total_available": 0
+        }
 
 @router.get("/conversations/{thread_id}")
 async def get_conversation(thread_id: str, include_metadata: bool = False):
@@ -377,7 +413,7 @@ async def get_conversation(thread_id: str, include_metadata: bool = False):
     
     try:
         messages = await memory_manager.get_conversation_history(
-            thread_id, 
+            thread_id,
             include_metadata=include_metadata
         )
         
@@ -390,8 +426,8 @@ async def get_conversation(thread_id: str, include_metadata: bool = False):
         raise HTTPException(status_code=404, detail=f"Conversation not found: {e}")
 
 @router.get("/knowledge/search")
-async def search_knowledge(q: str, 
-                          personality: str = 'syntaxprime', 
+async def search_knowledge(q: str,
+                          personality: str = 'syntaxprime',
                           limit: int = 10):
     """Search knowledge base"""
     knowledge_engine = get_knowledge_engine()
@@ -416,8 +452,23 @@ async def get_ai_stats():
     feedback_processor = get_feedback_processor()
     
     try:
-        # Get conversation stats
-        last_500 = await memory_manager.get_last_500_conversations()
+        # Get conversation stats from database
+        from ..core.database import db_manager
+        
+        conversation_stats_query = """
+        SELECT 
+            COUNT(DISTINCT ct.id) as total_conversations,
+            COUNT(cm.id) as total_messages,
+            COUNT(CASE WHEN cm.role = 'user' THEN 1 END) as user_messages,
+            COUNT(CASE WHEN cm.role = 'assistant' THEN 1 END) as assistant_messages,
+            AVG(cm.response_time_ms) as avg_response_time_ms,
+            MAX(ct.last_message_at) as last_conversation_at
+        FROM conversation_threads ct
+        LEFT JOIN conversation_messages cm ON ct.id = cm.thread_id
+        WHERE ct.user_id = $1
+        """
+        
+        stats_result = await db_manager.fetch_one(conversation_stats_query, orchestrator.default_user_id)
         
         # Get personality stats
         personality_stats = personality_engine.get_personality_stats()
@@ -429,19 +480,20 @@ async def get_ai_stats():
         
         return {
             "conversation_stats": {
-                "total_conversations": len(last_500),
-                "recent_conversations_30d": len([
-                    c for c in last_500 
-                    if c['last_message_at'] and 
-                    (datetime.now() - datetime.fromisoformat(c['last_message_at'].replace('Z', '+00:00'))).days <= 30
-                ])
+                "total_conversations": stats_result['total_conversations'] or 0,
+                "total_messages": stats_result['total_messages'] or 0,
+                "user_messages": stats_result['user_messages'] or 0,
+                "assistant_messages": stats_result['assistant_messages'] or 0,
+                "average_response_time_ms": float(stats_result['avg_response_time_ms']) if stats_result['avg_response_time_ms'] else 0,
+                "last_conversation_at": stats_result['last_conversation_at'].isoformat() if stats_result['last_conversation_at'] else None
             },
             "personality_stats": personality_stats,
             "feedback_stats": feedback_summary,
             "system_health": {
                 "memory_active": True,
                 "knowledge_engine_active": True,
-                "learning_active": feedback_summary.get('learning_active', False)
+                "learning_active": feedback_summary.get('learning_active', False),
+                "default_user_id": orchestrator.default_user_id
             }
         }
         
@@ -476,7 +528,8 @@ async def test_ai_connection():
         "providers": results,
         "system_status": "healthy" if primary_healthy or fallback_available else "degraded",
         "primary_provider": "openrouter",
-        "fallback_provider": "inception_labs"
+        "fallback_provider": "inception_labs",
+        "default_user_id": orchestrator.default_user_id
     }
 
 # Cleanup on shutdown
@@ -499,7 +552,7 @@ def get_integration_info():
         "version": "2.0.0",
         "components": [
             "OpenRouter Client",
-            "Inception Labs Client", 
+            "Inception Labs Client",
             "Digital Elephant Memory",
             "Knowledge Query Engine",
             "Personality Engine",
@@ -507,7 +560,7 @@ def get_integration_info():
         ],
         "endpoints": {
             "chat": "/ai/chat",
-            "feedback": "/ai/feedback", 
+            "feedback": "/ai/feedback",
             "personalities": "/ai/personalities",
             "conversations": "/ai/conversations",
             "knowledge_search": "/ai/knowledge/search",
@@ -520,8 +573,10 @@ def get_integration_info():
             "21K knowledge base integration",
             "4 personality system",
             "👍👎🖕 feedback learning",
-            "Provider fallback system"
-        ]
+            "Provider fallback system",
+            "UUID-based user management"
+        ],
+        "default_user_id": orchestrator.default_user_id
     }
 
 def check_module_health():
@@ -538,5 +593,6 @@ def check_module_health():
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
-        "status": "ready" if len(missing_vars) == 0 else "needs_configuration"
+        "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
+        "default_user_id": orchestrator.default_user_id
     }
