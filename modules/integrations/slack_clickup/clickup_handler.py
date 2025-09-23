@@ -1,154 +1,148 @@
 """
-Task Mapping Business Logic
-Maps Slack events to ClickUp tasks based on context and commands
+ClickUp API Handler - Environment-Driven Configuration
+Handles all ClickUp API interactions for task creation
 """
-import re
-from typing import Dict, Optional, Tuple
-from datetime import datetime
+import os
+import aiohttp
+import json
+from typing import Dict, Optional
+from datetime import datetime, timedelta
 
-#--Section 1: Class Initialization & Command Patterns 9/23/25
-class TaskMapper:
+#--Section 1: Class Initialization & Environment Setup 9/23/25
+class ClickUpHandler:
     def __init__(self):
-        self.command_patterns = {
-            'remind': r'(?:remind|reminder|remember)',
-            'task': r'(?:task|todo|do)',
-            'blog': r'(?:blog|write|article)',
-            'follow_up': r'(?:follow up|followup|check back)',
-        }
+        self.api_token = os.getenv('CLICKUP_API_TOKEN')
+        self.user_id = os.getenv('CLICKUP_USER_ID')
+        self.amcf_space_id = os.getenv('CLICKUP_AMCF_SPACE_ID')
+        self.personal_space_id = os.getenv('CLICKUP_PERSONAL_SPACE_ID')
+        self.base_url = "https://api.clickup.com/api/v2"
+        
+        if not all([self.api_token, self.user_id]):
+            print("⚠️  ClickUp API token or user ID not configured")
 
-#--Section 2: Slack Mention Processing 9/23/25
-    def extract_mention_task(self, message_data: Dict) -> Optional[Dict]:
-        """Extract task details from a Slack mention"""
-        text = message_data.get('text', '')
-        user = message_data.get('user', '')
-        channel = message_data.get('channel', '')
-        timestamp = message_data.get('ts', '')
-        
-        # Clean up the message text (remove mentions, extra spaces)
-        clean_text = self._clean_message_text(text)
-        
-        # Extract task title (first sentence or reasonable chunk)
-        title = self._extract_task_title(clean_text)
-        
-        # Build description with context
-        description = self._build_mention_description(
-            original_text=text,
-            user=user,
-            channel=channel,
-            timestamp=timestamp
-        )
-        
+#--Section 2: HTTP Headers & Authentication 9/23/25
+    def _get_headers(self) -> Dict[str, str]:
+        """Get standard headers for ClickUp API calls"""
         return {
-            'title': title,
-            'description': description,
-            'type': 'mention',
-            'source_data': message_data
+            'Authorization': self.api_token,
+            'Content-Type': 'application/json'
         }
 
-#--Section 3: AI Command Processing 9/23/25
-    def extract_command_task(self, message: str, context: str = "") -> Optional[Dict]:
-        """Extract task details from an AI conversation command"""
-        # Look for command patterns
-        command_type = self._detect_command_type(message)
-        
-        # Extract the actual task content
-        task_content = self._extract_command_content(message)
-        
-        if not task_content:
+#--Section 3: AMCF Task Creation 9/23/25
+    async def create_amcf_task(self, title: str, description: str) -> Optional[Dict]:
+        """Create a task in AMCF workspace with 3-day due date"""
+        if not self.amcf_space_id:
+            print("⚠️  AMCF space ID not configured")
             return None
         
-        title = self._extract_task_title(task_content)
-        description = self._build_command_description(
-            original_message=message,
-            context=context,
-            command_type=command_type
-        )
+        # Set due date to 3 days from now
+        due_date = int((datetime.now() + timedelta(days=3)).timestamp() * 1000)
         
-        return {
-            'title': title,
+        payload = {
+            'name': title,
             'description': description,
-            'type': 'command',
-            'command_type': command_type
+            'assignees': [self.user_id] if self.user_id else [],
+            'due_date': due_date,
+            'priority': 2,  # High priority for work tasks
+            'status': 'to do'
         }
+        
+        return await self._create_task_in_space(self.amcf_space_id, payload)
 
-#--Section 4: Text Cleaning & Parsing Utilities 9/23/25
-    def _clean_message_text(self, text: str) -> str:
-        """Remove Slack mentions and clean up text"""
-        # Remove user mentions
-        text = re.sub(r'<@[A-Z0-9]+>', '', text)
-        # Remove channel mentions
-        text = re.sub(r'<#[A-Z0-9]+\|[^>]+>', '', text)
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
+#--Section 4: Personal Task Creation 9/23/25
+    async def create_personal_task(self, title: str, description: str) -> Optional[Dict]:
+        """Create a task in personal workspace with 5-day due date"""
+        if not self.personal_space_id:
+            print("⚠️  Personal space ID not configured")
+            return None
+        
+        # Set due date to 5 days from now
+        due_date = int((datetime.now() + timedelta(days=5)).timestamp() * 1000)
+        
+        payload = {
+            'name': title,
+            'description': description,
+            'assignees': [self.user_id] if self.user_id else [],
+            'due_date': due_date,
+            'priority': 3,  # Normal priority for personal tasks
+            'status': 'to do'
+        }
+        
+        return await self._create_task_in_space(self.personal_space_id, payload)
+
+#--Section 5: Core Task Creation Logic 9/23/25
+    async def _create_task_in_space(self, space_id: str, payload: Dict) -> Optional[Dict]:
+        """Internal method to create task in specified space"""
+        if not self.api_token:
+            print("⚠️  ClickUp API token not configured")
+            return None
+        
+        try:
+            # First, get lists in the space to find default list
+            lists_url = f"{self.base_url}/space/{space_id}/list"
+            
+            async with aiohttp.ClientSession() as session:
+                # Get available lists
+                async with session.get(lists_url, headers=self._get_headers()) as resp:
+                    if resp.status != 200:
+                        print(f"❌ Failed to get lists for space {space_id}")
+                        return None
+                    
+                    lists_data = await resp.json()
+                    lists = lists_data.get('lists', [])
+                    
+                    if not lists:
+                        print(f"❌ No lists found in space {space_id}")
+                        return None
+                    
+                    # Use first available list
+                    list_id = lists[0]['id']
+                    
+                # Create task in the list
+                task_url = f"{self.base_url}/list/{list_id}/task"
+                
+                async with session.post(task_url, headers=self._get_headers(), json=payload) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        task_id = result.get('id')
+                        task_url = result.get('url')
+                        
+                        print(f"✅ Created ClickUp task: {task_id}")
+                        return {
+                            'id': task_id,
+                            'url': task_url,
+                            'title': payload['name'],
+                            'space_id': space_id,
+                            'list_id': list_id
+                        }
+                    else:
+                        error_text = await resp.text()
+                        print(f"❌ Failed to create ClickUp task: {resp.status} - {error_text}")
+                        return None
+                        
+        except Exception as e:
+            print(f"❌ ClickUp API error: {e}")
+            return None
+
+#--Section 6: Utility Methods 9/23/25
+    async def test_connection(self) -> bool:
+        """Test ClickUp API connection"""
+        if not self.api_token:
+            return False
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                test_url = f"{self.base_url}/user"
+                async with session.get(test_url, headers=self._get_headers()) as resp:
+                    return resp.status == 200
+        except Exception:
+            return False
     
-    def _extract_task_title(self, text: str, max_length: int = 80) -> str:
-        """Extract a reasonable task title from text"""
-        # Take first sentence or first reasonable chunk
-        sentences = text.split('.')
-        title = sentences[0].strip()
-        
-        # If too long, truncate at word boundary
-        if len(title) > max_length:
-            words = title.split()
-            title = ' '.join(words[:10]) + '...'
-        
-        return title if title else "Task from Slack"
-
-#--Section 5: Command Detection & Content Extraction 9/23/25
-    def _detect_command_type(self, message: str) -> str:
-        """Detect the type of command in the message"""
-        message_lower = message.lower()
-        
-        for command, pattern in self.command_patterns.items():
-            if re.search(pattern, message_lower):
-                return command
-        
-        return 'general'
-    
-    def _extract_command_content(self, message: str) -> str:
-        """Extract the actual task content from a command"""
-        # Common command starters to remove
-        prefixes = [
-            r'^(?:please\s+)?(?:remind me to|remember to|task to|todo:?)\s*',
-            r'^(?:can you\s+)?(?:remind|remember)\s+(?:me\s+)?(?:to\s+)?',
-            r'^(?:add\s+)?(?:task:?|todo:?)\s*',
-        ]
-        
-        content = message
-        for prefix in prefixes:
-            content = re.sub(prefix, '', content, flags=re.IGNORECASE).strip()
-        
-        return content
-
-#--Section 6: Description Builders 9/23/25
-    def _build_mention_description(self, original_text: str, user: str, channel: str, timestamp: str) -> str:
-        """Build detailed description for mention-based tasks"""
-        dt = datetime.fromtimestamp(float(timestamp))
-        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-        
-        return f"""📩 **Slack Mention Task**
-        
-**Original Message:** {original_text}
-
-**Context:**
-- From: <@{user}>
-- Channel: <#{channel}>
-- Time: {formatted_time}
-- Source: Slack Integration
-
-**Action Required:** Review and respond to this mention within 3 days."""
-    
-    def _build_command_description(self, original_message: str, context: str, command_type: str) -> str:
-        """Build detailed description for AI command tasks"""
-        return f"""🤖 **AI Command Task**
-        
-**Command:** {original_message}
-
-**Context:** {context if context else 'Generated from AI conversation'}
-
-**Type:** {command_type.title()}
-**Created:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**Source:** AI Integration
-
-**Note:** This task was created from an AI conversation command."""
+    def get_configuration(self) -> Dict:
+        """Get current configuration status"""
+        return {
+            'api_token_set': bool(self.api_token),
+            'user_id_set': bool(self.user_id),
+            'amcf_space_configured': bool(self.amcf_space_id),
+            'personal_space_configured': bool(self.personal_space_id)
+        }
