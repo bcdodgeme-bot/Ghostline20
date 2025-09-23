@@ -1,11 +1,11 @@
 # Syntax Prime V2 - Railway Deployment Configuration
-# Fixed startup command for Railway environment variables
+# Fixed startup command with proper port handling
 
 [build]
 builder = "dockerfile"
 
 [deploy]
-startCommand = "python -m uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info"
+startCommand = "sh -c 'uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level info'"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
