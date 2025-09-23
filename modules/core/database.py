@@ -43,11 +43,36 @@ class DatabaseManager:
             await self.pool.release(conn)
 
 #-- Section 3: Query Execution Interface - 9/23/25
+#-- Section 3: Query Execution Interface - 9/23/25
     async def execute_query(self, query: str, *args) -> list:
         """Execute query and return results."""
         conn = await self.get_connection()
         try:
             return await conn.fetch(query, *args)
+        finally:
+            await self.release_connection(conn)
+    
+    async def fetch_one(self, query: str, *args):
+        """Fetch single row from query."""
+        conn = await self.get_connection()
+        try:
+            return await conn.fetchrow(query, *args)
+        finally:
+            await self.release_connection(conn)
+    
+    async def fetch_all(self, query: str, *args):
+        """Fetch all rows from query."""
+        conn = await self.get_connection()
+        try:
+            return await conn.fetch(query, *args)
+        finally:
+            await self.release_connection(conn)
+    
+    async def execute(self, query: str, *args):
+        """Execute query without returning results."""
+        conn = await self.get_connection()
+        try:
+            return await conn.execute(query, *args)
         finally:
             await self.release_connection(conn)
 
