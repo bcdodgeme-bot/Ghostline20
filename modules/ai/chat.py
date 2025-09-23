@@ -62,14 +62,37 @@ class ChatResponse(BaseModel):
     timestamp: datetime
 
 #-- Section 4: Router Setup - 9/23/25
+#-- Section 4: Router Setup - 9/23/25
 router = APIRouter(prefix="/ai", tags=["AI Chat"])
 logger = logging.getLogger(__name__)
 
-# File upload configuration
-UPLOAD_DIR = Path("uploads/chat_files")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# File upload configuration - FIXED for Docker permissions
+UPLOAD_DIR = Path("/home/app/uploads/chat_files")  # Use user's home directory
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.txt', '.md', '.csv'}
+
+# Create upload directory safely (not at import time)
+def ensure_upload_dir():
+    """Ensure upload directory exists with proper error handling"""
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except PermissionError as e:
+        logger.error(f"Cannot create upload directory: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error creating upload directory: {e}")
+        return False
+
+# Call this function instead of doing it at import time
+_upload_dir_created = False
+
+def get_upload_dir():
+    """Get upload directory, creating it if necessary"""
+    global _upload_dir_created
+    if not _upload_dir_created:
+        _upload_dir_created = ensure_upload_dir()
+    return UPLOAD_DIR if _upload_dir_created else None
 
 #-- Section 5: Helper Functions - 9/23/25
 async def get_current_user_id() -> str:
