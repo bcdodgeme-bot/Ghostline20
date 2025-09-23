@@ -69,7 +69,7 @@ class AIBrainOrchestrator:
     
     def __init__(self):
         # FIXED: Use proper UUID format for default user
-        self.default_user_id = str(uuid.uuid4())  # Generate a proper UUID
+        self.default_user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Carl's user ID
         logger.info(f"AI Brain initialized with default user ID: {self.default_user_id}")
         self.fallback_attempts = 2
         
