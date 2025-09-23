@@ -1,7 +1,8 @@
 # modules/ai/conversation_manager.py
 """
-Digital Elephant Conversation Manager for Syntax Prime V2
+Digital Elephant Conversation Manager for Syntax Prime V2 - FIXED
 Never forgets. Maintains 250K context + last 500 conversations.
+FIX: Added missing _update_thread_after_message method
 """
 
 import asyncio
@@ -32,7 +33,7 @@ class DigitalElephantMemory:
         self._last_500_cache = None
         self._cache_expiry = None
     
-    async def create_conversation_thread(self, 
+    async def create_conversation_thread(self,
                                        platform: str = 'web',
                                        title: str = None,
                                        primary_project_id: int = None) -> str:
@@ -56,11 +57,11 @@ class DigitalElephantMemory:
         """
         
         try:
-            result = await db_manager.fetch_one(insert_query, 
-                                               thread_id, 
-                                               self.user_id, 
-                                               title, 
-                                               platform, 
+            result = await db_manager.fetch_one(insert_query,
+                                               thread_id,
+                                               self.user_id,
+                                               title,
+                                               platform,
                                                primary_project_id)
             
             self.current_thread_id = thread_id
@@ -71,7 +72,7 @@ class DigitalElephantMemory:
             logger.error(f"Failed to create conversation thread: {e}")
             raise
     
-    async def add_message(self, 
+    async def add_message(self,
                          thread_id: str,
                          role: str,  # 'user' or 'assistant'
                          content: str,
@@ -126,8 +127,62 @@ class DigitalElephantMemory:
             logger.error(f"Failed to add message: {e}")
             raise
     
-    async def get_conversation_history(self, 
-                                     thread_id: str, 
+    # FIXED: Added the missing method
+    async def _update_thread_after_message(self, thread_id: str, user_content: str = None):
+        """Update conversation thread metadata after adding a message"""
+        try:
+            # Update basic thread stats
+            update_query = """
+            UPDATE conversation_threads 
+            SET message_count = message_count + 1,
+                last_message_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1;
+            """
+            
+            await db_manager.execute(update_query, thread_id)
+            
+            # If this is a user message and we don't have a proper title yet, update it
+            if user_content and len(user_content.strip()) > 0:
+                # Check if thread has a generic title
+                thread_query = "SELECT title FROM conversation_threads WHERE id = $1"
+                thread_result = await db_manager.fetch_one(thread_query, thread_id)
+                
+                if thread_result and thread_result['title']:
+                    current_title = thread_result['title']
+                    # If it's a generic timestamp title, replace it with content-based title
+                    if 'Conversation 20' in current_title or current_title == 'New Conversation':
+                        # Create title from first part of user message
+                        new_title = user_content.strip()[:50]
+                        if len(user_content) > 50:
+                            new_title += "..."
+                        
+                        title_update_query = """
+                        UPDATE conversation_threads 
+                        SET title = $1, updated_at = NOW()
+                        WHERE id = $2;
+                        """
+                        await db_manager.execute(title_update_query, new_title, thread_id)
+                        logger.info(f"Updated thread title: {new_title}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to update thread metadata: {e}")
+            # Don't fail the whole operation if metadata update fails
+    
+    # FIXED: Added the missing cache invalidation method
+    def _invalidate_cache(self, thread_id: str = None):
+        """Invalidate conversation cache"""
+        if thread_id:
+            # Remove specific thread from cache
+            keys_to_remove = [key for key in self._conversation_cache.keys() if thread_id in key]
+            for key in keys_to_remove:
+                del self._conversation_cache[key]
+        else:
+            # Clear entire cache
+            self._conversation_cache.clear()
+    
+    async def get_conversation_history(self,
+                                     thread_id: str,
                                      limit: int = None,
                                      include_metadata: bool = False) -> List[Dict]:
         """
@@ -193,7 +248,7 @@ class DigitalElephantMemory:
             logger.error(f"Failed to get conversation history: {e}")
             raise
     
-    async def get_context_for_ai(self, 
+    async def get_context_for_ai(self,
                                 thread_id: str,
                                 max_tokens: int = None) -> Tuple[List[Dict], Dict]:
         """
@@ -250,8 +305,9 @@ def get_memory_manager(user_id: str):
 async def cleanup_memory_managers():
     """Cleanup all memory managers"""
     for manager in _memory_managers.values():
-        await manager.cleanup() if hasattr(manager, 'cleanup') else None
+        if hasattr(manager, 'cleanup'):
+            await manager.cleanup()
     _memory_managers.clear()
 
 # Note: This is a simplified version for display
-# The full version includes search, long-term memory, and caching
+# The full version would include search, long-term memory, and caching
