@@ -77,6 +77,7 @@ class AIBrainOrchestrator:
         self.fallback_attempts = 2
 
 #-- Section 5: Weather Integration Methods - Added 9/24/25
+#-- Section 5: Weather Integration Methods - Added 9/24/25
     def _detect_weather_request(self, message: str) -> bool:
         """Detect if user is asking about weather"""
         print(f"🌦️ WEATHER DEBUG: Checking message '{message}'")
@@ -95,8 +96,8 @@ class AIBrainOrchestrator:
         """Get current weather data for the user"""
         print(f"🌦️ WEATHER DEBUG: Getting weather for user {user_id}")
         try:
-            # Build the URL for your weather endpoint - using localhost for internal calls
-            base_url = os.getenv("RAILWAY_STATIC_URL", "http://localhost:8000")
+            # Use dedicated environment variable for internal API base URL
+            base_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:8000")
             params = {"user_id": user_id}
             if location:
                 params["location"] = location
