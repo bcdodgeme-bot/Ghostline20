@@ -28,8 +28,8 @@ async def verify_slack_request(request: Request) -> Dict:
     logger.info(f"🔐 WEBHOOK VERIFICATION STARTED")
     
     # Get headers
-    timestamp = request.headers.get("X-Slack-Request-Timestamp")
-    signature = request.headers.get("X-Slack-Signature")
+    timestamp = request.headers.get("x-slack-request-timestamp") or request.headers.get("X-Slack-Request-Timestamp")
+    signature = request.headers.get("x-slack-signature") or request.headers.get("X-Slack-Signature")
     content_type = request.headers.get("content-type")
     
     logger.info(f"📋 Headers received:")

@@ -128,6 +128,7 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
 
 def detect_weather_request(message: str) -> bool:
     """Detect if user is asking about weather"""
+    logger.info(f"🌦️ WEATHER DEBUG: Checking message '{message}'")  # ADD THIS LINE
     weather_keywords = [
         "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
         "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
@@ -135,7 +136,9 @@ def detect_weather_request(message: str) -> bool:
         "precipitation", "conditions", "outside", "today's weather"
     ]
     message_lower = message.lower()
-    return any(keyword in message_lower for keyword in weather_keywords)
+    result = any(keyword in message_lower for keyword in weather_keywords)
+    logger.info(f"🌦️ WEATHER DEBUG: Detection result = {result}")  # ADD THIS LINE TOO
+    return result
 
 async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
     """Process uploaded files and return file information"""
