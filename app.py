@@ -23,6 +23,11 @@ from modules.integrations.weather import get_integration_info as weather_integra
 from modules.integrations.bluesky import router as bluesky_router
 from modules.integrations.bluesky import get_integration_info as bluesky_integration_info, check_module_health as bluesky_module_health
 
+#-- NEW Section 2c: RSS Learning Integration - added 9/25/25
+from modules.integrations.rss_learning import router as rss_learning_router
+from modules.integrations.rss_learning import get_integration_info as rss_learning_integration_info, check_module_health as rss_learning_module_health, start_rss_service
+
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -209,6 +214,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     return user['id']
 
 #-- Section 10: Application Lifecycle Events - updated 9/24/25 with Bluesky
+# Update Section 10: Application Lifecycle Events - Add RSS Learning startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -239,15 +245,15 @@ async def startup_event():
         chat_health = chat_module_health()
         if chat_health['healthy']:
             print("💬 Chat system loaded successfully")
-            print(f"   📎 File upload support: {chat_health.get('file_upload_support', True)}")
-            print(f"   📏 Max file size: {chat_health.get('max_file_size', '10MB')}")
+            print(f"   🔍 File upload support: {chat_health.get('file_upload_support', True)}")
+            print(f"   📁 Max file size: {chat_health.get('max_file_size', '10MB')}")
         else:
             print("⚠️  Chat system loaded with warnings")
             print(f"   Missing vars: {chat_health.get('missing_vars', [])}")
     except Exception as e:
         print(f"⚠️  Chat system health check failed: {e}")
     
-    # Check Weather integration health - added 9/24/25
+    # Check Weather integration health
     try:
         weather_health = weather_module_health()
         if weather_health['healthy']:
@@ -260,7 +266,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Weather integration health check failed: {e}")
     
-    # NEW: Check Bluesky integration health - added 9/24/25
+    # Check Bluesky integration health
     try:
         bluesky_health = bluesky_module_health()
         if bluesky_health['healthy']:
@@ -275,6 +281,26 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Bluesky integration health check failed: {e}")
     
+    # NEW: Check RSS Learning integration health - added 9/25/25
+    try:
+        rss_health = rss_learning_module_health()
+        if rss_health['healthy']:
+            print("📰 RSS Learning integration loaded successfully")
+            source_count = rss_health.get('total_sources', 8)
+            print(f"   🌐 {source_count} RSS sources configured")
+            print("   🧠 AI-powered content analysis active")
+            print("   📈 Weekly background processing enabled")
+            print("   🎯 Marketing insights for AI brain integration")
+            
+            # Start RSS background service
+            await start_rss_service()
+            print("   ⚡ RSS background processor started")
+        else:
+            print("⚠️  RSS Learning integration loaded with warnings")
+            print(f"   Missing vars: {rss_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️  RSS Learning integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -285,7 +311,8 @@ async def startup_event():
     print("   📱 Web Interface: http://localhost:8000/ (login)")
     print("   💬 Chat Interface: http://localhost:8000/chat")
     print("   🌦️ Weather API: http://localhost:8000/integrations/weather")
-    print("   🔵 Bluesky API: http://localhost:8000/bluesky")  # NEW
+    print("   🔵 Bluesky API: http://localhost:8000/bluesky")
+    print("   📰 RSS Learning: http://localhost:8000/integrations/rss")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -294,30 +321,9 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-#-- Section 11: API Status and Info Endpoints - updated 9/24/25 with Bluesky
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for container orchestration and system monitoring"""
-    try:
-        health_status = await get_health_status()
-        
-        # Return 200 OK if healthy, 503 if unhealthy
-        if health_status["status"] == "healthy":
-            return health_status
-        else:
-            raise HTTPException(status_code=503, detail=health_status)
-            
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": time.time()
-            }
-        )
 
+#-- Section 11: API Status and Info Endpoints - updated 9/24/25 with Bluesky
+# Update Section 11: API Status and Info Endpoints - Add RSS Learning to features
 @app.get("/api/status")
 async def api_status():
     """Comprehensive API status endpoint with system information."""
@@ -335,10 +341,11 @@ async def api_status():
             "🌊 Real-time conversation streaming",
             "🌦️ Health-focused weather monitoring with Tomorrow.io",
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
+            "📰 RSS Learning system with AI-powered marketing insights",  # NEW
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "authentication"],
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "authentication"],  # NEW
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -362,6 +369,10 @@ async def api_status():
             "bluesky_approve": "/bluesky/approve",
             "bluesky_post": "/bluesky/post",
             "bluesky_accounts": "/bluesky/accounts/status",
+            "rss_status": "/integrations/rss/status",  # NEW
+            "rss_insights": "/integrations/rss/insights",  # NEW
+            "rss_trends": "/integrations/rss/trends",  # NEW
+            "rss_writing_inspiration": "/integrations/rss/writing-inspiration",  # NEW
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -381,9 +392,17 @@ async def api_status():
             "scan_interval": "3.5 hours",
             "personalities": ["syntaxprime", "professional", "compassionate"],
             "api_configured": bluesky_module_health()['healthy']
+        },
+        "rss_learning_system": {  # NEW
+            "sources_configured": 8,
+            "features": ["ai_content_analysis", "marketing_insights", "trend_identification", "writing_assistance"],
+            "processing_interval": "weekly",
+            "categories": ["seo", "content_marketing", "social_media", "analytics"],
+            "api_configured": rss_learning_module_health()['healthy']
         }
     }
 
+# Update integrations_info endpoint - Add RSS Learning
 @app.get("/integrations")
 async def integrations_info():
     """Get information about loaded integrations."""
@@ -393,7 +412,8 @@ async def integrations_info():
             "ai_brain": ai_integration_info(),
             "chat_system": chat_integration_info(),
             "weather": weather_integration_info(),
-            "bluesky_multi_account": bluesky_integration_info(),  # NEW
+            "bluesky_multi_account": bluesky_integration_info(),
+            "rss_learning": rss_learning_integration_info(),  # NEW
             "authentication": {
                 "name": "User Authentication System",
                 "version": "1.0.0",
@@ -426,6 +446,10 @@ app.include_router(weather_router)
 
 # NEW: Include Bluesky Multi-Account integration router - added 9/24/25
 app.include_router(bluesky_router)
+
+# Add RSS Learning router to Section 12: Integration Module Routers
+# Include RSS Learning integration router - added 9/25/25
+app.include_router(rss_learning_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
 # Periodic cleanup of expired sessions (every hour)

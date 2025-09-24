@@ -29,6 +29,15 @@ from .feedback_processor import get_feedback_processor
 
 logger = logging.getLogger(__name__)
 
+#-- NEW Section 1a: RSS Learning Integration Import - added 9/25/25
+try:
+    from ..integrations.rss_learning.marketing_insights import MarketingInsightsExtractor
+    RSS_LEARNING_AVAILABLE = True
+except ImportError:
+    RSS_LEARNING_AVAILABLE = False
+    logger.warning("RSS Learning integration not available")
+
+
 #-- Section 2: Pydantic Request/Response Models - 9/23/25
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
@@ -254,6 +263,113 @@ Ready to manage your social media intelligently?"""
             logger.error(f"Bluesky command processing failed: {e}")
             return f"❌ **Bluesky Error:** {str(e)}"
 
+#-- NEW Section 5c: RSS Learning Integration Methods - Added 9/25/25
+    def _detect_marketing_writing_request(self, message: str) -> tuple[bool, str]:
+        """Detect marketing writing requests and determine content type"""
+        message_lower = message.lower()
+        
+        # Marketing writing indicators
+        marketing_indicators = [
+            'write', 'draft', 'create', 'help me', 'content', 'campaign',
+            'marketing', 'blog', 'email', 'social', 'copy'
+        ]
+        
+        # Content type detection
+        if any(term in message_lower for term in ['email', 'newsletter', 'email campaign', 'email marketing']):
+            return any(indicator in message_lower for indicator in marketing_indicators), 'email'
+        elif any(term in message_lower for term in ['blog post', 'blog', 'article', 'write blog']):
+            return any(indicator in message_lower for indicator in marketing_indicators), 'blog'
+        elif any(term in message_lower for term in ['social media', 'social post', 'tweet', 'linkedin', 'instagram']):
+            return any(indicator in message_lower for indicator in marketing_indicators), 'social'
+        elif any(term in message_lower for term in ['marketing trends', 'content ideas', 'marketing insights']):
+            return True, 'general'
+        elif any(indicator in message_lower for indicator in marketing_indicators):
+            return True, 'blog'  # Default for general writing requests
+        
+        return False, ''
+
+    async def _get_rss_marketing_context(self, message: str, content_type: str = None) -> str:
+        """Get marketing context from RSS learning system"""
+        if not RSS_LEARNING_AVAILABLE:
+            return ""
+            
+        try:
+            insights_extractor = MarketingInsightsExtractor()
+            
+            # Detect content type if not provided
+            is_writing_request, detected_type = self._detect_marketing_writing_request(message)
+            final_content_type = content_type or detected_type or 'blog'
+            
+            if not is_writing_request and 'marketing' not in message.lower():
+                return ""
+            
+            # Get writing inspiration and trends
+            inspiration_task = insights_extractor.get_writing_inspiration(
+                content_type=final_content_type,
+                topic=None,
+                target_audience="digital marketers"
+            )
+            
+            trends_task = insights_extractor.get_latest_trends(limit=3)
+            
+            # Execute both requests concurrently
+            inspiration, trends = await asyncio.gather(inspiration_task, trends_task, return_exceptions=True)
+            
+            # Handle exceptions
+            if isinstance(inspiration, Exception):
+                logger.warning(f"RSS inspiration failed: {inspiration}")
+                inspiration = {}
+            if isinstance(trends, Exception):
+                logger.warning(f"RSS trends failed: {trends}")
+                trends = {}
+            
+            # Build context
+            context_parts = [
+                "CURRENT MARKETING INTELLIGENCE FROM RSS LEARNING SYSTEM:",
+                ""
+            ]
+            
+            # Add trends
+            if trends.get('trends_summary'):
+                context_parts.extend([
+                    "CURRENT MARKETING TRENDS:",
+                    trends['trends_summary'][:300] + "...",
+                    ""
+                ])
+            
+            # Add content inspiration
+            if inspiration.get('content_ideas') and is_writing_request:
+                context_parts.extend([
+                    f"CONTENT IDEAS FOR {final_content_type.upper()}:",
+                    *[f"• {idea}" for idea in inspiration['content_ideas'][:3]],
+                    ""
+                ])
+            
+            # Add actionable insights
+            if trends.get('actionable_insights'):
+                context_parts.extend([
+                    "CURRENT BEST PRACTICES:",
+                    *[f"• {insight}" for insight in trends['actionable_insights'][:3]],
+                    ""
+                ])
+            
+            # Add trending keywords
+            if trends.get('trending_keywords'):
+                context_parts.extend([
+                    "TRENDING TOPICS:",
+                    f"Current focus areas: {', '.join(trends['trending_keywords'][:6])}",
+                    ""
+                ])
+            
+            context_parts.append("Use this current marketing intelligence naturally to enhance your response with up-to-date insights and best practices.")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"RSS marketing context failed: {e}")
+            return ""
+
+
 #-- Section 6: Chat Message Processing - Updated 9/24/25 with Bluesky Integration
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
@@ -464,6 +580,33 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
             )
             
             raise HTTPException(status_code=500, detail=str(e))
+
+# Update Section 6: Chat Message Processing - Add RSS context integration
+# Find the section that processes chat messages and add RSS integration after Bluesky processing:
+
+            # NEW: Get RSS marketing context for writing assistance - Added 9/25/25
+            rss_context = None
+            if RSS_LEARNING_AVAILABLE:
+                rss_context = await self._get_rss_marketing_context(chat_request.message)
+                if rss_context:
+                    print(f"📰 RSS marketing context added for writing assistance")
+
+            # Then in the AI messages building section, add RSS context after knowledge context:
+
+            # Add RSS marketing context if available
+            if rss_context:
+                ai_messages.append({
+                    "role": "system",
+                    "content": rss_context
+                })
+                print(f"📊 RSS context added to AI messages")
+
+            # Update the final logging to include RSS info:
+            logger.info(f"Chat processed: {response_time_ms}ms, model: {model_used}, "
+                       f"personality: {chat_request.personality_id}, "
+                       f"weather: {'Yes' if weather_detected else 'No'}, "
+                       f"rss: {'Yes' if rss_context else 'No'}")
+
 
 #-- Section 7: AI Response Helper Methods - 9/23/25
     def _build_knowledge_context(self, knowledge_sources: List[Dict]) -> str:
@@ -814,6 +957,8 @@ async def shutdown_ai_brain():
     logger.info("AI brain shutdown complete")
 
 #-- Section 15: Module Information and Health Check Functions - Updated 9/24/25
+# Update Section 15: Module Information and Health Check Functions
+
 def get_integration_info():
     """Get information about the AI brain integration"""
     return {
@@ -827,7 +972,8 @@ def get_integration_info():
             "Personality Engine",
             "Feedback Processor",
             "Weather Integration",
-            "Bluesky Integration"  # NEW
+            "Bluesky Integration",
+            "RSS Learning Integration"  # NEW
         ],
         "endpoints": {
             "chat": "/ai/chat",
@@ -847,7 +993,8 @@ def get_integration_info():
             "Provider fallback system",
             "UUID-based user management",
             "Weather integration with health monitoring",
-            "Bluesky social media command processing"  # NEW
+            "Bluesky social media command processing",
+            "RSS learning integration for marketing writing assistance"  # NEW
         ],
         "default_user_id": orchestrator.default_user_id
     }
@@ -864,7 +1011,7 @@ def check_module_health():
     # Weather integration is optional
     weather_available = bool(os.getenv("TOMORROW_IO_API_KEY"))
     
-    # Bluesky integration is optional - NEW
+    # Bluesky integration is optional
     bluesky_available = any([
         os.getenv("BLUESKY_PERSONAL_PASSWORD"),
         os.getenv("BLUESKY_ROSE_ANGEL_PASSWORD"),
@@ -873,11 +1020,15 @@ def check_module_health():
         os.getenv("BLUESKY_DAMN_IT_CARL_PASSWORD")
     ])
     
+    # NEW: RSS learning integration is optional - added 9/25/25
+    rss_learning_available = RSS_LEARNING_AVAILABLE and bool(os.getenv("DATABASE_URL"))
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
         "default_user_id": orchestrator.default_user_id,
         "weather_integration_available": weather_available,
-        "bluesky_integration_available": bluesky_available  # NEW
+        "bluesky_integration_available": bluesky_available,
+        "rss_learning_integration_available": rss_learning_available  # NEW
     }
