@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
+import time  # Add this with your other imports
+
 from modules.core.health import get_health_status
 from modules.core.database import db_manager
 
@@ -275,6 +277,30 @@ async def startup_event():
     print()
 
 #-- Section 11: API Status and Info Endpoints - updated 9/24/25
+#-- Section 11: API Status, Info, and Health Check Endpoints - updated 9/24/25
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration and system monitoring"""
+    try:
+        health_status = await get_health_status()
+        
+        # Return 200 OK if healthy, 503 if unhealthy
+        if health_status["status"] == "healthy":
+            return health_status
+        else:
+            raise HTTPException(status_code=503, detail=health_status)
+            
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": time.time()
+            }
+        )
+
 @app.get("/api/status")
 async def api_status():
     """Comprehensive API status endpoint with system information."""
@@ -287,14 +313,14 @@ async def api_status():
             "📁 Advanced file processing (images, PDFs, CSVs, text)",
             "🧠 250K context memory system",
             "🎭 Multi-personality AI chat (4 personalities)",
-            "🔖 Smart bookmark system with conversation navigation",
+            "📖 Smart bookmark system with conversation navigation",
             "📚 21K knowledge base integration",
             "🌊 Real-time conversation streaming",
-            "🌦️ Health-focused weather monitoring with Tomorrow.io",  # NEW
+            "🌦️ Health-focused weather monitoring with Tomorrow.io",
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "authentication"],  # UPDATED
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "authentication"],
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -310,9 +336,9 @@ async def api_status():
             "ai_conversations": "/ai/conversations",
             "ai_personalities": "/ai/personalities",
             "ai_stats": "/ai/stats",
-            "weather_current": "/integrations/weather/current",      # NEW
-            "weather_alerts": "/integrations/weather/alerts",       # NEW
-            "weather_status": "/integrations/weather/status",       # NEW
+            "weather_current": "/integrations/weather/current",
+            "weather_alerts": "/integrations/weather/alerts",
+            "weather_status": "/integrations/weather/status",
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -320,7 +346,7 @@ async def api_status():
             "max_file_size": "10MB",
             "features": ["OCR", "computer_vision", "data_analysis", "text_extraction"]
         },
-        "weather_monitoring": {  # NEW SECTION
+        "weather_monitoring": {
             "provider": "tomorrow.io",
             "health_features": ["pressure_tracking", "uv_monitoring", "headache_prediction"],
             "thresholds": {"pressure_drop": "3.0 mbar", "uv_protection": "4.0 index"},
@@ -336,7 +362,7 @@ async def integrations_info():
             "slack_clickup": get_integration_info(),
             "ai_brain": ai_integration_info(),
             "chat_system": chat_integration_info(),
-            "weather": weather_integration_info(),  # NEW
+            "weather": weather_integration_info(),
             "authentication": {
                 "name": "User Authentication System",
                 "version": "1.0.0",
