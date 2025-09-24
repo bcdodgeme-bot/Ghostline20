@@ -730,6 +730,22 @@ if __name__ == "__main__":
         
         # This would fail in testing without proper database setup
         try:
+            from ..core.database import db_manager
+    
+            thread_lookup_query = """
+            SELECT thread_id FROM conversation_messages 
+            WHERE id = $1 AND user_id = $2
+            """
+            
+            message_result = await db_manager.fetch_one(thread_lookup_query,
+                                                       feedback_request.message_id,
+                                                       user_id)
+            
+            if not message_result:
+                raise HTTPException(status_code=404, detail="Message not found")
+            
+            thread_id = message_result['thread_id']
+            
             feedback_result = await processor.record_feedback(
                 user_id=test_user_id,
                 message_id=test_message_id,
