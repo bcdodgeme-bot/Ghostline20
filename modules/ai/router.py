@@ -1,10 +1,11 @@
 # modules/ai/router.py
 """
-AI Brain Main Router for Syntax Prime V2 - FIXED
+AI Brain Main Router for Syntax Prime V2 - SECTIONED AND FIXED
 Ties together all AI components into FastAPI endpoints
-FIX: Use proper UUID for default user ID
+Date: 9/23/25
 """
 
+#-- Section 1: Core Imports and Dependencies - 9/23/25
 import asyncio
 import uuid
 from datetime import datetime
@@ -26,7 +27,7 @@ from .feedback_processor import get_feedback_processor
 
 logger = logging.getLogger(__name__)
 
-# Pydantic models for API requests/responses
+#-- Section 2: Pydantic Request/Response Models - 9/23/25
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
     personality_id: str = Field(default='syntaxprime', description="Personality to use")
@@ -58,10 +59,10 @@ class FeedbackResponse(BaseModel):
     learning_result: Dict
     message: str
 
-# Router setup
+#-- Section 3: Router Setup and Configuration - 9/23/25
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-# AI Brain orchestrator
+#-- Section 4: AI Brain Orchestrator Class - 9/23/25
 class AIBrainOrchestrator:
     """
     Main orchestrator that coordinates all AI brain components
@@ -72,7 +73,8 @@ class AIBrainOrchestrator:
         self.default_user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Carl's user ID
         logger.info(f"AI Brain initialized with default user ID: {self.default_user_id}")
         self.fallback_attempts = 2
-        
+
+#-- Section 5: Chat Message Processing - 9/23/25
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
@@ -218,7 +220,8 @@ class AIBrainOrchestrator:
             )
             
             raise HTTPException(status_code=500, detail=str(e))
-    
+
+#-- Section 6: AI Response Helper Methods - 9/23/25
     def _build_knowledge_context(self, knowledge_sources: List[Dict]) -> str:
         """Build knowledge context string for AI prompt"""
         if not knowledge_sources:
@@ -274,7 +277,8 @@ class AIBrainOrchestrator:
             except Exception as fallback_error:
                 logger.error(f"Both AI providers failed: {fallback_error}")
                 raise Exception(f"All AI providers failed. Primary: {e}, Fallback: {fallback_error}")
-    
+
+#-- Section 7: FIXED Feedback Processing with Proper Thread ID Lookup - 9/23/25
     async def process_feedback(self,
                              feedback_request: FeedbackRequest,
                              user_id: str = None) -> FeedbackResponse:
@@ -284,12 +288,28 @@ class AIBrainOrchestrator:
         # Get feedback processor
         feedback_processor = get_feedback_processor()
         
-        # Get message details for context
-        memory_manager = get_memory_manager(user_id)
-        
-        # We need to find the thread_id for this message
-        # This is a simplified version - in production you'd query the database
-        thread_id = "temp-thread-id"  # TODO: Get from message lookup
+        # FIXED: Get the actual thread_id from the message instead of hardcoded string
+        try:
+            from ..core.database import db_manager
+            
+            thread_lookup_query = """
+            SELECT thread_id FROM conversation_messages 
+            WHERE id = $1
+            """
+            
+            message_result = await db_manager.fetch_one(thread_lookup_query, feedback_request.message_id)
+            
+            if not message_result:
+                # If message not found, generate a proper UUID for feedback storage
+                thread_id = str(uuid.uuid4())
+                logger.warning(f"Message {feedback_request.message_id} not found, using generated UUID: {thread_id}")
+            else:
+                thread_id = message_result['thread_id']
+
+        except Exception as e:
+            # Fallback: generate a proper UUID instead of invalid string
+            thread_id = str(uuid.uuid4())
+            logger.warning(f"Could not lookup thread_id for message {feedback_request.message_id}, using generated UUID: {e}")
         
         try:
             feedback_result = await feedback_processor.record_feedback(
@@ -325,10 +345,10 @@ class AIBrainOrchestrator:
             logger.error(f"Feedback processing failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-# Global orchestrator
+#-- Section 8: Global Orchestrator Instance - 9/23/25
 orchestrator = AIBrainOrchestrator()
 
-# API Endpoints
+#-- Section 9: Main API Endpoints - 9/23/25
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(chat_request: ChatRequest):
     """
@@ -362,6 +382,7 @@ async def get_personalities():
         "default_personality": "syntaxprime"
     }
 
+#-- Section 10: Conversation Management Endpoints - 9/23/25
 @router.get("/conversations")
 async def get_conversations(limit: int = 50):
     """Get conversation threads"""
@@ -425,6 +446,7 @@ async def get_conversation(thread_id: str, include_metadata: bool = False):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Conversation not found: {e}")
 
+#-- Section 11: Knowledge Search and Statistics Endpoints - 9/23/25
 @router.get("/knowledge/search")
 async def search_knowledge(q: str,
                           personality: str = 'syntaxprime',
@@ -501,6 +523,7 @@ async def get_ai_stats():
         logger.error(f"Stats retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+#-- Section 12: System Testing and Health Check Endpoints - 9/23/25
 @router.post("/test")
 async def test_ai_connection():
     """Test AI provider connections"""
@@ -532,7 +555,7 @@ async def test_ai_connection():
         "default_user_id": orchestrator.default_user_id
     }
 
-# Cleanup on shutdown
+#-- Section 13: Cleanup and Shutdown Handlers - 9/23/25
 @router.on_event("shutdown")
 async def shutdown_ai_brain():
     """Cleanup AI brain components"""
@@ -544,7 +567,7 @@ async def shutdown_ai_brain():
     
     logger.info("AI brain shutdown complete")
 
-# Export router and integration info
+#-- Section 14: Module Information and Health Check Functions - 9/23/25
 def get_integration_info():
     """Get information about the AI brain integration"""
     return {
