@@ -679,6 +679,7 @@ async def chat_with_ai(
     Handles text messages, file uploads, personality switching, knowledge integration, and weather queries
     """
     start_time = datetime.now()
+    logger.info(f"🔍 DEBUG: chat_with_ai called with message: '{request.message}'")  # ADD THIS LINE
     
     try:
         # Process any uploaded files

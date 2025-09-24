@@ -25,6 +25,8 @@ task_mapper = TaskMapper()
 #-- Section 2: Webhook Verification & Security with Debug Logging - Updated 9/24/25
 async def verify_slack_request(request: Request) -> Dict:
     """Verify and parse incoming Slack webhook request with comprehensive debug logging"""
+    print("🚨 EMERGENCY: verify_slack_request started")
+    
     logger.info(f"🔐 WEBHOOK VERIFICATION STARTED")
     
     # Get headers
@@ -32,25 +34,33 @@ async def verify_slack_request(request: Request) -> Dict:
     signature = request.headers.get("x-slack-signature") or request.headers.get("X-Slack-Signature")
     content_type = request.headers.get("content-type")
     
+    print(f"🚨 EMERGENCY: Headers extracted - timestamp: {bool(timestamp)}, signature: {bool(signature)}")
+    
     logger.info(f"📋 Headers received:")
     logger.info(f"   ⏰ Timestamp: {timestamp}")
     logger.info(f"   🔏 Signature: {signature}")
     logger.info(f"   📄 Content-Type: {content_type}")
     
     if not timestamp or not signature:
+        print("🚨 EMERGENCY: Missing headers, raising exception")
         logger.error(f"❌ Missing required Slack headers")
         logger.error(f"   ⏰ Has timestamp: {bool(timestamp)}")
         logger.error(f"   🔏 Has signature: {bool(signature)}")
         raise HTTPException(status_code=401, detail="Missing Slack headers")
     
     # Get body
+    print("🚨 EMERGENCY: About to read body")
     body = await request.body()
+    print(f"🚨 EMERGENCY: Body read successfully, {len(body)} bytes")
+    
     logger.info(f"📦 Body received: {len(body)} bytes")
     logger.info(f"📝 Body preview: {body[:200].decode(errors='ignore')}...")
     
     # Verify signature with debug logging
+    print("🚨 EMERGENCY: About to verify signature")
     logger.info(f"🔍 Verifying Slack signature...")
     verification_result = slack_handler.verify_request(body, timestamp, signature)
+    print(f"🚨 EMERGENCY: Signature verification result: {verification_result}")
     logger.info(f"🔒 Signature verification result: {verification_result}")
     
     if not verification_result:
@@ -82,17 +92,21 @@ async def verify_slack_request(request: Request) -> Dict:
         
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
     
+    print("🚨 EMERGENCY: Signature verification passed!")
     logger.info(f"✅ Signature verification passed!")
     
     # Parse body
     try:
         if content_type == "application/json":
+            print("🚨 EMERGENCY: Parsing JSON body")
             logger.info(f"📋 Parsing JSON body...")
             parsed_data = json.loads(body.decode())
+            print(f"🚨 EMERGENCY: JSON parsed successfully - keys: {list(parsed_data.keys())}")
             logger.info(f"✅ JSON parsed successfully")
             logger.info(f"📊 Data keys: {list(parsed_data.keys())}")
             return parsed_data
         else:
+            print("🚨 EMERGENCY: Parsing URL-encoded body")
             logger.info(f"📋 Parsing URL-encoded body...")
             # URL-encoded form data
             from urllib.parse import parse_qs
@@ -102,6 +116,7 @@ async def verify_slack_request(request: Request) -> Dict:
             logger.info(f"📊 Data keys: {list(parsed_data.keys())}")
             return parsed_data
     except Exception as e:
+        print(f"🚨 EMERGENCY: Body parsing failed: {e}")
         logger.error(f"❌ Body parsing failed: {e}")
         logger.error(f"📄 Content-Type: {content_type}")
         logger.error(f"📦 Body: {body[:500]}")
@@ -207,9 +222,75 @@ async def handle_slack_events(request: Request, background_tasks: BackgroundTask
     print(f"🚨 Request headers: {dict(request.headers)}")
     
     try:
+        print("🚨 EMERGENCY: Starting webhook processing")
         logger.info(f"🌐 WEBHOOK RECEIVED - Processing Slack event")
         
-        # ... rest of your existing code ...
+        data = await verify_slack_request(request)
+        print(f"🚨 EMERGENCY: Verification complete, data type: {data.get('type', 'NO_TYPE')}")
+        logger.info(f"📊 Webhook data type: {data.get('type', 'NO_TYPE')}")
+        
+        # Handle URL verification
+        if data.get("type") == "url_verification":
+            challenge = data.get("challenge")
+            print(f"🚨 EMERGENCY: URL verification challenge: {challenge}")
+            logger.info(f"🔍 URL verification challenge: {challenge}")
+            return {"challenge": challenge}
+        
+        # Handle event callbacks
+        if data.get("type") == "event_callback":
+            event = data.get("event", {})
+            event_type = event.get("type")
+            print(f"🚨 EMERGENCY: Event callback type: {event_type}")
+            logger.info(f"📨 Event callback type: {event_type}")
+            
+            # Handle app mentions with detailed logging
+            if event_type == "app_mention":
+                message_text = event.get("text", "")
+                user = event.get("user", "")
+                channel = event.get("channel", "")
+                
+                print(f"🚨 EMERGENCY: App mention from user {user} in channel {channel}")
+                print(f"🚨 EMERGENCY: Message text: {message_text}")
+                print(f"🚨 EMERGENCY: Looking for user ID: {slack_handler.user_id}")
+                
+                logger.info(f"👥 APP MENTION EVENT:")
+                logger.info(f"   👤 From user: {user}")
+                logger.info(f"   📺 In channel: {channel}")
+                logger.info(f"   💬 Message text: {message_text}")
+                logger.info(f"   🎯 Looking for user ID: {slack_handler.user_id}")
+                
+                # Check if our user is mentioned
+                is_mentioned = slack_handler.is_user_mentioned(message_text)
+                print(f"🚨 EMERGENCY: User mentioned result: {is_mentioned}")
+                logger.info(f"   ✅ User mentioned result: {is_mentioned}")
+                
+                if is_mentioned:
+                    print("🚨 EMERGENCY: USER IS MENTIONED - Adding background task")
+                    logger.info(f"🚀 USER IS MENTIONED - Adding background task")
+                    background_tasks.add_task(process_mention_task, event)
+                    logger.info(f"✅ Background task added to queue")
+                else:
+                    print("🚨 EMERGENCY: User not mentioned, skipping task creation")
+                    logger.info(f"⏭️ User not mentioned, skipping task creation")
+            
+            # Handle direct messages
+            elif event_type == "message" and event.get("channel_type") == "im":
+                logger.info(f"💬 DIRECT MESSAGE received")
+                message_text = event.get("text", "")
+                
+                # Direct message - treat as potential command
+                if slack_handler.is_user_mentioned(message_text):
+                    logger.info(f"🎯 User mentioned in DM, processing as mention")
+                    background_tasks.add_task(process_mention_task, event)
+                else:
+                    logger.info(f"⏭️ User not mentioned in DM, skipping")
+            else:
+                print(f"🚨 EMERGENCY: Unhandled event type: {event_type}")
+                logger.info(f"ℹ️ Unhandled event type: {event_type}")
+        
+        print("🚨 EMERGENCY: Webhook processing complete, returning OK status")
+        logger.info(f"✅ Webhook processing complete, returning OK status")
+        return {"status": "ok"}
         
     except Exception as e:
         print(f"🚨 EMERGENCY DEBUG: Exception caught: {e}")
@@ -217,61 +298,6 @@ async def handle_slack_events(request: Request, background_tasks: BackgroundTask
         import traceback
         print(f"🚨 Full traceback: {traceback.format_exc()}")
         return {"status": "error", "error": str(e)}
-    
-    data = await verify_slack_request(request)
-    logger.info(f"📊 Webhook data type: {data.get('type', 'NO_TYPE')}")
-    
-    # Handle URL verification
-    if data.get("type") == "url_verification":
-        challenge = data.get("challenge")
-        logger.info(f"🔍 URL verification challenge: {challenge}")
-        return {"challenge": challenge}
-    
-    # Handle event callbacks
-    if data.get("type") == "event_callback":
-        event = data.get("event", {})
-        event_type = event.get("type")
-        logger.info(f"📨 Event callback type: {event_type}")
-        
-        # Handle app mentions with detailed logging
-        if event_type == "app_mention":
-            message_text = event.get("text", "")
-            user = event.get("user", "")
-            channel = event.get("channel", "")
-            
-            logger.info(f"👥 APP MENTION EVENT:")
-            logger.info(f"   👤 From user: {user}")
-            logger.info(f"   📺 In channel: {channel}")
-            logger.info(f"   💬 Message text: {message_text}")
-            logger.info(f"   🎯 Looking for user ID: {slack_handler.user_id}")
-            
-            # Check if our user is mentioned
-            is_mentioned = slack_handler.is_user_mentioned(message_text)
-            logger.info(f"   ✅ User mentioned result: {is_mentioned}")
-            
-            if is_mentioned:
-                logger.info(f"🚀 USER IS MENTIONED - Adding background task")
-                background_tasks.add_task(process_mention_task, event)
-                logger.info(f"✅ Background task added to queue")
-            else:
-                logger.info(f"⏭️ User not mentioned, skipping task creation")
-        
-        # Handle direct messages
-        elif event_type == "message" and event.get("channel_type") == "im":
-            logger.info(f"💬 DIRECT MESSAGE received")
-            message_text = event.get("text", "")
-            
-            # Direct message - treat as potential command
-            if slack_handler.is_user_mentioned(message_text):
-                logger.info(f"🎯 User mentioned in DM, processing as mention")
-                background_tasks.add_task(process_mention_task, event)
-            else:
-                logger.info(f"⏭️ User not mentioned in DM, skipping")
-        else:
-            logger.info(f"ℹ️ Unhandled event type: {event_type}")
-    
-    logger.info(f"✅ Webhook processing complete, returning OK status")
-    return {"status": "ok"}
 
 @router.post("/slack/slash")
 async def handle_slash_commands(request: Request, background_tasks: BackgroundTasks):
