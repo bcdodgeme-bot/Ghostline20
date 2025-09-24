@@ -27,9 +27,9 @@ class FeedbackProcessor:
     
     def __init__(self):
         self.feedback_types = {
-            'good': 'positive_response',
-            'bad': 'negative_response', 
-            'personality': 'perfect_personality'
+            'good': 'good_answer',
+            'bad': 'bad_answer',
+            'personality': 'good_personality'
         }
         
         # Learning parameters
