@@ -1,6 +1,7 @@
 """
-Slack-ClickUp Integration Router
+Slack-ClickUp Integration Router with Enhanced Debug Logging
 API endpoints for webhook handling and manual commands
+Updated: 9/24/25 - Added comprehensive debug logging to track task creation failures
 """
 import os
 import json
@@ -9,10 +10,10 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from typing import Dict, Optional
 
 from .slack_handler import SlackHandler
-from .clickup_handler import ClickUpHandler  
+from .clickup_handler import ClickUpHandler
 from .task_mapper import TaskMapper
 
-#--Section 1: Router Initialization & Configuration 9/23/25
+#-- Section 1: Router Initialization & Configuration - 9/23/25
 router = APIRouter(prefix="/integrations/slack-clickup", tags=["slack-clickup"])
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ slack_handler = SlackHandler()
 clickup_handler = ClickUpHandler()
 task_mapper = TaskMapper()
 
-#--Section 2: Webhook Verification & Security 9/23/25
+#-- Section 2: Webhook Verification & Security - 9/23/25
 async def verify_slack_request(request: Request) -> Dict:
     """Verify and parse incoming Slack webhook request"""
     # Get headers
@@ -50,39 +51,73 @@ async def verify_slack_request(request: Request) -> Dict:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
-#--Section 3: Background Task Processing 9/23/25
+#-- Section 3: Background Task Processing with Debug Logging - Updated 9/24/25
 async def process_mention_task(message_data: Dict):
-    """Background task to process Slack mentions"""
+    """Background task to process Slack mentions with comprehensive debug logging"""
+    logger.info(f"🔄 BACKGROUND TASK STARTED - Processing mention task")
+    logger.info(f"📝 Message data received: {json.dumps(message_data, indent=2)}")
+    
     try:
-        # Extract task details
+        # Extract task details with debug logging
+        logger.info(f"🧩 Attempting to extract task from mention...")
         task_info = task_mapper.extract_mention_task(message_data)
+        
         if not task_info:
-            logger.warning("Could not extract task from mention")
+            logger.warning("❌ Could not extract task from mention - task_info is None")
+            logger.info(f"📄 Raw message text was: {message_data.get('text', 'NO_TEXT_FOUND')}")
             return
         
-        # Create AMCF task (work-related, 3-day due date)
+        logger.info(f"✅ Task info extracted successfully:")
+        logger.info(f"   📋 Title: {task_info.get('title', 'NO_TITLE')}")
+        logger.info(f"   📝 Description length: {len(task_info.get('description', ''))}")
+        logger.info(f"   🏷️ Type: {task_info.get('type', 'NO_TYPE')}")
+        
+        # Create AMCF task (work-related, 3-day due date) with debug logging
+        logger.info(f"🎯 Creating AMCF task in ClickUp...")
         result = await clickup_handler.create_amcf_task(
             title=task_info['title'],
             description=task_info['description']
         )
         
         if result:
-            task_url = result.get('url', '')
-            # Send confirmation back to Slack
-            await slack_handler.send_response(
-                channel_id=message_data.get('channel'),
-                text=f"✅ Created AMCF task: {task_url}",
-                thread_ts=message_data.get('ts')
-            )
-            logger.info(f"Created AMCF task: {result.get('id')}")
+            task_url = result.get('url', 'NO_URL')
+            task_id = result.get('id', 'NO_ID')
+            logger.info(f"🎉 AMCF task created successfully!")
+            logger.info(f"   🆔 Task ID: {task_id}")
+            logger.info(f"   🔗 Task URL: {task_url}")
+            
+            # Send confirmation back to Slack with debug logging
+            channel_id = message_data.get('channel')
+            thread_ts = message_data.get('ts')
+            logger.info(f"📤 Sending Slack confirmation...")
+            logger.info(f"   📺 Channel ID: {channel_id}")
+            logger.info(f"   🧵 Thread TS: {thread_ts}")
+            
+            try:
+                await slack_handler.send_response(
+                    channel_id=channel_id,
+                    text=f"✅ Created AMCF task: {task_url}",
+                    thread_ts=thread_ts
+                )
+                logger.info(f"✅ Slack confirmation sent successfully")
+            except Exception as slack_error:
+                logger.error(f"❌ Failed to send Slack confirmation: {slack_error}")
+            
+            logger.info(f"🏆 BACKGROUND TASK COMPLETED SUCCESSFULLY - Task: {task_id}")
         else:
-            logger.error("Failed to create AMCF task")
+            logger.error("❌ ClickUp task creation failed - result was None/False")
+            logger.error("🔍 Check ClickUp API credentials and permissions")
             
     except Exception as e:
-        logger.error(f"Error processing mention task: {e}")
+        logger.error(f"💥 BACKGROUND TASK EXCEPTION: {e}")
+        logger.error(f"🔍 Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"📚 Full traceback: {traceback.format_exc()}")
 
 async def process_command_task(command: str, context: str = ""):
     """Background task to process AI command tasks"""
+    logger.info(f"🔄 Processing command task: {command}")
+    
     try:
         # Extract task details
         task_info = task_mapper.extract_command_task(command, context)
@@ -107,33 +142,65 @@ async def process_command_task(command: str, context: str = ""):
         logger.error(f"Error processing command task: {e}")
         return None
 
-#--Section 4: Slack Webhook Endpoints 9/23/25
+#-- Section 4: Slack Webhook Endpoints with Debug Logging - Updated 9/24/25
 @router.post("/slack/events")
 async def handle_slack_events(request: Request, background_tasks: BackgroundTasks):
-    """Handle Slack Events API webhooks"""
+    """Handle Slack Events API webhooks with enhanced debug logging"""
+    logger.info(f"🌐 WEBHOOK RECEIVED - Processing Slack event")
+    
     data = await verify_slack_request(request)
+    logger.info(f"📊 Webhook data type: {data.get('type', 'NO_TYPE')}")
     
     # Handle URL verification
     if data.get("type") == "url_verification":
-        return {"challenge": data.get("challenge")}
+        challenge = data.get("challenge")
+        logger.info(f"🔍 URL verification challenge: {challenge}")
+        return {"challenge": challenge}
     
     # Handle event callbacks
     if data.get("type") == "event_callback":
         event = data.get("event", {})
         event_type = event.get("type")
+        logger.info(f"📨 Event callback type: {event_type}")
         
-        # Handle app mentions
+        # Handle app mentions with detailed logging
         if event_type == "app_mention":
+            message_text = event.get("text", "")
+            user = event.get("user", "")
+            channel = event.get("channel", "")
+            
+            logger.info(f"👥 APP MENTION EVENT:")
+            logger.info(f"   👤 From user: {user}")
+            logger.info(f"   📺 In channel: {channel}")
+            logger.info(f"   💬 Message text: {message_text}")
+            logger.info(f"   🎯 Looking for user ID: {slack_handler.user_id}")
+            
             # Check if our user is mentioned
-            if slack_handler.is_user_mentioned(event.get("text", "")):
+            is_mentioned = slack_handler.is_user_mentioned(message_text)
+            logger.info(f"   ✅ User mentioned result: {is_mentioned}")
+            
+            if is_mentioned:
+                logger.info(f"🚀 USER IS MENTIONED - Adding background task")
                 background_tasks.add_task(process_mention_task, event)
+                logger.info(f"✅ Background task added to queue")
+            else:
+                logger.info(f"⏭️ User not mentioned, skipping task creation")
         
         # Handle direct messages
         elif event_type == "message" and event.get("channel_type") == "im":
+            logger.info(f"💬 DIRECT MESSAGE received")
+            message_text = event.get("text", "")
+            
             # Direct message - treat as potential command
-            if slack_handler.is_user_mentioned(event.get("text", "")):
+            if slack_handler.is_user_mentioned(message_text):
+                logger.info(f"🎯 User mentioned in DM, processing as mention")
                 background_tasks.add_task(process_mention_task, event)
+            else:
+                logger.info(f"⏭️ User not mentioned in DM, skipping")
+        else:
+            logger.info(f"ℹ️ Unhandled event type: {event_type}")
     
+    logger.info(f"✅ Webhook processing complete, returning OK status")
     return {"status": "ok"}
 
 @router.post("/slack/slash")
@@ -145,15 +212,18 @@ async def handle_slash_commands(request: Request, background_tasks: BackgroundTa
     text = data.get("text", "")
     user_id = data.get("user_id", "")
     
+    logger.info(f"⚡ Slash command received: {command} from user {user_id}")
+    
     # Only process if command is from our configured user
     if user_id == slack_handler.user_id:
         if command == "/task" or command == "/remind":
+            logger.info(f"📝 Processing slash command: {text}")
             background_tasks.add_task(process_command_task, text, "Slack slash command")
             return {"text": "📝 Creating personal task...", "response_type": "ephemeral"}
     
     return {"text": "Command processed", "response_type": "ephemeral"}
 
-#--Section 5: Manual API Endpoints 9/23/25
+#-- Section 5: Manual API Endpoints - 9/23/25
 @router.post("/tasks/personal")
 async def create_personal_task_endpoint(task_data: Dict):
     """Manual endpoint to create personal tasks"""
@@ -170,7 +240,7 @@ async def create_personal_task_endpoint(task_data: Dict):
     else:
         raise HTTPException(status_code=500, detail="Failed to create task")
 
-@router.post("/tasks/work")  
+@router.post("/tasks/work")
 async def create_work_task_endpoint(task_data: Dict):
     """Manual endpoint to create AMCF work tasks"""
     title = task_data.get("title")
@@ -186,7 +256,7 @@ async def create_work_task_endpoint(task_data: Dict):
     else:
         raise HTTPException(status_code=500, detail="Failed to create task")
 
-#--Section 6: Status & Health Check Endpoints 9/23/25
+#-- Section 6: Status & Health Check Endpoints - 9/23/25
 @router.get("/status")
 async def integration_status():
     """Get integration status and configuration"""
@@ -202,4 +272,30 @@ async def integration_status():
             "manual_personal": "/integrations/slack-clickup/tasks/personal",
             "manual_work": "/integrations/slack-clickup/tasks/work"
         }
+    }
+
+#-- Section 7: Debug Testing Endpoint - Added 9/24/25
+@router.post("/debug/test-mention")
+async def debug_test_mention(test_data: Dict):
+    """Debug endpoint to test mention processing manually"""
+    logger.info(f"🧪 DEBUG TEST - Manual mention test")
+    
+    # Create a fake Slack mention event for testing
+    fake_event = {
+        "type": "app_mention",
+        "text": test_data.get("text", f"<@{slack_handler.user_id}> test task"),
+        "user": test_data.get("user", "U12345678"),
+        "channel": test_data.get("channel", "C12345678"),
+        "ts": test_data.get("ts", "1234567890.123456")
+    }
+    
+    logger.info(f"🎭 Fake event created: {fake_event}")
+    
+    # Process the fake mention
+    await process_mention_task(fake_event)
+    
+    return {
+        "status": "debug_test_completed",
+        "fake_event": fake_event,
+        "message": "Check logs for detailed processing information"
     }

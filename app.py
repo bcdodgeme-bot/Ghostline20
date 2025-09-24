@@ -13,6 +13,11 @@ from modules.core.database import db_manager
 from modules.integrations.slack_clickup import router as slack_clickup_router
 from modules.integrations.slack_clickup import get_integration_info, check_module_health
 
+#-- NEW Section 2a: Weather Module Imports - added 9/24/25
+from modules.integrations.weather import router as weather_router
+from modules.integrations.weather import get_integration_info as weather_integration_info, check_module_health as weather_module_health
+
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -199,6 +204,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     return user['id']
 
 #-- Section 10: Application Lifecycle Events - 9/23/25
+#-- Section 10: Application Lifecycle Events - updated 9/24/25
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -237,6 +243,19 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Chat system health check failed: {e}")
     
+    # NEW: Check Weather integration health - added 9/24/25
+    try:
+        weather_health = weather_module_health()
+        if weather_health['healthy']:
+            print("🌦️ Weather integration loaded successfully")
+            print("   📊 Pressure tracking for headache prediction active")
+            print("   ☀️ UV monitoring for sun sensitivity enabled")
+        else:
+            print("⚠️  Weather integration loaded with warnings")
+            print(f"   Missing vars: {weather_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️  Weather integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -246,6 +265,7 @@ async def startup_event():
     print("=" * 50)
     print("   📱 Web Interface: http://localhost:8000/ (login)")
     print("   💬 Chat Interface: http://localhost:8000/chat")
+    print("   🌦️ Weather API: http://localhost:8000/integrations/weather")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -254,43 +274,7 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up database connection and AI components on shutdown."""
-    print("🛑 Shutting down Syntax Prime V2...")
-    
-    # Clean up sessions
-    session_info = AuthManager.get_session_info()
-    if session_info['active_sessions'] > 0:
-        print(f"🔐 Cleaning up {session_info['active_sessions']} active sessions")
-    
-    # Import AI cleanup functions
-    try:
-        from modules.ai.openrouter_client import cleanup_openrouter_client
-        from modules.ai.inception_client import cleanup_inception_client
-        from modules.ai.conversation_manager import cleanup_memory_managers
-        
-        # Cleanup AI components
-        await cleanup_openrouter_client()
-        await cleanup_inception_client()
-        await cleanup_memory_managers()
-        print("✅ AI components cleaned up")
-        
-    except ImportError as e:
-        print(f"⚠️  Some AI cleanup functions not available: {e}")
-    except Exception as e:
-        print(f"⚠️  AI cleanup error: {e}")
-    
-    # Cleanup database
-    try:
-        await db_manager.disconnect()
-        print("✅ Database disconnected")
-    except Exception as e:
-        print(f"⚠️  Database disconnect error: {e}")
-    
-    print("👋 Syntax Prime V2 shutdown complete")
-
-#-- Section 11: API Status and Info Endpoints - 9/23/25
+#-- Section 11: API Status and Info Endpoints - updated 9/24/25
 @app.get("/api/status")
 async def api_status():
     """Comprehensive API status endpoint with system information."""
@@ -306,10 +290,11 @@ async def api_status():
             "🔖 Smart bookmark system with conversation navigation",
             "📚 21K knowledge base integration",
             "🌊 Real-time conversation streaming",
+            "🌦️ Health-focused weather monitoring with Tomorrow.io",  # NEW
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "authentication"],
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "authentication"],  # UPDATED
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -325,28 +310,23 @@ async def api_status():
             "ai_conversations": "/ai/conversations",
             "ai_personalities": "/ai/personalities",
             "ai_stats": "/ai/stats",
+            "weather_current": "/integrations/weather/current",      # NEW
+            "weather_alerts": "/integrations/weather/alerts",       # NEW
+            "weather_status": "/integrations/weather/status",       # NEW
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
             "supported_types": ["images", "pdfs", "text", "csv", "markdown"],
             "max_file_size": "10MB",
             "features": ["OCR", "computer_vision", "data_analysis", "text_extraction"]
+        },
+        "weather_monitoring": {  # NEW SECTION
+            "provider": "tomorrow.io",
+            "health_features": ["pressure_tracking", "uv_monitoring", "headache_prediction"],
+            "thresholds": {"pressure_drop": "3.0 mbar", "uv_protection": "4.0 index"},
+            "api_configured": weather_module_health()['healthy']
         }
     }
-
-@app.get("/health")
-async def health_check():
-    """System health check with database connectivity and auth status."""
-    health_data = await get_health_status()
-    
-    # Add authentication system health
-    session_info = AuthManager.get_session_info()
-    health_data["authentication"] = {
-        "active_sessions": session_info["active_sessions"],
-        "auth_system": "operational"
-    }
-    
-    return health_data
 
 @app.get("/integrations")
 async def integrations_info():
@@ -356,6 +336,7 @@ async def integrations_info():
             "slack_clickup": get_integration_info(),
             "ai_brain": ai_integration_info(),
             "chat_system": chat_integration_info(),
+            "weather": weather_integration_info(),  # NEW
             "authentication": {
                 "name": "User Authentication System",
                 "version": "1.0.0",
@@ -371,6 +352,7 @@ async def integrations_info():
     }
 
 #-- Section 12: Integration Module Routers - 9/23/25
+#-- Section 12: Integration Module Routers - updated 9/24/25
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -382,6 +364,9 @@ app.include_router(ai_router)
 import modules.ai.chat as chat_module
 chat_module.get_current_user_id = get_current_user_id
 app.include_router(chat_router)
+
+# NEW: Include Weather integration router - added 9/24/25
+app.include_router(weather_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
 # Periodic cleanup of expired sessions (every hour)
