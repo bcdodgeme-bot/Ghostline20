@@ -202,7 +202,21 @@ async def process_command_task(command: str, context: str = ""):
 @router.post("/slack/events")
 async def handle_slack_events(request: Request, background_tasks: BackgroundTasks):
     """Handle Slack Events API webhooks with enhanced debug logging"""
-    logger.info(f"🌐 WEBHOOK RECEIVED - Processing Slack event")
+    # EMERGENCY DEBUG - This should ALWAYS show if endpoint is called
+    print("🚨 EMERGENCY DEBUG: /slack/events endpoint called!")
+    print(f"🚨 Request headers: {dict(request.headers)}")
+    
+    try:
+        logger.info(f"🌐 WEBHOOK RECEIVED - Processing Slack event")
+        
+        # ... rest of your existing code ...
+        
+    except Exception as e:
+        print(f"🚨 EMERGENCY DEBUG: Exception caught: {e}")
+        print(f"🚨 Exception type: {type(e).__name__}")
+        import traceback
+        print(f"🚨 Full traceback: {traceback.format_exc()}")
+        return {"status": "error", "error": str(e)}
     
     data = await verify_slack_request(request)
     logger.info(f"📊 Webhook data type: {data.get('type', 'NO_TYPE')}")

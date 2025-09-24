@@ -98,7 +98,7 @@ def get_upload_dir():
 async def get_current_user_id() -> str:
     """Get current user ID - placeholder for now"""
     # TODO: Implement proper authentication
-    return "temp-user-id"
+    return "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
 async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
     """Get current weather data for the user"""
