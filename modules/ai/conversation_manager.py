@@ -89,6 +89,11 @@ class DigitalElephantMemory:
         """
         message_id = str(uuid.uuid4())
         
+        # FIXED: Ensure all values are JSON serializable
+        # Convert any UUID objects to strings
+        if knowledge_sources_used:
+            knowledge_sources_used = [str(item) for item in knowledge_sources_used]
+
         # Prepare JSONB fields
         knowledge_sources_json = json.dumps(knowledge_sources_used or [])
         preferences_json = json.dumps(extracted_preferences or {})
