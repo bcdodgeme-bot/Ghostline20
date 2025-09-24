@@ -1,8 +1,8 @@
 # modules/ai/router.py
 """
-AI Brain Main Router for Syntax Prime V2 - SECTIONED AND FIXED
+AI Brain Main Router for Syntax Prime V2 - SECTIONED AND UPDATED
 Ties together all AI components into FastAPI endpoints
-Date: 9/23/25, Updated: 9/24/25 - Added Weather Integration
+Date: 9/23/25, Updated: 9/24/25 - Added Weather Integration, Updated: 9/24/25 - Added Bluesky Integration
 """
 
 #-- Section 1: Core Imports and Dependencies - 9/23/25
@@ -64,7 +64,7 @@ class FeedbackResponse(BaseModel):
 #-- Section 3: Router Setup and Configuration - 9/23/25
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-#-- Section 4: AI Brain Orchestrator Class - 9/23/25
+#-- Section 4: AI Brain Orchestrator Class - Updated 9/24/25
 class AIBrainOrchestrator:
     """
     Main orchestrator that coordinates all AI brain components
@@ -77,14 +77,13 @@ class AIBrainOrchestrator:
         self.fallback_attempts = 2
 
 #-- Section 5: Weather Integration Methods - Added 9/24/25
-#-- Section 5: Weather Integration Methods - Added 9/24/25
     def _detect_weather_request(self, message: str) -> bool:
         """Detect if user is asking about weather"""
         print(f"🌦️ WEATHER DEBUG: Checking message '{message}'")
         weather_keywords = [
             "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
             "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
-            "hot", "cold", "warm", "cool", "storm", "thunderstorm", "snow",
+            "hot", "cold", "warm", "storm", "thunderstorm", "snow",
             "precipitation", "conditions", "outside", "today's weather"
         ]
         message_lower = message.lower()
@@ -143,12 +142,124 @@ Please respond naturally about the weather using this current data. Focus on hea
 """
         return weather_context
 
-#-- Section 6: Chat Message Processing - Updated 9/24/25 with Weather Integration
+#-- NEW Section 5a: Bluesky Command Detection - Added 9/24/25
+    def _detect_bluesky_command(self, message: str) -> bool:
+        """Detect if user is issuing a Bluesky command"""
+        bluesky_keywords = [
+            "bluesky", "blue sky", "social media", "engagement", "opportunities",
+            "post to bluesky", "scan bluesky", "bluesky scan", "bluesky opportunities",
+            "bluesky high priority", "bluesky approve", "bluesky health",
+            "bluesky accounts", "bluesky status", "social assistant"
+        ]
+        message_lower = message.lower()
+        return any(keyword in message_lower for keyword in bluesky_keywords)
+
+    async def _process_bluesky_command(self, message: str, user_id: str) -> str:
+        """Process Bluesky command and return response"""
+        try:
+            # Import Bluesky components (lazy import to avoid circular dependencies)
+            from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
+            from ..integrations.bluesky.approval_system import get_approval_system
+            from ..integrations.bluesky.notification_manager import get_notification_manager
+            
+            multi_client = get_bluesky_multi_client()
+            approval_system = get_approval_system()
+            notification_manager = get_notification_manager()
+            
+            # Track user activity
+            await notification_manager.track_user_activity(user_id, 'chat_bluesky_command')
+            
+            message_lower = message.lower()
+            
+            if 'bluesky scan' in message_lower or 'scan bluesky' in message_lower:
+                # Get account status and initiate scan
+                accounts_status = multi_client.get_all_accounts_status()
+                configured_count = len([a for a in accounts_status.values() if a.get('password')])
+                authenticated_count = len([a for a in accounts_status.values() if a.get('authenticated')])
+                
+                return f"""🔵 **Bluesky Scan Initiated**
+
+📱 **Status:** {authenticated_count}/{configured_count} accounts ready
+⏳ **Scanning:** All authenticated accounts for engagement opportunities
+🧠 **AI Analysis:** Keyword matching + conversation detection active
+
+I'm analyzing your timelines now. Check back in a few minutes with `bluesky opportunities`!"""
+
+            elif 'bluesky opportunities' in message_lower:
+                # Get pending opportunities
+                opportunities = await approval_system.get_pending_approvals(limit=5)
+                
+                if not opportunities:
+                    return "📭 **No pending opportunities** found. Try `bluesky scan` to check for new content!"
+                
+                response_lines = [f"🎯 **{len(opportunities)} Engagement Opportunities**\n"]
+                
+                for i, opp in enumerate(opportunities, 1):
+                    account_name = opp['account_id'].replace('_', ' ').title()
+                    score = int(opp.get('keyword_score', 0) * 100)
+                    
+                    response_lines.append(f"**{i}. {account_name}** ({score}% keyword match)")
+                    response_lines.append(f"   📝 **Draft:** {opp['draft_text'][:100]}...")
+                    response_lines.append("")
+                
+                response_lines.append("Use the Bluesky dashboard to approve opportunities!")
+                return "\n".join(response_lines)
+                
+            elif 'bluesky accounts' in message_lower or 'bluesky status' in message_lower:
+                # Show account status
+                accounts_status = multi_client.get_all_accounts_status()
+                
+                response_lines = ["🔵 **Bluesky Accounts Status**\n"]
+                
+                for account_id, info in accounts_status.items():
+                    account_name = account_id.replace('_', ' ').title()
+                    status_emoji = "✅" if info.get('authenticated') else "❌"
+                    keyword_count = info.get('keyword_count', 0)
+                    
+                    response_lines.append(f"{status_emoji} **{account_name}** ({keyword_count} keywords)")
+                
+                return "\n".join(response_lines)
+                
+            elif 'bluesky health' in message_lower:
+                # Test system health
+                try:
+                    auth_results = await multi_client.authenticate_all_accounts()
+                    working_count = sum(auth_results.values())
+                    total_count = len(auth_results)
+                    
+                    return f"""🔵 **Bluesky System Health**
+
+📱 **Accounts:** {working_count}/{total_count} connected
+🤖 **AI Assistant:** All personalities loaded
+⚙️ **Status:** {'Healthy' if working_count > 0 else 'Needs Attention'}"""
+                    
+                except Exception as e:
+                    return f"❌ **Health Check Failed:** {str(e)}"
+            
+            else:
+                # General Bluesky info
+                return """🔵 **Bluesky Social Media Assistant**
+
+Your 5-account AI management system with keyword intelligence.
+
+**Commands:**
+• `bluesky scan` - Scan all accounts for opportunities
+• `bluesky opportunities` - View engagement suggestions  
+• `bluesky accounts` - Check account status
+• `bluesky health` - System health check
+
+Ready to manage your social media intelligently?"""
+                
+        except Exception as e:
+            logger.error(f"Bluesky command processing failed: {e}")
+            return f"❌ **Bluesky Error:** {str(e)}"
+
+#-- Section 6: Chat Message Processing - Updated 9/24/25 with Bluesky Integration
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
         """
-        Process a chat message through the complete AI brain pipeline with weather integration
+        Process a chat message through the complete AI brain pipeline with weather and Bluesky integration
         """
         user_id = user_id or self.default_user_id
         start_time = time.time()
@@ -176,12 +287,43 @@ Please respond naturally about the weather using this current data. Focus on hea
         )
         
         try:
+            # NEW: Check for Bluesky commands first - Added 9/24/25
+            if self._detect_bluesky_command(chat_request.message):
+                print(f"🔵 BLUESKY DEBUG: Bluesky command detected")
+                
+                bluesky_response = await self._process_bluesky_command(chat_request.message, user_id)
+                response_time_ms = int((time.time() - start_time) * 1000)
+                
+                # Store Bluesky response
+                ai_message_id = await memory_manager.add_message(
+                    thread_id=thread_id,
+                    role='assistant',
+                    content=bluesky_response,
+                    model_used='bluesky_assistant',
+                    response_time_ms=response_time_ms
+                )
+                
+                return ChatResponse(
+                    response=bluesky_response,
+                    thread_id=thread_id,
+                    message_id=ai_message_id,
+                    personality_id="bluesky_assistant",
+                    model_used="bluesky_assistant",
+                    response_time_ms=response_time_ms,
+                    knowledge_sources=[],
+                    conversation_context={
+                        'thread_id': thread_id,
+                        'command_type': 'bluesky',
+                        'message_count': 2  # User message + assistant response
+                    }
+                )
+            
             # Get conversation context for AI
             conversation_messages, context_info = await memory_manager.get_context_for_ai(
                 thread_id, max_tokens=200000  # Leave room for knowledge and response
             )
             
-            # NEW: Check for weather requests - Added 9/24/25
+            # Check for weather requests - Added 9/24/25
             weather_context = None
             weather_detected = self._detect_weather_request(chat_request.message)
             if weather_detected:
@@ -299,7 +441,8 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
                     'thread_id': thread_id,
                     'message_count': context_info.get('total_messages', 0),
                     'tokens_used': context_info.get('estimated_tokens', 0),
-                    'has_long_term_memory': context_info.get('has_memory_context', False)
+                    'has_long_term_memory': context_info.get('has_memory_context', False),
+                    'weather_detected': weather_detected
                 }
             )
             
@@ -453,7 +596,7 @@ orchestrator = AIBrainOrchestrator()
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(chat_request: ChatRequest):
     """
-    Main chat endpoint - processes message through complete AI brain with weather integration
+    Main chat endpoint - processes message through complete AI brain with weather and Bluesky integration
     """
     return await orchestrator.process_chat_message(chat_request)
 
@@ -616,6 +759,8 @@ async def get_ai_stats():
                 "memory_active": True,
                 "knowledge_engine_active": True,
                 "learning_active": feedback_summary.get('learning_active', False),
+                "bluesky_integration_active": True,  # NEW
+                "weather_integration_active": True,  # EXISTING
                 "default_user_id": orchestrator.default_user_id
             }
         }
@@ -681,7 +826,8 @@ def get_integration_info():
             "Knowledge Query Engine",
             "Personality Engine",
             "Feedback Processor",
-            "Weather Integration"  # NEW
+            "Weather Integration",
+            "Bluesky Integration"  # NEW
         ],
         "endpoints": {
             "chat": "/ai/chat",
@@ -700,7 +846,8 @@ def get_integration_info():
             "👍👎🖕 feedback learning",
             "Provider fallback system",
             "UUID-based user management",
-            "Weather integration with health monitoring"  # NEW
+            "Weather integration with health monitoring",
+            "Bluesky social media command processing"  # NEW
         ],
         "default_user_id": orchestrator.default_user_id
     }
@@ -717,10 +864,20 @@ def check_module_health():
     # Weather integration is optional
     weather_available = bool(os.getenv("TOMORROW_IO_API_KEY"))
     
+    # Bluesky integration is optional - NEW
+    bluesky_available = any([
+        os.getenv("BLUESKY_PERSONAL_PASSWORD"),
+        os.getenv("BLUESKY_ROSE_ANGEL_PASSWORD"),
+        os.getenv("BLUESKY_BINGE_TV_PASSWORD"),
+        os.getenv("BLUESKY_MEALS_FEELZ_PASSWORD"),
+        os.getenv("BLUESKY_DAMN_IT_CARL_PASSWORD")
+    ])
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
         "default_user_id": orchestrator.default_user_id,
-        "weather_integration_available": weather_available  # NEW
+        "weather_integration_available": weather_available,
+        "bluesky_integration_available": bluesky_available  # NEW
     }

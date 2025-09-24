@@ -19,6 +19,9 @@ from modules.integrations.slack_clickup import get_integration_info, check_modul
 from modules.integrations.weather import router as weather_router
 from modules.integrations.weather import get_integration_info as weather_integration_info, check_module_health as weather_module_health
 
+#-- NEW Section 2b: Bluesky Multi-Account Integration - added 9/24/25
+from modules.integrations.bluesky import router as bluesky_router
+from modules.integrations.bluesky import get_integration_info as bluesky_integration_info, check_module_health as bluesky_module_health
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -205,8 +208,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     
     return user['id']
 
-#-- Section 10: Application Lifecycle Events - 9/23/25
-#-- Section 10: Application Lifecycle Events - updated 9/24/25
+#-- Section 10: Application Lifecycle Events - updated 9/24/25 with Bluesky
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -245,7 +247,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Chat system health check failed: {e}")
     
-    # NEW: Check Weather integration health - added 9/24/25
+    # Check Weather integration health - added 9/24/25
     try:
         weather_health = weather_module_health()
         if weather_health['healthy']:
@@ -258,6 +260,21 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Weather integration health check failed: {e}")
     
+    # NEW: Check Bluesky integration health - added 9/24/25
+    try:
+        bluesky_health = bluesky_module_health()
+        if bluesky_health['healthy']:
+            print("🔵 Bluesky integration loaded successfully")
+            configured_accounts = bluesky_health.get('configured_accounts', 0)
+            print(f"   📱 {configured_accounts}/5 accounts configured")
+            print("   🤖 Multi-account AI assistant army ready")
+            print("   ⏰ 3.5-hour scan intervals with approval-first workflow")
+        else:
+            print("⚠️  Bluesky integration loaded with warnings")
+            print(f"   Missing vars: {bluesky_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️  Bluesky integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -267,7 +284,8 @@ async def startup_event():
     print("=" * 50)
     print("   📱 Web Interface: http://localhost:8000/ (login)")
     print("   💬 Chat Interface: http://localhost:8000/chat")
-    print("   🌦️ Weather API: http://localhost:8000/integrations/weather")  # NEW
+    print("   🌦️ Weather API: http://localhost:8000/integrations/weather")
+    print("   🔵 Bluesky API: http://localhost:8000/bluesky")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -276,8 +294,7 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-#-- Section 11: API Status and Info Endpoints - updated 9/24/25
-#-- Section 11: API Status, Info, and Health Check Endpoints - updated 9/24/25
+#-- Section 11: API Status and Info Endpoints - updated 9/24/25 with Bluesky
 @app.get("/health")
 async def health_check():
     """Health check endpoint for container orchestration and system monitoring"""
@@ -310,17 +327,18 @@ async def api_status():
         "architecture": "modular_chat_system_with_auth",
         "features": [
             "🔐 Secure user authentication with bcrypt",
-            "📁 Advanced file processing (images, PDFs, CSVs, text)",
+            "📄 Advanced file processing (images, PDFs, CSVs, text)",
             "🧠 250K context memory system",
             "🎭 Multi-personality AI chat (4 personalities)",
             "📖 Smart bookmark system with conversation navigation",
             "📚 21K knowledge base integration",
             "🌊 Real-time conversation streaming",
             "🌦️ Health-focused weather monitoring with Tomorrow.io",
+            "🔵 Multi-account Bluesky social media assistant (5 accounts)",
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "authentication"],
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "authentication"],
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -339,6 +357,11 @@ async def api_status():
             "weather_current": "/integrations/weather/current",
             "weather_alerts": "/integrations/weather/alerts",
             "weather_status": "/integrations/weather/status",
+            "bluesky_scan": "/bluesky/scan",
+            "bluesky_opportunities": "/bluesky/opportunities",
+            "bluesky_approve": "/bluesky/approve",
+            "bluesky_post": "/bluesky/post",
+            "bluesky_accounts": "/bluesky/accounts/status",
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -351,6 +374,13 @@ async def api_status():
             "health_features": ["pressure_tracking", "uv_monitoring", "headache_prediction"],
             "thresholds": {"pressure_drop": "3.0 mbar", "uv_protection": "4.0 index"},
             "api_configured": weather_module_health()['healthy']
+        },
+        "bluesky_social_management": {
+            "accounts_supported": 5,
+            "features": ["keyword_intelligence", "engagement_suggestions", "approval_workflow", "cross_account_opportunities"],
+            "scan_interval": "3.5 hours",
+            "personalities": ["syntaxprime", "professional", "compassionate"],
+            "api_configured": bluesky_module_health()['healthy']
         }
     }
 
@@ -363,6 +393,7 @@ async def integrations_info():
             "ai_brain": ai_integration_info(),
             "chat_system": chat_integration_info(),
             "weather": weather_integration_info(),
+            "bluesky_multi_account": bluesky_integration_info(),  # NEW
             "authentication": {
                 "name": "User Authentication System",
                 "version": "1.0.0",
@@ -377,8 +408,7 @@ async def integrations_info():
         }
     }
 
-#-- Section 12: Integration Module Routers - 9/23/25
-#-- Section 12: Integration Module Routers - updated 9/24/25
+#-- Section 12: Integration Module Routers - updated 9/24/25 with Bluesky
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -391,8 +421,11 @@ import modules.ai.chat as chat_module
 chat_module.get_current_user_id = get_current_user_id
 app.include_router(chat_router)
 
-# NEW: Include Weather integration router - added 9/24/25
+# Include Weather integration router - added 9/24/25
 app.include_router(weather_router)
+
+# NEW: Include Bluesky Multi-Account integration router - added 9/24/25
+app.include_router(bluesky_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
 # Periodic cleanup of expired sessions (every hour)
