@@ -1,7 +1,7 @@
 # modules/ai/chat.py
 # AI Chat Router for Syntax Prime V2
-# Clean, sectioned chat endpoint with file upload support
-# Date: 9/23/25
+# Clean, sectioned chat endpoint with file upload support and weather integration
+# Date: 9/23/25, Updated: 9/24/25
 
 #-- Section 1: Core Imports - 9/23/25
 import os
@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 import logging
+import httpx  # Added for weather API calls
 
 # File processing imports
 from PIL import Image, ImageOps
@@ -62,7 +63,6 @@ class ChatResponse(BaseModel):
     timestamp: datetime
 
 #-- Section 4: Router Setup - 9/23/25
-#-- Section 4: Router Setup - 9/23/25
 router = APIRouter(prefix="/ai", tags=["AI Chat"])
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,43 @@ async def get_current_user_id() -> str:
     """Get current user ID - placeholder for now"""
     # TODO: Implement proper authentication
     return "temp-user-id"
+
+async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
+    """Get current weather data for the user"""
+    try:
+        # Build the URL for your weather endpoint - using localhost for internal calls
+        base_url = os.getenv("RAILWAY_STATIC_URL", "http://localhost:8000")
+        params = {"user_id": user_id}
+        if location:
+            params["location"] = location
+            
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{base_url}/integrations/weather/current",
+                params=params,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Weather API returned {response.status_code}")
+                return {"error": f"Weather API returned {response.status_code}"}
+                
+    except Exception as e:
+        logger.error(f"Weather fetch error: {e}")
+        return {"error": f"Failed to get weather: {str(e)}"}
+
+def detect_weather_request(message: str) -> bool:
+    """Detect if user is asking about weather"""
+    weather_keywords = [
+        "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
+        "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
+        "hot", "cold", "warm", "cool", "storm", "thunderstorm", "snow",
+        "precipitation", "conditions", "outside", "today's weather"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in weather_keywords)
 
 async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
     """Process uploaded files and return file information"""
@@ -635,8 +672,8 @@ async def chat_with_ai(
     user_id: str = Depends(get_current_user_id)
 ):
     """
-    Main chat endpoint with file upload support
-    Handles text messages, file uploads, personality switching, and knowledge integration
+    Main chat endpoint with file upload support and weather integration
+    Handles text messages, file uploads, personality switching, knowledge integration, and weather queries
     """
     start_time = datetime.now()
     
@@ -686,6 +723,42 @@ async def chat_with_ai(
             max_tokens=200000  # Use full 250K context
         )
         
+        # Check if this is a weather request - NEW WEATHER FUNCTIONALITY
+        weather_data = None
+        if detect_weather_request(request.message):
+            logger.info(f"Weather request detected for user {user_id}")
+            weather_data = await get_weather_for_user(user_id)
+            
+            if weather_data and "data" in weather_data:
+                # Add weather context to the conversation
+                weather_info = weather_data["data"]
+                weather_context = f"""
+CURRENT WEATHER DATA:
+Location: {weather_info.get('location', 'Current location')}
+Current conditions: {weather_info.get('current_conditions', 'N/A')}
+Temperature: {weather_info.get('temperature_f', 'N/A')}°F
+Barometric Pressure: {weather_info.get('pressure', 'N/A')} mbar
+Pressure Change (3h): {weather_info.get('pressure_change_3h', 'N/A')} mbar
+UV Index: {weather_info.get('uv_index', 'N/A')}
+Headache Risk: {weather_info.get('headache_risk', 'N/A')}
+UV Risk: {weather_info.get('uv_risk', 'N/A')}
+Health Alerts: {', '.join(weather_info.get('health_alerts', ['None']))}
+
+Please respond naturally about the weather using this current data. Focus on health implications if relevant (headaches from pressure changes, UV protection needs, etc.).
+"""
+                logger.info("Weather context added to AI conversation")
+            elif weather_data and "error" in weather_data:
+                weather_context = f"""
+WEATHER REQUEST DETECTED: Unfortunately, I'm having trouble accessing current weather data: {weather_data['error']}
+Please respond appropriately about being unable to access weather information.
+"""
+                logger.warning(f"Weather API error: {weather_data['error']}")
+            else:
+                weather_context = """
+WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respond appropriately.
+"""
+                logger.warning("Weather service returned unexpected response")
+        
         # Search knowledge base if requested
         knowledge_sources = []
         if request.include_knowledge:
@@ -708,6 +781,10 @@ async def chat_with_ai(
         
         # Prepare messages for OpenRouter
         messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add weather context as system message if weather request detected
+        if weather_data and detect_weather_request(request.message):
+            messages.append({"role": "system", "content": weather_context})
         
         # Add conversation history (last 10 messages)
         for msg in conversation_history[-10:]:
@@ -756,7 +833,7 @@ async def chat_with_ai(
             knowledge_sources_used=[source.get('id') for source in knowledge_sources]
         )
         
-        logger.info(f"Chat completed - Thread: {thread_id}, Response time: {response_time_ms}ms")
+        logger.info(f"Chat completed - Thread: {thread_id}, Response time: {response_time_ms}ms, Weather: {'Yes' if weather_data else 'No'}")
         
         return ChatResponse(
             message_id=ai_message_id,
@@ -1109,11 +1186,13 @@ def get_integration_info() -> Dict[str, Any]:
             "Bookmark system",
             "Knowledge integration",
             "Streaming responses",
-            "Conversation management"
+            "Conversation management",
+            "Weather integration"  # NEW
         ],
         "file_upload_support": True,
         "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
-        "supported_file_types": list(ALLOWED_EXTENSIONS)
+        "supported_file_types": list(ALLOWED_EXTENSIONS),
+        "weather_integration": True  # NEW
     }
 
 def check_module_health() -> Dict[str, Any]:
@@ -1129,10 +1208,15 @@ def check_module_health() -> Dict[str, Any]:
     if not os.getenv("OPENROUTER_API_KEY"):
         missing_vars.append("OPENROUTER_API_KEY")
     
+    # Check weather integration (optional)
+    if not os.getenv("TOMORROW_IO_API_KEY"):
+        warnings.append("Weather integration not configured (TOMORROW_IO_API_KEY missing)")
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "warnings": warnings,
         "upload_directory": str(UPLOAD_DIR),
-        "max_file_size": f"{MAX_FILE_SIZE // (1024 * 1024)}MB"
+        "max_file_size": f"{MAX_FILE_SIZE // (1024 * 1024)}MB",
+        "weather_integration_available": bool(os.getenv("TOMORROW_IO_API_KEY"))
     }

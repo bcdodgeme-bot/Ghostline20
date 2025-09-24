@@ -22,33 +22,89 @@ slack_handler = SlackHandler()
 clickup_handler = ClickUpHandler()
 task_mapper = TaskMapper()
 
-#-- Section 2: Webhook Verification & Security - 9/23/25
+#-- Section 2: Webhook Verification & Security with Debug Logging - Updated 9/24/25
 async def verify_slack_request(request: Request) -> Dict:
-    """Verify and parse incoming Slack webhook request"""
+    """Verify and parse incoming Slack webhook request with comprehensive debug logging"""
+    logger.info(f"🔐 WEBHOOK VERIFICATION STARTED")
+    
     # Get headers
     timestamp = request.headers.get("X-Slack-Request-Timestamp")
     signature = request.headers.get("X-Slack-Signature")
+    content_type = request.headers.get("content-type")
+    
+    logger.info(f"📋 Headers received:")
+    logger.info(f"   ⏰ Timestamp: {timestamp}")
+    logger.info(f"   🔏 Signature: {signature}")
+    logger.info(f"   📄 Content-Type: {content_type}")
     
     if not timestamp or not signature:
+        logger.error(f"❌ Missing required Slack headers")
+        logger.error(f"   ⏰ Has timestamp: {bool(timestamp)}")
+        logger.error(f"   🔏 Has signature: {bool(signature)}")
         raise HTTPException(status_code=401, detail="Missing Slack headers")
     
     # Get body
     body = await request.body()
+    logger.info(f"📦 Body received: {len(body)} bytes")
+    logger.info(f"📝 Body preview: {body[:200].decode(errors='ignore')}...")
     
-    # Verify signature
-    if not slack_handler.verify_request(body, timestamp, signature):
+    # Verify signature with debug logging
+    logger.info(f"🔍 Verifying Slack signature...")
+    verification_result = slack_handler.verify_request(body, timestamp, signature)
+    logger.info(f"🔒 Signature verification result: {verification_result}")
+    
+    if not verification_result:
+        logger.error(f"❌ SIGNATURE VERIFICATION FAILED!")
+        logger.error(f"   🔑 Signing secret configured: {bool(slack_handler.signing_secret)}")
+        logger.error(f"   ⏰ Timestamp: {timestamp}")
+        logger.error(f"   🔏 Received signature: {signature}")
+        
+        # Let's also log what we computed for debugging
+        try:
+            from datetime import datetime as dt
+            import hmac, hashlib
+            current_time = int(dt.now().timestamp())
+            timestamp_int = int(timestamp)
+            time_diff = abs(current_time - timestamp_int)
+            logger.error(f"   📅 Time difference: {time_diff} seconds (max allowed: 300)")
+            
+            sig_basestring = f"v0:{timestamp}:{body.decode()}"
+            computed_hash = hmac.new(
+                slack_handler.signing_secret.encode(),
+                sig_basestring.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            computed_signature = f"v0={computed_hash}"
+            logger.error(f"   🧮 Computed signature: {computed_signature}")
+            logger.error(f"   📊 Signatures match: {computed_signature == signature}")
+        except Exception as debug_error:
+            logger.error(f"   🚫 Debug signature computation failed: {debug_error}")
+        
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    
+    logger.info(f"✅ Signature verification passed!")
     
     # Parse body
     try:
-        if request.headers.get("content-type") == "application/json":
-            return json.loads(body.decode())
+        if content_type == "application/json":
+            logger.info(f"📋 Parsing JSON body...")
+            parsed_data = json.loads(body.decode())
+            logger.info(f"✅ JSON parsed successfully")
+            logger.info(f"📊 Data keys: {list(parsed_data.keys())}")
+            return parsed_data
         else:
+            logger.info(f"📋 Parsing URL-encoded body...")
             # URL-encoded form data
             from urllib.parse import parse_qs
             parsed = parse_qs(body.decode())
-            return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            parsed_data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            logger.info(f"✅ URL-encoded data parsed successfully")
+            logger.info(f"📊 Data keys: {list(parsed_data.keys())}")
+            return parsed_data
     except Exception as e:
+        logger.error(f"❌ Body parsing failed: {e}")
+        logger.error(f"📄 Content-Type: {content_type}")
+        logger.error(f"📦 Body: {body[:500]}")
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
 #-- Section 3: Background Task Processing with Debug Logging - Updated 9/24/25
