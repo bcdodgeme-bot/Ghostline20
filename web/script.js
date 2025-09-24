@@ -1,8 +1,10 @@
 // =============================================================================
-// Syntax Prime V2 - Fixed Chat Interface JavaScript
-// Fixes: API errors, input visibility, submit button, request format
+// Syntax Prime V2 - Fixed Chat Interface JavaScript with Feedback System
+// Fixes: API errors, input visibility, submit button, request format, feedback buttons
+// Date: 9/23/25
 // =============================================================================
 
+//-- Section 1: Core Class Setup and Constructor - 9/23/25
 class SyntaxPrimeChat {
     constructor() {
         this.apiBase = window.location.origin;
@@ -15,7 +17,7 @@ class SyntaxPrimeChat {
         this.init();
     }
 
-    // === Initialization ===
+//-- Section 2: Initialization and Event Listeners - 9/23/25
     init() {
         this.setupEventListeners();
         this.loadPersonalities();
@@ -63,6 +65,7 @@ class SyntaxPrimeChat {
         this.setupModalHandlers();
     }
 
+//-- Section 3: Modal Event Handlers - 9/23/25
     setupModalHandlers() {
         // Bookmark modal
         const bookmarkModal = document.getElementById('bookmarkModal');
@@ -91,7 +94,7 @@ class SyntaxPrimeChat {
         });
     }
 
-    // === FIXED: API Communication with proper error handling ===
+//-- Section 4: API Communication with Error Handling - 9/23/25
     async apiCall(endpoint, method = 'GET', data = null) {
         try {
             const options = {
@@ -165,7 +168,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // === FIXED: Chat message sending with proper request format ===
+//-- Section 5: Chat Message Sending - 9/23/25
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
@@ -226,7 +229,7 @@ class SyntaxPrimeChat {
         messageInput.focus();
     }
 
-    // === FIXED: Message display with better error handling ===
+//-- Section 6: Message Display with Feedback Buttons - 9/23/25
     addMessage(role, content, metadata = {}) {
         const messagesContainer = document.getElementById('chatMessages');
         const welcomeMessage = messagesContainer.querySelector('.welcome-message');
@@ -276,7 +279,7 @@ class SyntaxPrimeChat {
 
         contentDiv.appendChild(bubble);
 
-        // Add message actions for assistant messages
+        // UPDATED: Add message actions for assistant messages with feedback buttons
         if (role === 'assistant' && !metadata.error) {
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'message-actions';
@@ -286,6 +289,15 @@ class SyntaxPrimeChat {
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                     </svg>
+                </button>
+                <button class="message-action feedback-good" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'good')" title="Good Response 👍">
+                    👍
+                </button>
+                <button class="message-action feedback-bad" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'bad')" title="Bad Response 👎">
+                    👎
+                </button>
+                <button class="message-action feedback-personality" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'personality')" title="Perfect Personality! 🖕">
+                    🖕
                 </button>
                 <button class="message-action remember-action" onclick="syntaxChat.rememberMessage('${messageDiv.dataset.messageId}')" title="Remember This" style="display: none;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -319,6 +331,51 @@ class SyntaxPrimeChat {
         messageDiv._messageContent = content;
     }
 
+//-- Section 7: NEW Feedback Submission System - 9/23/25
+    async submitFeedback(messageId, feedbackType) {
+        try {
+            // Visual feedback first
+            const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (messageDiv) {
+                const feedbackBtn = messageDiv.querySelector(`.feedback-${feedbackType}`);
+                if (feedbackBtn) {
+                    feedbackBtn.style.background = 'var(--accent-primary)';
+                    feedbackBtn.style.color = 'white';
+                    feedbackBtn.style.transform = 'scale(0.9)';
+                    setTimeout(() => {
+                        feedbackBtn.style.background = '';
+                        feedbackBtn.style.color = '';
+                        feedbackBtn.style.transform = '';
+                    }, 1000);
+                }
+            }
+
+            // Submit feedback to backend
+            const response = await this.apiCall('/ai/feedback', 'POST', {
+                message_id: messageId,
+                feedback_type: feedbackType,
+                feedback_text: null
+            });
+
+            // Show success notification with the emoji and message
+            this.showSuccess(response.message);
+            
+            // Special effect for personality feedback
+            if (feedbackType === 'personality') {
+                setTimeout(() => {
+                    this.showNotification('🖕 Perfect personality recorded! More of this energy coming up!', 'success');
+                }, 500);
+            }
+            
+            console.log('Feedback submitted successfully:', response);
+
+        } catch (error) {
+            console.error('Feedback submission failed:', error);
+            this.showError('Failed to submit feedback. Please try again.');
+        }
+    }
+
+//-- Section 8: Message Content Formatting - 9/23/25
     formatMessageContent(content) {
         // Basic markdown-like formatting
         return content
@@ -328,7 +385,7 @@ class SyntaxPrimeChat {
             .replace(/\n/g, '<br>');
     }
 
-    // === FIXED: Input handling with proper submit button ===
+//-- Section 9: Input Handling and Validation - 9/23/25
     handleInputChange() {
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
@@ -354,7 +411,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // === FIXED: Auto-resize textarea to show full content ===
+//-- Section 10: Textarea Auto-Resize and UI Updates - 9/23/25
     autoResizeTextarea() {
         const textarea = document.getElementById('messageInput');
         // Reset height to auto to get correct scrollHeight
@@ -404,7 +461,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // === Show/Hide typing indicator ===
+//-- Section 11: Typing Indicator Management - 9/23/25
     showTypingIndicator() {
         const messagesContainer = document.getElementById('chatMessages');
         const typingDiv = document.createElement('div');
@@ -444,7 +501,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // === File Upload Functions (keeping existing) ===
+//-- Section 12: File Upload Functions - 9/23/25
     handleFileSelect(event) {
         const files = Array.from(event.target.files);
         files.forEach(file => this.addUploadedFile(file));
@@ -514,7 +571,7 @@ class SyntaxPrimeChat {
         return '📎';
     }
 
-    // === Drag and Drop (keeping existing) ===
+//-- Section 13: Drag and Drop File Handling - 9/23/25
     setupDragAndDrop() {
         const dragOverlay = document.getElementById('dragOverlay');
         let dragCounter = 0;
@@ -549,7 +606,7 @@ class SyntaxPrimeChat {
         });
     }
 
-    // === Other methods (keeping existing with error handling improvements) ===
+//-- Section 14: Personality and Conversation Loading - 9/23/25
     async loadPersonalities() {
         try {
             const response = await this.apiCall('/ai/personalities');
@@ -624,7 +681,7 @@ class SyntaxPrimeChat {
         });
     }
 
-    // === Utility Functions ===
+//-- Section 15: Notification System - 9/23/25
     showError(message) {
         this.showNotification(message, 'error');
     }
@@ -664,7 +721,7 @@ class SyntaxPrimeChat {
         }, 5000);
     }
 
-    // === Other existing methods ===
+//-- Section 16: UI Control Methods - 9/23/25
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         sidebar.classList.toggle('collapsed');
@@ -705,6 +762,7 @@ class SyntaxPrimeChat {
         this.showSuccess('Remember functionality coming soon!');
     }
 
+//-- Section 17: Modal Management - 9/23/25
     showModal(modal) {
         modal.classList.add('active');
         modal.style.display = 'flex';
@@ -726,6 +784,7 @@ class SyntaxPrimeChat {
         this.showSuccess('Settings saved!');
     }
 
+//-- Section 18: Authentication Management - 9/23/25
     logout() {
         fetch('/auth/logout', {
             method: 'POST',
@@ -738,7 +797,8 @@ class SyntaxPrimeChat {
     }
 }
 
-// === Initialize App ===
+//-- Section 19: App Initialization and Styles - 9/23/25
+// Initialize the chat application
 const syntaxChat = new SyntaxPrimeChat();
 
 // Add notification animations to document
