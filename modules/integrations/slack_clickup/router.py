@@ -273,17 +273,41 @@ async def handle_slack_events(request: Request, background_tasks: BackgroundTask
                     print("🚨 EMERGENCY: User not mentioned, skipping task creation")
                     logger.info(f"⏭️ User not mentioned, skipping task creation")
             
-            # Handle direct messages
-            elif event_type == "message" and event.get("channel_type") == "im":
-                logger.info(f"💬 DIRECT MESSAGE received")
+            # Handle regular messages that mention our user (main use case!)
+            elif event_type == "message":
                 message_text = event.get("text", "")
+                user = event.get("user", "")
+                channel = event.get("channel", "")
+                channel_type = event.get("channel_type", "")
                 
-                # Direct message - treat as potential command
-                if slack_handler.is_user_mentioned(message_text):
-                    logger.info(f"🎯 User mentioned in DM, processing as mention")
+                print(f"🚨 EMERGENCY: Regular message from user {user} in channel {channel}")
+                print(f"🚨 EMERGENCY: Message text: {message_text}")
+                print(f"🚨 EMERGENCY: Channel type: {channel_type}")
+                
+                logger.info(f"💬 MESSAGE EVENT:")
+                logger.info(f"   👤 From user: {user}")
+                logger.info(f"   📺 In channel: {channel}")
+                logger.info(f"   🏷️ Channel type: {channel_type}")
+                logger.info(f"   💬 Message text: {message_text}")
+                logger.info(f"   🎯 Looking for user ID: {slack_handler.user_id}")
+                
+                # Check if our user is mentioned in the message
+                is_mentioned = slack_handler.is_user_mentioned(message_text)
+                print(f"🚨 EMERGENCY: User mentioned result: {is_mentioned}")
+                logger.info(f"   ✅ User mentioned result: {is_mentioned}")
+                
+                if is_mentioned:
+                    print("🚨 EMERGENCY: USER IS MENTIONED in regular message - Adding background task")
+                    logger.info(f"🚀 USER MENTIONED IN MESSAGE - Adding background task")
                     background_tasks.add_task(process_mention_task, event)
+                    logger.info(f"✅ Background task added to queue")
                 else:
-                    logger.info(f"⏭️ User not mentioned in DM, skipping")
+                    print("🚨 EMERGENCY: User not mentioned in regular message, skipping")
+                    logger.info(f"⏭️ User not mentioned in message, skipping task creation")
+                    
+                # Handle direct messages separately if needed
+                if channel_type == "im":
+                    logger.info(f"📱 This was a direct message")
             else:
                 print(f"🚨 EMERGENCY: Unhandled event type: {event_type}")
                 logger.info(f"ℹ️ Unhandled event type: {event_type}")

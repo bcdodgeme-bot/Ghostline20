@@ -2,7 +2,7 @@
 """
 AI Brain Main Router for Syntax Prime V2 - SECTIONED AND FIXED
 Ties together all AI components into FastAPI endpoints
-Date: 9/23/25
+Date: 9/23/25, Updated: 9/24/25 - Added Weather Integration
 """
 
 #-- Section 1: Core Imports and Dependencies - 9/23/25
@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Any
 import json
 import time
 import logging
+import os
+import httpx  # Added for weather API calls
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -74,15 +76,83 @@ class AIBrainOrchestrator:
         logger.info(f"AI Brain initialized with default user ID: {self.default_user_id}")
         self.fallback_attempts = 2
 
-#-- Section 5: Chat Message Processing - 9/23/25
+#-- Section 5: Weather Integration Methods - Added 9/24/25
+    def _detect_weather_request(self, message: str) -> bool:
+        """Detect if user is asking about weather"""
+        print(f"🌦️ WEATHER DEBUG: Checking message '{message}'")
+        weather_keywords = [
+            "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
+            "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
+            "hot", "cold", "warm", "cool", "storm", "thunderstorm", "snow",
+            "precipitation", "conditions", "outside", "today's weather"
+        ]
+        message_lower = message.lower()
+        result = any(keyword in message_lower for keyword in weather_keywords)
+        print(f"🌦️ WEATHER DEBUG: Detection result = {result}")
+        return result
+
+    async def _get_weather_for_user(self, user_id: str, location: str = None) -> Dict:
+        """Get current weather data for the user"""
+        print(f"🌦️ WEATHER DEBUG: Getting weather for user {user_id}")
+        try:
+            # Build the URL for your weather endpoint - using localhost for internal calls
+            base_url = os.getenv("RAILWAY_STATIC_URL", "http://localhost:8000")
+            params = {"user_id": user_id}
+            if location:
+                params["location"] = location
+                
+            async with httpx.AsyncClient() as client:
+                print(f"🌦️ WEATHER DEBUG: Calling {base_url}/integrations/weather/current")
+                response = await client.get(
+                    f"{base_url}/integrations/weather/current",
+                    params=params,
+                    timeout=30
+                )
+                
+                print(f"🌦️ WEATHER DEBUG: Weather API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    weather_data = response.json()
+                    print(f"🌦️ WEATHER DEBUG: Weather data received successfully")
+                    return weather_data
+                else:
+                    print(f"🌦️ WEATHER DEBUG: Weather API returned {response.status_code}")
+                    return {"error": f"Weather API returned {response.status_code}"}
+                    
+        except Exception as e:
+            print(f"🌦️ WEATHER DEBUG: Weather fetch error: {e}")
+            logger.error(f"Weather fetch error: {e}")
+            return {"error": f"Failed to get weather: {str(e)}"}
+
+    def _build_weather_context(self, weather_info: Dict) -> str:
+        """Build weather context for AI"""
+        print(f"🌦️ WEATHER DEBUG: Building weather context")
+        weather_context = f"""
+CURRENT WEATHER DATA:
+Current conditions: {weather_info.get('current_conditions', 'N/A')}
+Temperature: {weather_info.get('temperature_f', 'N/A')}°F
+Barometric Pressure: {weather_info.get('pressure', 'N/A')} mbar
+Pressure Change (3h): {weather_info.get('pressure_change_3h', 'N/A')} mbar
+UV Index: {weather_info.get('uv_index', 'N/A')}
+Headache Risk: {weather_info.get('headache_risk', 'N/A')}
+UV Risk: {weather_info.get('uv_risk', 'N/A')}
+Health Alerts: {', '.join(weather_info.get('health_alerts', ['None']))}
+
+Please respond naturally about the weather using this current data. Focus on health implications if relevant (headaches from pressure changes, UV protection needs, etc.).
+"""
+        return weather_context
+
+#-- Section 6: Chat Message Processing - Updated 9/24/25 with Weather Integration
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
         """
-        Process a chat message through the complete AI brain pipeline
+        Process a chat message through the complete AI brain pipeline with weather integration
         """
         user_id = user_id or self.default_user_id
         start_time = time.time()
+        
+        print(f"🚀 DEBUG: process_chat_message called with message: '{chat_request.message}'")
         
         # Get components
         memory_manager = get_memory_manager(user_id)
@@ -110,6 +180,28 @@ class AIBrainOrchestrator:
                 thread_id, max_tokens=200000  # Leave room for knowledge and response
             )
             
+            # NEW: Check for weather requests - Added 9/24/25
+            weather_context = None
+            weather_detected = self._detect_weather_request(chat_request.message)
+            if weather_detected:
+                print(f"🌦️ WEATHER DEBUG: Weather detected for user {user_id}")
+                weather_data = await self._get_weather_for_user(user_id)
+                
+                if weather_data and "data" in weather_data:
+                    weather_context = self._build_weather_context(weather_data["data"])
+                    print(f"🌦️ WEATHER DEBUG: Weather context built successfully")
+                elif weather_data and "error" in weather_data:
+                    weather_context = f"""
+WEATHER REQUEST DETECTED: Unfortunately, I'm having trouble accessing current weather data: {weather_data['error']}
+Please respond appropriately about being unable to access weather information.
+"""
+                    print(f"🌦️ WEATHER DEBUG: Weather API error: {weather_data['error']}")
+                else:
+                    weather_context = """
+WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respond appropriately.
+"""
+                    print(f"🌦️ WEATHER DEBUG: Weather service returned unexpected response")
+            
             # Search knowledge base if requested
             knowledge_sources = []
             if chat_request.include_knowledge:
@@ -131,6 +223,14 @@ class AIBrainOrchestrator:
             ai_messages = [
                 {"role": "system", "content": system_prompt}
             ]
+            
+            # Add weather context as system message if weather request detected
+            if weather_context:
+                ai_messages.append({
+                    "role": "system",
+                    "content": weather_context
+                })
+                print(f"🌦️ WEATHER DEBUG: Weather context added to AI messages")
             
             # Add knowledge context if available
             if knowledge_sources:
@@ -203,7 +303,7 @@ class AIBrainOrchestrator:
             )
             
             logger.info(f"Chat processed: {response_time_ms}ms, model: {model_used}, "
-                       f"personality: {chat_request.personality_id}")
+                       f"personality: {chat_request.personality_id}, weather: {'Yes' if weather_detected else 'No'}")
             
             return chat_response
             
@@ -221,7 +321,7 @@ class AIBrainOrchestrator:
             
             raise HTTPException(status_code=500, detail=str(e))
 
-#-- Section 6: AI Response Helper Methods - 9/23/25
+#-- Section 7: AI Response Helper Methods - 9/23/25
     def _build_knowledge_context(self, knowledge_sources: List[Dict]) -> str:
         """Build knowledge context string for AI prompt"""
         if not knowledge_sources:
@@ -278,7 +378,7 @@ class AIBrainOrchestrator:
                 logger.error(f"Both AI providers failed: {fallback_error}")
                 raise Exception(f"All AI providers failed. Primary: {e}, Fallback: {fallback_error}")
 
-#-- Section 7: FIXED Feedback Processing with Proper Thread ID Lookup - 9/23/25
+#-- Section 8: FIXED Feedback Processing with Proper Thread ID Lookup - 9/23/25
     async def process_feedback(self,
                              feedback_request: FeedbackRequest,
                              user_id: str = None) -> FeedbackResponse:
@@ -345,14 +445,14 @@ class AIBrainOrchestrator:
             logger.error(f"Feedback processing failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-#-- Section 8: Global Orchestrator Instance - 9/23/25
+#-- Section 9: Global Orchestrator Instance - 9/23/25
 orchestrator = AIBrainOrchestrator()
 
-#-- Section 9: Main API Endpoints - 9/23/25
+#-- Section 10: Main API Endpoints - 9/23/25
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(chat_request: ChatRequest):
     """
-    Main chat endpoint - processes message through complete AI brain
+    Main chat endpoint - processes message through complete AI brain with weather integration
     """
     return await orchestrator.process_chat_message(chat_request)
 
@@ -382,7 +482,7 @@ async def get_personalities():
         "default_personality": "syntaxprime"
     }
 
-#-- Section 10: Conversation Management Endpoints - 9/23/25
+#-- Section 11: Conversation Management Endpoints - 9/23/25
 @router.get("/conversations")
 async def get_conversations(limit: int = 50):
     """Get conversation threads"""
@@ -446,7 +546,7 @@ async def get_conversation(thread_id: str, include_metadata: bool = False):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Conversation not found: {e}")
 
-#-- Section 11: Knowledge Search and Statistics Endpoints - 9/23/25
+#-- Section 12: Knowledge Search and Statistics Endpoints - 9/23/25
 @router.get("/knowledge/search")
 async def search_knowledge(q: str,
                           personality: str = 'syntaxprime',
@@ -523,7 +623,7 @@ async def get_ai_stats():
         logger.error(f"Stats retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-#-- Section 12: System Testing and Health Check Endpoints - 9/23/25
+#-- Section 13: System Testing and Health Check Endpoints - 9/23/25
 @router.post("/test")
 async def test_ai_connection():
     """Test AI provider connections"""
@@ -555,7 +655,7 @@ async def test_ai_connection():
         "default_user_id": orchestrator.default_user_id
     }
 
-#-- Section 13: Cleanup and Shutdown Handlers - 9/23/25
+#-- Section 14: Cleanup and Shutdown Handlers - 9/23/25
 @router.on_event("shutdown")
 async def shutdown_ai_brain():
     """Cleanup AI brain components"""
@@ -567,7 +667,7 @@ async def shutdown_ai_brain():
     
     logger.info("AI brain shutdown complete")
 
-#-- Section 14: Module Information and Health Check Functions - 9/23/25
+#-- Section 15: Module Information and Health Check Functions - Updated 9/24/25
 def get_integration_info():
     """Get information about the AI brain integration"""
     return {
@@ -579,7 +679,8 @@ def get_integration_info():
             "Digital Elephant Memory",
             "Knowledge Query Engine",
             "Personality Engine",
-            "Feedback Processor"
+            "Feedback Processor",
+            "Weather Integration"  # NEW
         ],
         "endpoints": {
             "chat": "/ai/chat",
@@ -597,7 +698,8 @@ def get_integration_info():
             "4 personality system",
             "👍👎🖕 feedback learning",
             "Provider fallback system",
-            "UUID-based user management"
+            "UUID-based user management",
+            "Weather integration with health monitoring"  # NEW
         ],
         "default_user_id": orchestrator.default_user_id
     }
@@ -611,11 +713,13 @@ def check_module_health():
     if not os.getenv("OPENROUTER_API_KEY"):
         missing_vars.append("OPENROUTER_API_KEY")
     
-    # Inception Labs is optional (can run in placeholder mode)
+    # Weather integration is optional
+    weather_available = bool(os.getenv("TOMORROW_IO_API_KEY"))
     
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
-        "default_user_id": orchestrator.default_user_id
+        "default_user_id": orchestrator.default_user_id,
+        "weather_integration_available": weather_available  # NEW
     }
