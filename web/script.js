@@ -230,106 +230,138 @@ class SyntaxPrimeChat {
     }
 
 //-- Section 6: Message Display with Feedback Buttons - 9/23/25
-    addMessage(role, content, metadata = {}) {
-        const messagesContainer = document.getElementById('chatMessages');
-        const welcomeMessage = messagesContainer.querySelector('.welcome-message');
-        
-        // Remove welcome message on first interaction
-        if (welcomeMessage) {
-            welcomeMessage.remove();
-        }
+//-- Section 6: Message Display with Feedback Buttons - 9/23/25
+        addMessage(role, content, metadata = {}) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const welcomeMessage = messagesContainer.querySelector('.welcome-message');
+            
+            // Remove welcome message on first interaction
+            if (welcomeMessage) {
+                welcomeMessage.remove();
+            }
 
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${role}`;
-        messageDiv.dataset.messageId = metadata.messageId || Date.now().toString();
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            messageDiv.dataset.messageId = metadata.messageId || Date.now().toString();
 
-        const avatar = document.createElement('div');
-        avatar.className = 'message-avatar';
-        
-        if (role === 'user') {
-            avatar.innerHTML = '👤';
-        } else {
-            avatar.innerHTML = '<img src="static/syntax-buffering.png" alt="Syntax" style="width: 32px; height: 32px; object-fit: contain; border-radius: 50%;">';
-        }
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            
+            if (role === 'user') {
+                avatar.innerHTML = '👤';
+            } else {
+                avatar.innerHTML = '<img src="static/syntax-buffering.png" alt="Syntax" style="width: 32px; height: 32px; object-fit: contain; border-radius: 50%;">';
+            }
 
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
 
-        const bubble = document.createElement('div');
-        bubble.className = 'message-bubble';
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
 
-        const textDiv = document.createElement('div');
-        textDiv.className = 'message-text';
-        textDiv.innerHTML = this.formatMessageContent(content);
+            const textDiv = document.createElement('div');
+            textDiv.className = 'message-text';
+            textDiv.innerHTML = this.formatMessageContent(content);
 
-        bubble.appendChild(textDiv);
+            bubble.appendChild(textDiv);
 
-        // Add file attachments for user messages
-        if (role === 'user' && metadata.files && metadata.files.length > 0) {
-            const filesDiv = document.createElement('div');
-            filesDiv.className = 'message-files';
-            metadata.files.forEach(file => {
-                const fileSpan = document.createElement('span');
-                fileSpan.className = 'message-file';
-                fileSpan.innerHTML = `📎 ${file.name}`;
-                filesDiv.appendChild(fileSpan);
-            });
-            bubble.appendChild(filesDiv);
-        }
+            // Add file attachments for user messages
+            if (role === 'user' && metadata.files && metadata.files.length > 0) {
+                const filesDiv = document.createElement('div');
+                filesDiv.className = 'message-files';
+                metadata.files.forEach(file => {
+                    const fileSpan = document.createElement('span');
+                    fileSpan.className = 'message-file';
+                    fileSpan.innerHTML = `📎 ${file.name}`;
+                    filesDiv.appendChild(fileSpan);
+                });
+                bubble.appendChild(filesDiv);
+            }
 
-        contentDiv.appendChild(bubble);
+            contentDiv.appendChild(bubble);
 
-        // UPDATED: Add message actions for assistant messages with feedback buttons
-        if (role === 'assistant' && !metadata.error) {
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'message-actions';
-            actionsDiv.innerHTML = `
-                <button class="message-action" onclick="syntaxChat.copyMessage('${messageDiv.dataset.messageId}')" title="Copy">
+            // Add message actions for assistant messages with feedback buttons
+            if (role === 'assistant' && !metadata.error) {
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'message-actions';
+                
+                // Create Copy button
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'message-action';
+                copyBtn.title = 'Copy';
+                copyBtn.innerHTML = `
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                     </svg>
-                </button>
-                <button class="message-action feedback-good" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'good')" title="Good Response 👍">
-                    👍
-                </button>
-                <button class="message-action feedback-bad" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'bad')" title="Bad Response 👎">
-                    👎
-                </button>
-                <button class="message-action feedback-personality" onclick="syntaxChat.submitFeedback('${messageDiv.dataset.messageId}', 'personality')" title="Perfect Personality! 🖕">
-                    🖕
-                </button>
-                <button class="message-action remember-action" onclick="syntaxChat.rememberMessage('${messageDiv.dataset.messageId}')" title="Remember This" style="display: none;">
+                `;
+                copyBtn.addEventListener('click', () => this.copyMessage(messageDiv.dataset.messageId));
+                
+                // Create Good Feedback button
+                const feedbackGoodBtn = document.createElement('button');
+                feedbackGoodBtn.className = 'message-action feedback-good';
+                feedbackGoodBtn.title = 'Good Response 👍';
+                feedbackGoodBtn.innerHTML = '👍';
+                feedbackGoodBtn.addEventListener('click', () => this.submitFeedback(messageDiv.dataset.messageId, 'good'));
+                
+                // Create Bad Feedback button
+                const feedbackBadBtn = document.createElement('button');
+                feedbackBadBtn.className = 'message-action feedback-bad';
+                feedbackBadBtn.title = 'Bad Response 👎';
+                feedbackBadBtn.innerHTML = '👎';
+                feedbackBadBtn.addEventListener('click', () => this.submitFeedback(messageDiv.dataset.messageId, 'bad'));
+                
+                // Create Personality Feedback button
+                const feedbackPersonalityBtn = document.createElement('button');
+                feedbackPersonalityBtn.className = 'message-action feedback-personality';
+                feedbackPersonalityBtn.title = 'Perfect Personality! 🖕';
+                feedbackPersonalityBtn.innerHTML = '🖕';
+                feedbackPersonalityBtn.addEventListener('click', () => this.submitFeedback(messageDiv.dataset.messageId, 'personality'));
+                
+                // Create Remember button
+                const rememberBtn = document.createElement('button');
+                rememberBtn.className = 'message-action remember-action';
+                rememberBtn.title = 'Remember This';
+                rememberBtn.style.display = 'none';
+                rememberBtn.innerHTML = `
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5Z"/>
                     </svg>
-                </button>
-            `;
-            contentDiv.appendChild(actionsDiv);
+                `;
+                rememberBtn.addEventListener('click', () => this.rememberMessage(messageDiv.dataset.messageId));
+                
+                // Append all buttons to actions div
+                actionsDiv.appendChild(copyBtn);
+                actionsDiv.appendChild(feedbackGoodBtn);
+                actionsDiv.appendChild(feedbackBadBtn);
+                actionsDiv.appendChild(feedbackPersonalityBtn);
+                actionsDiv.appendChild(rememberBtn);
+                
+                contentDiv.appendChild(actionsDiv);
+            }
+
+            // Add metadata for assistant messages
+            if (role === 'assistant' && metadata.personality && !metadata.error) {
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'message-meta';
+                const responseTime = metadata.responseTime ? `${metadata.responseTime}ms` : '';
+                metaDiv.innerHTML = `
+                    <span>Personality: ${metadata.personality}</span>
+                    ${responseTime ? `<span>Response: ${responseTime}</span>` : ''}
+                    ${metadata.knowledgeSources?.length ? `<span>Knowledge: ${metadata.knowledgeSources.length} sources</span>` : ''}
+                `;
+                contentDiv.appendChild(metaDiv);
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            // Store message content for potential bookmarking
+            messageDiv._messageContent = content;
         }
-
-        // Add metadata for assistant messages
-        if (role === 'assistant' && metadata.personality && !metadata.error) {
-            const metaDiv = document.createElement('div');
-            metaDiv.className = 'message-meta';
-            const responseTime = metadata.responseTime ? `${metadata.responseTime}ms` : '';
-            metaDiv.innerHTML = `
-                <span>Personality: ${metadata.personality}</span>
-                ${responseTime ? `<span>Response: ${responseTime}</span>` : ''}
-                ${metadata.knowledgeSources?.length ? `<span>Knowledge: ${metadata.knowledgeSources.length} sources</span>` : ''}
-            `;
-            contentDiv.appendChild(metaDiv);
-        }
-
-        messageDiv.appendChild(avatar);
-        messageDiv.appendChild(contentDiv);
-
-        messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-        // Store message content for potential bookmarking
-        messageDiv._messageContent = content;
-    }
 
 //-- Section 7: NEW Feedback Submission System - 9/23/25
     async submitFeedback(messageId, feedbackType) {
