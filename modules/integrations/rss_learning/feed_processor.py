@@ -355,6 +355,11 @@ class RSSFeedProcessor:
                 'processed': True
             }
             
+            # DEBUG: Log the values being inserted - ADD THESE 3 LINES
+            print(f"DEBUG - sentiment_score: {db_item['sentiment_score']}")
+            print(f"DEBUG - trend_score: {db_item['trend_score']}")
+            print(f"DEBUG - relevance_score: {db_item['relevance_score']}")
+            
             # Store in database
             await self.db.insert_feed_item(db_item)
             
