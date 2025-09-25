@@ -75,10 +75,10 @@ class RSSFeedProcessor:
                 await self.process_all_feeds()
                 
                 # Clean up old content
-                await self.cleanup_old_content()
+                #await self.cleanup_old_content()
                 
                 # Update content freshness scores
-                await self.db.execute_function('update_rss_content_freshness')
+                #await self.db.execute_function('update_rss_content_freshness')
                 
                 logger.info("Weekly RSS processing completed successfully")
                 
