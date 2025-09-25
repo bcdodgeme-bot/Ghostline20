@@ -246,7 +246,7 @@ class ContentAnalyzer:
         if len(content) < 200:
             score -= 2.0
         
-        return max(1.0, min(10.0, score))
+        return max(1.0, min(9.99, score))
     
     def _calculate_trend_score(self, title: str, content: str) -> float:
         """Calculate trend score based on trending topics and recency indicators"""
@@ -279,7 +279,7 @@ class ContentAnalyzer:
         timely_terms = ['latest', 'new', 'updated', 'recent', '2025', 'now', 'current']
         score += sum(0.3 for term in timely_terms if term in text)
         
-        return max(1.0, min(10.0, score))
+        return max(1.0, min(9.99, score))
     
     def _basic_sentiment_analysis(self, content: str) -> float:
         """Basic sentiment analysis (-1 to 1)"""
