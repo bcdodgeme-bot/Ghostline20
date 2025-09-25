@@ -214,11 +214,29 @@ class RSSFeedProcessor:
             }
     
     async def _fetch_rss_feed(self, feed_url: str) -> Optional[str]:
-        """Fetch RSS feed content"""
+        """Fetch RSS feed content with proper encoding handling"""
         try:
             async with self.session.get(feed_url) as response:
                 if response.status == 200:
-                    content = await response.text()
+                    # Read as bytes first to handle encoding properly
+                    content_bytes = await response.read()
+                    
+                    # Try to decode with proper encoding
+                    try:
+                        # First try the declared encoding from response
+                        encoding = response.charset or 'utf-8'
+                        content = content_bytes.decode(encoding)
+                    except (UnicodeDecodeError, LookupError):
+                        # Fallback to utf-8 with error handling
+                        content = content_bytes.decode('utf-8', errors='replace')
+                    
+                    # Clean up problematic characters that XML parsers dislike
+                    # Remove null bytes, backspace, and vertical tab characters
+                    content = content.replace('\x00', '').replace('\x08', '').replace('\x0b', '')
+                    
+                    # Remove other control characters except newlines, tabs, and carriage returns
+                    content = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+                    
                     return content
                 else:
                     logger.warning(f"HTTP {response.status} for {feed_url}")
@@ -313,6 +331,10 @@ class RSSFeedProcessor:
                 category=category
             )
             
+            # Clamp sentiment score to valid database range (-1.00 to 1.00)
+            sentiment_score = analysis.get('sentiment_score', 0.0)
+            sentiment_score = max(-1.0, min(1.0, float(sentiment_score)))
+            
             # Prepare item for database
             db_item = {
                 **item,
@@ -324,7 +346,7 @@ class RSSFeedProcessor:
                 'content_type': analysis.get('content_type', 'article'),
                 'relevance_score': analysis.get('relevance_score', 5.0),
                 'trend_score': analysis.get('trend_score', 5.0),
-                'sentiment_score': analysis.get('sentiment_score', 0.0),
+                'sentiment_score': sentiment_score,  # Now properly clamped
                 'ai_processed': True,
                 'processed': True
             }
