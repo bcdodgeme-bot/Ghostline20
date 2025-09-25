@@ -16,3 +16,12 @@ data_imported/chunk_ad
 data_imported/chunk_ae
 data_imported/ghostline_sources_complete.jsonl
 /test
+config/__pycache__/settings.cpython-311.pyc
+modules/core/__pycache__/auth.cpython-311.pyc
+modules/core/__pycache__/database.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/__init__.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/content_analyzer.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/database_manager.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/feed_processor.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/marketing_insights.cpython-311.pyc
+modules/integrations/rss_learning/__pycache__/router.cpython-311.pyc

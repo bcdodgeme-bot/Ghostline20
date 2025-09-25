@@ -74,11 +74,11 @@ class RSSFeedProcessor:
                 # Process all RSS feeds
                 await self.process_all_feeds()
                 
-                # Clean up old content
-                #await self.cleanup_old_content()
+                # Clean up old content (REACTIVATED - this is safe since it's DELETE only)
+                await self.cleanup_old_content()
                 
-                # Update content freshness scores
-                #await self.db.execute_function('update_rss_content_freshness')
+                # Skip this function call since it doesn't exist in the database
+                # await self.db.execute_function('update_rss_content_freshness')
                 
                 logger.info("Weekly RSS processing completed successfully")
                 
@@ -331,15 +331,25 @@ class RSSFeedProcessor:
                 category=category
             )
             
-            # Clamp sentiment score to valid database range (-1.00 to 1.00)
-            sentiment_score = analysis.get('sentiment_score', 0.0)
-            sentiment_score = max(-9.99, min(9.99, float(sentiment_score)))
+            # CRITICAL FIX: Extract raw scores from analysis first
+            raw_sentiment = analysis.get('sentiment_score', 0.0)
+            raw_trend = analysis.get('trend_score', 5.0)
+            raw_relevance = analysis.get('relevance_score', 5.0)
             
-            # ADD THESE TWO LINES HERE:
-            trend_score = max(1.0, min(9.99, analysis.get('trend_score', 5.0)))
-            relevance_score = max(1.0, min(9.99, analysis.get('relevance_score', 5.0)))
+            # Clamp ALL scores to valid DECIMAL(3,2) database range (-9.99 to 9.99)
+            sentiment_score = max(-9.99, min(9.99, float(raw_sentiment)))
+            trend_score = max(1.0, min(9.99, float(raw_trend)))      # Min 1.0 for positive scores
+            relevance_score = max(1.0, min(9.99, float(raw_relevance))) # Min 1.0 for positive scores
             
-            # Prepare item for database
+            # Log any clamping that occurs (for debugging)
+            if sentiment_score != raw_sentiment:
+                logger.warning(f"CLAMPED sentiment_score from {raw_sentiment} to {sentiment_score}")
+            if trend_score != raw_trend:
+                logger.warning(f"CLAMPED trend_score from {raw_trend} to {trend_score}")
+            if relevance_score != raw_relevance:
+                logger.warning(f"CLAMPED relevance_score from {raw_relevance} to {relevance_score}")
+            
+            # Prepare item for database with clamped scores
             db_item = {
                 **item,
                 'source_id': source_id,
@@ -348,34 +358,34 @@ class RSSFeedProcessor:
                 'marketing_insights': analysis.get('insights', ''),
                 'actionable_tips': analysis.get('actionable_tips', []),
                 'content_type': analysis.get('content_type', 'article'),
-                'relevance_score': relevance_score,  # ← CHANGE THIS
-                'trend_score': trend_score,
-                'sentiment_score': sentiment_score,  # Now properly clamped
+                'relevance_score': relevance_score,    # Use clamped value
+                'trend_score': trend_score,            # Use clamped value
+                'sentiment_score': sentiment_score,    # Use clamped value
                 'ai_processed': True,
                 'processed': True
             }
             
-            # DEBUG: Log the values being inserted - ADD THESE 3 LINES
-            print(f"DEBUG - sentiment_score: {db_item['sentiment_score']}")
-            print(f"DEBUG - trend_score: {db_item['trend_score']}")
-            print(f"DEBUG - relevance_score: {db_item['relevance_score']}")
+            # Final verification before database insertion
+            logger.info(f"Inserting scores for '{item['title'][:30]}...': Sentiment={db_item['sentiment_score']:.2f}, Trend={db_item['trend_score']:.2f}, Relevance={db_item['relevance_score']:.2f}")
             
             # Store in database
             await self.db.insert_feed_item(db_item)
             
-            logger.debug(f"Processed: {item['title'][:50]}... (Score: {db_item['relevance_score']:.1f})")
+            logger.debug(f"Successfully processed: {item['title'][:50]}...")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to process feed item: {e}")
+            logger.error(f"Failed to process feed item '{item.get('title', 'Unknown')}': {e}")
             return False
     
     async def cleanup_old_content(self, days_old: int = 120):
-        """Clean up old content to prevent database bloat"""
+        """Clean up old content to prevent database bloat - REACTIVATED"""
         try:
             deleted_count = await self.db.cleanup_old_content(days_old)
             if deleted_count > 0:
-                logger.info(f"Cleaned up {deleted_count} old RSS items")
+                logger.info(f"Cleaned up {deleted_count} old RSS items (older than {days_old} days)")
+            else:
+                logger.debug("No old content to clean up")
                 
         except Exception as e:
             logger.error(f"Content cleanup failed: {e}")
