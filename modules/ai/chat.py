@@ -803,10 +803,19 @@ async def chat_with_ai(
             logger.info(f"Processed {len(processed_files)} uploaded files")
         
         # Check for Marketing Scraper commands FIRST - NEW 9/25/25
-        if detect_scraper_command(request.message):
+        scraper_detected = detect_scraper_command(request.message)
+        logger.info(f"🔍 Scraper detection result: {scraper_detected} for message: '{request.message}'")
+
+        if scraper_detected:
             logger.info(f"🔍 Marketing scraper command detected: {request.message}")
             
-            scraper_response = await process_scraper_command(request.message, user_id)
+            try:
+                scraper_response = await process_scraper_command(request.message, user_id)
+                logger.info(f"🔍 Scraper response generated: {scraper_response[:100]}...")
+            except Exception as e:
+                logger.error(f"🔍 Scraper processing failed with exception: {e}")
+                # Fall through to regular AI if scraper fails
+                pass
             
             memory_manager = get_memory_manager(user_id)
             
