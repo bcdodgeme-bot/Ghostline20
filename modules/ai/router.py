@@ -342,8 +342,11 @@ Ready to manage your social media intelligently?"""
     async def _process_scraper_command(self, message: str, user_id: str) -> str:
         """Process marketing scraper commands"""
         print(f"🔍 SCRAPER DEBUG: Processing command: {message}")
+        print(f"🔍 SCRAPER DEBUG: MARKETING_SCRAPER_AVAILABLE = {MARKETING_SCRAPER_AVAILABLE}")  # ADD THIS LINE
+    
         
         if not MARKETING_SCRAPER_AVAILABLE:
+            print(f"🔍 SCRAPER DEBUG: Returning 'not available' message")
             return "❌ **Marketing Scraper Not Available** - Missing dependencies or configuration"
             
         try:
