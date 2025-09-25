@@ -3,6 +3,7 @@
 AI Brain Main Router for Syntax Prime V2 - SECTIONED AND UPDATED
 Ties together all AI components into FastAPI endpoints
 Date: 9/23/25, Updated: 9/24/25 - Added Weather Integration, Updated: 9/24/25 - Added Bluesky Integration
+Updated: 9/25/25 - FIXED Marketing Scraper Integration Order
 """
 
 #-- Section 1: Core Imports and Dependencies - 9/23/25
@@ -38,15 +39,14 @@ except ImportError:
     logger.warning("RSS Learning integration not available")
 
 #-- NEW Section 1b: Marketing Scraper Integration Import - added 9/25/25
-# ADD THIS after the RSS Learning import (around line 30):
-
 try:
-    from ..integrations.marketing_scraper.database_manager import ScrapedContentDB
+    from ..integrations.marketing_scraper.scraper_client import MarketingScraperClient
+    from ..integrations.marketing_scraper.content_analyzer import ContentAnalyzer
+    from ..integrations.marketing_scraper.database_manager import ScrapedContentDatabase
     MARKETING_SCRAPER_AVAILABLE = True
 except ImportError:
     MARKETING_SCRAPER_AVAILABLE = False
     logger.warning("Marketing Scraper integration not available")
-
 
 #-- Section 2: Pydantic Request/Response Models - 9/23/25
 class ChatRequest(BaseModel):
@@ -83,10 +83,11 @@ class FeedbackResponse(BaseModel):
 #-- Section 3: Router Setup and Configuration - 9/23/25
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-#-- Section 4: AI Brain Orchestrator Class - Updated 9/24/25
+#-- Section 4: AI Brain Orchestrator Class - Updated 9/25/25 with FIXED Command Order
 class AIBrainOrchestrator:
     """
     Main orchestrator that coordinates all AI brain components
+    FIXED: Proper command detection order
     """
     
     def __init__(self):
@@ -100,10 +101,9 @@ class AIBrainOrchestrator:
         """Detect if user is asking about weather"""
         print(f"🌦️ WEATHER DEBUG: Checking message '{message}'")
         weather_keywords = [
-            "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
-            "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
-            "hot", "cold", "warm", "storm", "thunderstorm", "snow",
-            "precipitation", "conditions", "outside", "today's weather"
+            "weather", "temperature", "forecast", "rain", "snow", "sunny",
+            "cloudy", "storm", "wind", "humidity", "barometric pressure",
+            "headache weather", "pressure change", "uv index"
         ]
         message_lower = message.lower()
         result = any(keyword in message_lower for keyword in weather_keywords)
@@ -161,7 +161,7 @@ Please respond naturally about the weather using this current data. Focus on hea
 """
         return weather_context
 
-#-- NEW Section 5a: Bluesky Command Detection - Added 9/24/25
+#-- Section 5a: Bluesky Command Detection - Added 9/24/25
     def _detect_bluesky_command(self, message: str) -> bool:
         """Detect if user is issuing a Bluesky command"""
         bluesky_keywords = [
@@ -209,7 +209,7 @@ I'm analyzing your timelines now. Check back in a few minutes with `bluesky oppo
                 opportunities = await approval_system.get_pending_approvals(limit=5)
                 
                 if not opportunities:
-                    return "📭 **No pending opportunities** found. Try `bluesky scan` to check for new content!"
+                    return "🔭 **No pending opportunities** found. Try `bluesky scan` to check for new content!"
                 
                 response_lines = [f"🎯 **{len(opportunities)} Engagement Opportunities**\n"]
                 
@@ -273,7 +273,226 @@ Ready to manage your social media intelligently?"""
             logger.error(f"Bluesky command processing failed: {e}")
             return f"❌ **Bluesky Error:** {str(e)}"
 
-#-- NEW Section 5c: RSS Learning Integration Methods - Added 9/25/25
+#-- NEW Section 5b: Marketing Scraper Command Detection - Added 9/25/25
+    def _detect_scraper_command(self, message: str) -> bool:
+        """Detect marketing scraper commands"""
+        print(f"🔍 SCRAPER DEBUG: Checking message '{message}'")
+        scraper_keywords = [
+            "scrape", "scraper", "analyze website", "competitor analysis", "scrape url",
+            "scrape site", "website analysis", "marketing analysis", "content analysis",
+            "scrape history", "scrape insights", "scrape data"
+        ]
+        message_lower = message.lower()
+        result = any(keyword in message_lower for keyword in scraper_keywords)
+        print(f"🔍 SCRAPER DEBUG: Detection result = {result}")
+        return result
+
+    def _extract_url_from_message(self, message: str) -> str:
+        """Extract URL from scrape command message"""
+        import re
+        
+        # Look for URLs in the message
+        url_pattern = r'https?://[^\s<>"{\}|\\^`\[\]]+'
+        urls = re.findall(url_pattern, message)
+        
+        if urls:
+            return urls[0]  # Return first URL found
+        
+        # If no full URL, look for domain patterns
+        domain_pattern = r'(?:^|\s)([a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|co\.uk))'
+        domains = re.findall(domain_pattern, message)
+        
+        if domains:
+            return f"https://{domains[0]}"
+        
+        return None
+
+    async def _process_scraper_command(self, message: str, user_id: str) -> str:
+        """Process marketing scraper commands"""
+        print(f"🔍 SCRAPER DEBUG: Processing command: {message}")
+        
+        if not MARKETING_SCRAPER_AVAILABLE:
+            return "❌ **Marketing Scraper Not Available** - Missing dependencies or configuration"
+            
+        try:
+            message_lower = message.lower()
+            
+            if 'scrape history' in message_lower:
+                # Get scrape history
+                db = ScrapedContentDatabase()
+                history = await db.get_user_scrape_history(user_id=user_id, limit=10)
+                
+                if not history:
+                    return """🔍 **Marketing Scraper History**
+
+No scraping history found. Start analyzing competitors with:
+• `scrape https://example.com` - Analyze any website
+• `scrape insights` - Get analysis from previous scrapes"""
+                
+                response_parts = ["🔍 **Recent Scraping History**\n"]
+                
+                for i, item in enumerate(history, 1):
+                    domain = item.get('domain', 'Unknown')
+                    scraped_at = item.get('created_at', 'Unknown time')
+                    word_count = item.get('word_count', 0)
+                    
+                    response_parts.append(f"**{i}. {domain}**")
+                    response_parts.append(f"   📅 Scraped: {scraped_at}")
+                    response_parts.append(f"   📝 Words: {word_count}")
+                    response_parts.append("")
+                
+                response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
+                return "\n".join(response_parts)
+            
+            elif 'scrape insights' in message_lower:
+                # Get competitive insights from all scraped content
+                db = ScrapedContentDatabase()
+                
+                # Search for recent content using empty topic to get all
+                recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
+                
+                if not recent_content:
+                    return """🔍 **Marketing Scraper Insights**
+
+No scraped content available for analysis. 
+
+Start building your competitive intelligence with:
+• `scrape https://competitor.com` - Analyze competitor sites
+• `scrape https://industry-blog.com` - Analyze industry content"""
+                
+                # Generate competitive insights summary
+                response_parts = [
+                    "🧠 **Competitive Intelligence Report**",
+                    f"📊 Based on {len(recent_content)} recently analyzed websites",
+                    ""
+                ]
+                
+                # Show key insights from stored content
+                for i, content in enumerate(recent_content[:5], 1):
+                    insights = content.get('key_insights', {})
+                    response_parts.append(f"**{i}. {content['domain']}**")
+                    if insights.get('value_proposition'):
+                        response_parts.append(f"   🎯 Value Prop: {insights['value_proposition'][:100]}...")
+                    if insights.get('content_strategy'):
+                        response_parts.append(f"   📝 Strategy: {insights['content_strategy'][:100]}...")
+                    response_parts.append("")
+                
+                response_parts.append("🔍 Use `scrape https://newsite.com` to add more competitive intelligence!")
+                return "\n".join(response_parts)
+            
+            else:
+                # Extract URL and scrape content
+                url = self._extract_url_from_message(message)
+                
+                if not url:
+                    return """🔍 **Marketing Scraper Commands**
+
+**Usage:**
+• `scrape https://example.com` - Analyze any website for marketing insights
+• `scrape history` - View your scraping history  
+• `scrape insights` - Get competitive intelligence report
+
+**Examples:**
+• `scrape https://hubspot.com/blog` - Analyze HubSpot's content strategy
+• `scrape https://competitor.com` - Competitive analysis
+• `scrape https://industry-news.com` - Industry trend analysis
+
+Ready to analyze your competition? 🕵️"""
+                
+                print(f"🔍 SCRAPER DEBUG: Extracted URL: {url}")
+                
+                # Perform the scrape
+                scraper = MarketingScraperClient()
+                analyzer = ContentAnalyzer()
+                db = ScrapedContentDatabase()
+                
+                try:
+                    # Scrape the website
+                    print(f"🔍 SCRAPER DEBUG: Starting scrape for {url}")
+                    scraped_data = await scraper.scrape_website(url)
+                    print(f"🔍 SCRAPER DEBUG: Scrape completed with status: {scraped_data.get('scrape_status')}")
+                    
+                    if scraped_data.get('scrape_status') != 'completed':
+                        return f"""❌ **Scraping Failed**
+                        
+Unable to analyze {url}
+Error: {scraped_data.get('error_message', 'Unknown error')}
+
+Please verify the URL is accessible and try again."""
+                    
+                    # Analyze the content
+                    print(f"🔍 SCRAPER DEBUG: Starting AI analysis")
+                    analysis = await analyzer.analyze_scraped_content(scraped_data)
+                    print(f"🔍 SCRAPER DEBUG: Analysis completed with status: {analysis.get('analysis_status')}")
+                    
+                    # Store in database
+                    print(f"🔍 SCRAPER DEBUG: Storing in database")
+                    content_id = await db.store_scraped_content(
+                        user_id=user_id,
+                        scraped_data=scraped_data,
+                        analysis_results=analysis
+                    )
+                    print(f"🔍 SCRAPER DEBUG: Stored with ID: {content_id}")
+                    
+                    # Generate response
+                    domain = scraped_data.get('domain', url)
+                    word_count = scraped_data.get('word_count', 0)
+                    
+                    response_parts = [
+                        f"✅ **Successfully Analyzed: {domain}**",
+                        f"📄 Content extracted: {word_count:,} words",
+                        ""
+                    ]
+                    
+                    if analysis.get('competitive_insights'):
+                        insights = analysis.get('competitive_insights', {})
+                        if insights.get('value_proposition'):
+                            response_parts.extend([
+                                "**🎯 Value Proposition:**",
+                                f"• {insights['value_proposition'][:200]}...",
+                                ""
+                            ])
+                    
+                    if analysis.get('marketing_angles'):
+                        marketing = analysis.get('marketing_angles', {})
+                        if marketing.get('content_strategy'):
+                            response_parts.extend([
+                                "**📝 Content Strategy:**",
+                                f"• {marketing['content_strategy'][:200]}...",
+                                ""
+                            ])
+                    
+                    if analysis.get('cta_analysis'):
+                        cta = analysis.get('cta_analysis', {})
+                        if cta.get('cta_placement_strategy'):
+                            response_parts.extend([
+                                "**🔥 CTA Strategy:**",
+                                f"• {cta['cta_placement_strategy'][:200]}...",
+                                ""
+                            ])
+                    
+                    response_parts.extend([
+                        f"💾 **Stored for Analysis** - Use `scrape insights` for competitive intelligence",
+                        f"📈 **View History** - Use `scrape history` to see all analyzed sites"
+                    ])
+                    
+                    return "\n".join(response_parts)
+                    
+                except Exception as e:
+                    logger.error(f"Scraper processing failed: {e}")
+                    print(f"🔍 SCRAPER DEBUG: Processing failed: {e}")
+                    return f"""❌ **Analysis Failed**
+                    
+Error analyzing {url}: {str(e)}
+
+Please try again or contact support if the issue persists."""
+        
+        except Exception as e:
+            logger.error(f"Scraper command processing failed: {e}")
+            print(f"🔍 SCRAPER DEBUG: Command processing failed: {e}")
+            return f"❌ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
+
+#-- Section 5c: RSS Learning Integration Methods - Added 9/25/25
     def _detect_marketing_writing_request(self, message: str) -> tuple[bool, str]:
         """Detect marketing writing requests and determine content type"""
         message_lower = message.lower()
@@ -379,20 +598,19 @@ Ready to manage your social media intelligently?"""
             logger.error(f"RSS marketing context failed: {e}")
             return ""
 
-
-#-- Section 6: Chat Message Processing - Updated 9/24/25 with Bluesky Integration
+#-- Section 6: Chat Message Processing - Updated 9/25/25 with FIXED Command Order
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
         """
-        Process a chat message through the complete AI brain pipeline with weather and Bluesky integration
+        Process a chat message through the complete AI brain pipeline
+        FIXED: Proper command detection order
         """
         user_id = user_id or self.default_user_id
         start_time = time.time()
         
         print(f"🚀 DEBUG: process_chat_message called with message: '{chat_request.message}'")
         
-    
         # Get components
         memory_manager = get_memory_manager(user_id)
         knowledge_engine = get_knowledge_engine()
@@ -414,7 +632,9 @@ Ready to manage your social media intelligently?"""
         )
         
         try:
-            # NEW: Check for Bluesky commands first - Added 9/24/25
+            # FIXED COMMAND ORDER: Check commands in correct priority order
+            
+            # 1. Check for Bluesky commands first
             if self._detect_bluesky_command(chat_request.message):
                 print(f"🔵 BLUESKY DEBUG: Bluesky command detected")
                 
@@ -441,16 +661,11 @@ Ready to manage your social media intelligently?"""
                     conversation_context={
                         'thread_id': thread_id,
                         'command_type': 'bluesky',
-                        'message_count': 2  # User message + assistant response
+                        'message_count': 2
                     }
                 )
             
-            # Get conversation context for AI
-            conversation_messages, context_info = await memory_manager.get_context_for_ai(
-                thread_id, max_tokens=200000  # Leave room for knowledge and response
-            )
-            
-            # Check for weather requests - Added 9/24/25
+            # 2. Check for weather requests second
             weather_context = None
             weather_detected = self._detect_weather_request(chat_request.message)
             if weather_detected:
@@ -472,6 +687,53 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
 """
                     print(f"🌦️ WEATHER DEBUG: Weather service returned unexpected response")
             
+            # 3. FIXED: Check for Marketing Scraper commands BEFORE regular AI processing
+            if self._detect_scraper_command(chat_request.message):
+                print(f"🔍 SCRAPER DEBUG: Marketing scraper command detected")
+                
+                try:
+                    scraper_response = await self._process_scraper_command(chat_request.message, user_id)
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    
+                    # Store scraper response
+                    ai_message_id = await memory_manager.add_message(
+                        thread_id=thread_id,
+                        role='assistant',
+                        content=scraper_response,
+                        model_used='marketing_scraper',
+                        response_time_ms=response_time_ms
+                    )
+                    
+                    print(f"🔍 SCRAPER DEBUG: Response generated and stored")
+                    
+                    return ChatResponse(
+                        response=scraper_response,
+                        thread_id=thread_id,
+                        message_id=ai_message_id,
+                        personality_id="marketing_scraper",
+                        model_used="marketing_scraper",
+                        response_time_ms=response_time_ms,
+                        knowledge_sources=[],
+                        conversation_context={
+                            'thread_id': thread_id,
+                            'command_type': 'marketing_scraper',
+                            'message_count': 2
+                        }
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"🔍 Scraper processing failed with exception: {e}")
+                    print(f"🔍 SCRAPER DEBUG: Exception during processing: {e}")
+                    # Fall through to regular AI processing on scraper failure
+            
+            # 4. Regular AI processing (only if no special commands detected)
+            print(f"🤖 DEBUG: Proceeding with regular AI processing")
+            
+            # Get conversation context for AI
+            conversation_messages, context_info = await memory_manager.get_context_for_ai(
+                thread_id, max_tokens=200000  # Leave room for knowledge and response
+            )
+            
             # Search knowledge base if requested
             knowledge_sources = []
             if chat_request.include_knowledge:
@@ -489,6 +751,13 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
                 knowledge_context=knowledge_sources
             )
             
+            # Get RSS marketing context for writing assistance
+            rss_context = None
+            if RSS_LEARNING_AVAILABLE:
+                rss_context = await self._get_rss_marketing_context(chat_request.message)
+                if rss_context:
+                    print(f"📰 RSS marketing context added for writing assistance")
+            
             # Build messages for AI
             ai_messages = [
                 {"role": "system", "content": system_prompt}
@@ -501,6 +770,14 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
                     "content": weather_context
                 })
                 print(f"🌦️ WEATHER DEBUG: Weather context added to AI messages")
+            
+            # Add RSS marketing context if available
+            if rss_context:
+                ai_messages.append({
+                    "role": "system",
+                    "content": rss_context
+                })
+                print(f"📊 RSS context added to AI messages")
             
             # Add knowledge context if available
             if knowledge_sources:
@@ -574,7 +851,9 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
             )
             
             logger.info(f"Chat processed: {response_time_ms}ms, model: {model_used}, "
-                       f"personality: {chat_request.personality_id}, weather: {'Yes' if weather_detected else 'No'}")
+                       f"personality: {chat_request.personality_id}, "
+                       f"weather: {'Yes' if weather_detected else 'No'}, "
+                       f"rss: {'Yes' if rss_context else 'No'}")
             
             return chat_response
             
@@ -591,33 +870,6 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
             )
             
             raise HTTPException(status_code=500, detail=str(e))
-
-# Update Section 6: Chat Message Processing - Add RSS context integration
-# Find the section that processes chat messages and add RSS integration after Bluesky processing:
-
-            # NEW: Get RSS marketing context for writing assistance - Added 9/25/25
-            rss_context = None
-            if RSS_LEARNING_AVAILABLE:
-                rss_context = await self._get_rss_marketing_context(chat_request.message)
-                if rss_context:
-                    print(f"📰 RSS marketing context added for writing assistance")
-
-            # Then in the AI messages building section, add RSS context after knowledge context:
-
-            # Add RSS marketing context if available
-            if rss_context:
-                ai_messages.append({
-                    "role": "system",
-                    "content": rss_context
-                })
-                print(f"📊 RSS context added to AI messages")
-
-            # Update the final logging to include RSS info:
-            logger.info(f"Chat processed: {response_time_ms}ms, model: {model_used}, "
-                       f"personality: {chat_request.personality_id}, "
-                       f"weather: {'Yes' if weather_detected else 'No'}, "
-                       f"rss: {'Yes' if rss_context else 'No'}")
-
 
 #-- Section 7: AI Response Helper Methods - 9/23/25
     def _build_knowledge_context(self, knowledge_sources: List[Dict]) -> str:
@@ -750,7 +1002,7 @@ orchestrator = AIBrainOrchestrator()
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(chat_request: ChatRequest):
     """
-    Main chat endpoint - processes message through complete AI brain with weather and Bluesky integration
+    Main chat endpoint - processes message through complete AI brain with FIXED command order
     """
     return await orchestrator.process_chat_message(chat_request)
 
@@ -913,8 +1165,10 @@ async def get_ai_stats():
                 "memory_active": True,
                 "knowledge_engine_active": True,
                 "learning_active": feedback_summary.get('learning_active', False),
-                "bluesky_integration_active": True,  # NEW
-                "weather_integration_active": True,  # EXISTING
+                "bluesky_integration_active": True,
+                "weather_integration_active": True,
+                "marketing_scraper_integration_active": MARKETING_SCRAPER_AVAILABLE,  # NEW
+                "rss_learning_integration_active": RSS_LEARNING_AVAILABLE,
                 "default_user_id": orchestrator.default_user_id
             }
         }
@@ -967,9 +1221,7 @@ async def shutdown_ai_brain():
     
     logger.info("AI brain shutdown complete")
 
-#-- Section 15: Module Information and Health Check Functions - Updated 9/24/25
-# Update Section 15: Module Information and Health Check Functions
-
+#-- Section 15: Module Information and Health Check Functions - Updated 9/25/25 with Marketing Scraper
 def get_integration_info():
     """Get information about the AI brain integration"""
     return {
@@ -984,7 +1236,8 @@ def get_integration_info():
             "Feedback Processor",
             "Weather Integration",
             "Bluesky Integration",
-            "RSS Learning Integration"  # NEW
+            "RSS Learning Integration",
+            "Marketing Scraper Integration"  # NEW
         ],
         "endpoints": {
             "chat": "/ai/chat",
@@ -1005,7 +1258,8 @@ def get_integration_info():
             "UUID-based user management",
             "Weather integration with health monitoring",
             "Bluesky social media command processing",
-            "RSS learning integration for marketing writing assistance"  # NEW
+            "RSS learning integration for marketing writing assistance",
+            "Marketing scraper for competitive analysis"  # NEW
         ],
         "default_user_id": orchestrator.default_user_id
     }
@@ -1031,10 +1285,10 @@ def check_module_health():
         os.getenv("BLUESKY_DAMN_IT_CARL_PASSWORD")
     ])
     
-    # NEW: RSS learning integration is optional - added 9/25/25
+    # RSS learning integration is optional
     rss_learning_available = RSS_LEARNING_AVAILABLE and bool(os.getenv("DATABASE_URL"))
     
-    # NEW: Marketing scraper integration is optional - added 9/25/25
+    # Marketing scraper integration is optional - NEW
     marketing_scraper_available = MARKETING_SCRAPER_AVAILABLE and bool(os.getenv("DATABASE_URL"))
     
     return {
@@ -1044,5 +1298,6 @@ def check_module_health():
         "default_user_id": orchestrator.default_user_id,
         "weather_integration_available": weather_available,
         "bluesky_integration_available": bluesky_available,
-        "rss_learning_integration_available": rss_learning_available  # NEW
+        "rss_learning_integration_available": rss_learning_available,
+        "marketing_scraper_integration_available": marketing_scraper_available  # NEW
     }
