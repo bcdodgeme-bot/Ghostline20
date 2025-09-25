@@ -108,12 +108,23 @@ class RSSDatabase:
         
         # NUCLEAR SAFETY: Clamp ALL numeric values to DECIMAL(3,2) range
         if 'sentiment_score' in item_data:
+            old_val = item_data['sentiment_score']
             item_data['sentiment_score'] = max(-9.99, min(9.99, float(item_data['sentiment_score'] or 0)))
+            if old_val != item_data['sentiment_score']:
+                logger.warning(f"CLAMPED sentiment_score from {old_val} to {item_data['sentiment_score']}")
+                
         if 'trend_score' in item_data:
+            old_val = item_data['trend_score']
             item_data['trend_score'] = max(-9.99, min(9.99, float(item_data['trend_score'] or 5.0)))
+            if old_val != item_data['trend_score']:
+                logger.warning(f"CLAMPED trend_score from {old_val} to {item_data['trend_score']}")
+                
         if 'relevance_score' in item_data:
+            old_val = item_data['relevance_score']
             item_data['relevance_score'] = max(-9.99, min(9.99, float(item_data['relevance_score'] or 5.0)))
-        
+            if old_val != item_data['relevance_score']:
+                logger.warning(f"CLAMPED relevance_score from {old_val} to {item_data['relevance_score']}")
+                
         query = '''
             INSERT INTO rss_feed_entries (
                 source_id, title, description, link, pub_date, guid,
