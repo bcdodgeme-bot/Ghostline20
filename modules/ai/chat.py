@@ -42,7 +42,7 @@ from modules.integrations.bluesky.approval_system import get_approval_system
 from modules.integrations.bluesky.notification_manager import get_notification_manager
 
 #-- NEW Section 2b: Marketing Scraper Integration Import - 9/25/25
-from modules.integrations.marketing_scraper.scraper_client import ScraperClient
+from modules.integrations.marketing_scraper.scraper_client import MarketingScraperClient
 from modules.integrations.marketing_scraper.content_analyzer import MarketingContentAnalyzer
 from modules.integrations.marketing_scraper.database_manager import ScrapedContentDB
 
@@ -549,7 +549,7 @@ Start building your competitive intelligence with:
 Ready to analyze your competition? 🕵️"""
             
             # Perform the scrape
-            scraper = ScraperClient()
+            scraper = MarketingScraperClient()
             analyzer = MarketingContentAnalyzer()
             db = ScrapedContentDB()
             
