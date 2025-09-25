@@ -39,14 +39,46 @@ except ImportError:
     logger.warning("RSS Learning integration not available")
 
 #-- NEW Section 1b: Marketing Scraper Integration Import - added 9/25/25
+#-- NEW Section 1b: Marketing Scraper Integration Import - added 9/25/25
+# TEMPORARY DEBUG - Remove after fixing
+print("🔍 DEBUG: Testing marketing scraper imports...")
+import os
+import sys
+print(f"🔍 DEBUG: Current working directory: {os.getcwd()}")
+
+# Test each import individually
 try:
+    print("🔍 DEBUG: Trying scraper_client import...")
     from ..integrations.marketing_scraper.scraper_client import MarketingScraperClient
+    print("✅ MarketingScraperClient imported successfully")
+    scraper_client_ok = True
+except Exception as e:
+    print(f"❌ MarketingScraperClient import failed: {e}")
+    import traceback
+    traceback.print_exc()
+    scraper_client_ok = False
+
+try:
+    print("🔍 DEBUG: Trying content_analyzer import...")
     from ..integrations.marketing_scraper.content_analyzer import ContentAnalyzer
+    print("✅ ContentAnalyzer imported successfully")
+    content_analyzer_ok = True
+except Exception as e:
+    print(f"❌ ContentAnalyzer import failed: {e}")
+    content_analyzer_ok = False
+
+try:
+    print("🔍 DEBUG: Trying database_manager import...")
     from ..integrations.marketing_scraper.database_manager import ScrapedContentDatabase
-    MARKETING_SCRAPER_AVAILABLE = True
-except ImportError:
-    MARKETING_SCRAPER_AVAILABLE = False
-    logger.warning("Marketing Scraper integration not available")
+    print("✅ ScrapedContentDatabase imported successfully")
+    database_manager_ok = True
+except Exception as e:
+    print(f"❌ ScrapedContentDatabase import failed: {e}")
+    database_manager_ok = False
+
+MARKETING_SCRAPER_AVAILABLE = scraper_client_ok and content_analyzer_ok and database_manager_ok
+print(f"🔍 DEBUG: MARKETING_SCRAPER_AVAILABLE = {MARKETING_SCRAPER_AVAILABLE}")
+# END TEMPORARY DEBUG
 
 #-- Section 2: Pydantic Request/Response Models - 9/23/25
 class ChatRequest(BaseModel):
