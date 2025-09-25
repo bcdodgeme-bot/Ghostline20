@@ -54,3 +54,18 @@ requests>=2.31.0
 httpx
 
 feedparser>=6.0.0
+
+# ADD THESE TO requirements.txt for Marketing Scraper Integration
+
+# Web scraping and HTML parsing
+
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Text processing and content extraction  
+
+charset-normalizer>=3.3.0
+
+# URL and HTTP utilities (likely already installed)
+urllib3>=2.0.0
+

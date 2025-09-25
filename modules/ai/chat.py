@@ -1,6 +1,6 @@
 # modules/ai/chat.py
-# AI Chat Router for Syntax Prime V2 - COMPLETE REWRITE WITH RSS LEARNING
-# Clean, sectioned chat endpoint with file upload, weather, Bluesky, and RSS Learning integration
+# AI Chat Router for Syntax Prime V2 - COMPLETE REWRITE WITH RSS LEARNING + MARKETING SCRAPER
+# Clean, sectioned chat endpoint with file upload, weather, Bluesky, RSS Learning, and Marketing Scraper integration
 # Date: 9/25/25
 
 #-- Section 1: Core Imports - 9/25/25
@@ -40,6 +40,11 @@ from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_
 from modules.integrations.bluesky.engagement_analyzer import get_engagement_analyzer
 from modules.integrations.bluesky.approval_system import get_approval_system
 from modules.integrations.bluesky.notification_manager import get_notification_manager
+
+#-- NEW Section 2b: Marketing Scraper Integration Import - 9/25/25
+from modules.integrations.marketing_scraper.scraper_client import ScraperClient
+from modules.integrations.marketing_scraper.content_analyzer import MarketingContentAnalyzer
+from modules.integrations.marketing_scraper.database_manager import ScrapedContentDB
 
 #-- Section 3: Request/Response Models - 9/25/25
 class ChatMessage(BaseModel):
@@ -106,153 +111,134 @@ async def get_current_user_id() -> str:
 async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
     """Get current weather data for the user"""
     try:
-        base_url = os.getenv("RAILWAY_STATIC_URL", "http://localhost:8000")
-        params = {"user_id": user_id}
-        if location:
-            params["location"] = location
+        base_url = "https://api.tomorrow.io/v4/weather/realtime"
+        api_key = os.getenv("TOMORROW_IO_API_KEY")
+        
+        if not api_key:
+            return {"error": "Weather API key not configured"}
             
+        # Default location if not provided
+        location = location or "27519"  # Default to Cary, NC
+        
+        params = {
+            "location": location,
+            "apikey": api_key,
+            "units": "imperial"
+        }
+        
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{base_url}/integrations/weather/current",
-                params=params,
-                timeout=30
-            )
+            response = await client.get(base_url, params=params)
             
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                weather_data = data.get('data', {}).get('values', {})
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "location": location,
+                        "temperature_f": weather_data.get('temperature', 'N/A'),
+                        "humidity": weather_data.get('humidity', 'N/A'),
+                        "wind_speed": weather_data.get('windSpeed', 'N/A'),
+                        "weather_code": weather_data.get('weatherCode', 'N/A'),
+                        "pressure": weather_data.get('pressureSeaLevel', 'N/A'),
+                        "uv_index": weather_data.get('uvIndex', 'N/A'),
+                        "visibility": weather_data.get('visibility', 'N/A')
+                    }
+                }
             else:
-                logger.warning(f"Weather API returned {response.status_code}")
-                return {"error": f"Weather API returned {response.status_code}"}
+                return {"error": f"Weather API returned status {response.status_code}"}
                 
     except Exception as e:
-        logger.error(f"Weather fetch error: {e}")
-        return {"error": f"Failed to get weather: {str(e)}"}
+        logger.error(f"Weather API error: {e}")
+        return {"error": str(e)}
 
 def detect_weather_request(message: str) -> bool:
-    """Detect if user is asking about weather"""
+    """Detect weather-related requests"""
     weather_keywords = [
-        "weather", "temperature", "forecast", "rain", "sunny", "cloudy",
-        "pressure", "headache", "uv", "sun", "humidity", "wind", "barometric",
-        "hot", "cold", "warm", "cool", "storm", "thunderstorm", "snow",
-        "precipitation", "conditions", "outside", "today's weather"
+        "weather", "temperature", "forecast", "rain", "snow", "sunny",
+        "cloudy", "storm", "wind", "humidity", "barometric pressure",
+        "headache weather", "pressure change", "uv index"
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in weather_keywords)
 
-#-- Section 5a: Bluesky Command Processing - 9/24/25
+#-- Section 5a: Bluesky Integration Functions - 9/24/25
 def detect_bluesky_command(message: str) -> bool:
-    """Detect if user is issuing a Bluesky command"""
+    """Detect Bluesky management commands"""
     bluesky_keywords = [
-        "bluesky", "blue sky", "social media", "engagement", "opportunities",
-        "post to bluesky", "scan bluesky", "bluesky scan", "bluesky opportunities",
-        "bluesky high priority", "bluesky approve", "bluesky health",
-        "bluesky accounts", "bluesky status", "social assistant"
+        "bluesky scan", "bluesky opportunities", "bluesky accounts",
+        "bluesky health", "bluesky status", "bluesky", "social media opportunities"
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in bluesky_keywords)
 
 async def process_bluesky_command(message: str, user_id: str) -> str:
-    """Process Bluesky-related commands and return formatted response"""
+    """Process Bluesky-related commands"""
     try:
-        multi_client = get_bluesky_multi_client()
-        engagement_analyzer = get_engagement_analyzer()
-        approval_system = get_approval_system()
-        notification_manager = get_notification_manager()
-        
         message_lower = message.lower()
         
-        await notification_manager.track_user_activity(user_id, 'chat_interaction')
+        if 'scan' in message_lower:
+            await trigger_background_scan(user_id)
+            return """🔵 **Bluesky Account Scan Initiated**
+
+✅ Scanning all configured accounts for engagement opportunities...
+🔍 Analyzing posts from the last 24 hours
+🤖 AI-powered engagement suggestions incoming
+📝 Draft posts will be generated for approval
+
+Results will be available in a few moments. Use `bluesky opportunities` to view suggestions."""
         
-        if any(phrase in message_lower for phrase in ['bluesky scan', 'scan bluesky', 'scan all accounts']):
-            import asyncio
-            asyncio.create_task(trigger_background_scan(user_id))
+        elif 'opportunities' in message_lower or 'suggestion' in message_lower:
+            approval_system = get_approval_system()
+            pending_items = await approval_system.get_pending_approvals(limit=5)
             
-            accounts_status = multi_client.get_all_accounts_status()
-            configured_count = len([a for a in accounts_status.values() if a.get('password')])
-            authenticated_count = len([a for a in accounts_status.values() if a.get('authenticated')])
+            if not pending_items:
+                return """🔵 **No Current Opportunities**
+
+No engagement opportunities found at this time.
+• Use `bluesky scan` to search for new opportunities
+• Check back in a few hours for automatic updates"""
             
-            return f"""🔵 **Bluesky Scan Initiated**
-
-📱 **Accounts Status:** {authenticated_count}/{configured_count} accounts authenticated
-⏳ **Scanning:** All authenticated accounts for engagement opportunities
-🕐 **Process Time:** ~2-3 minutes for complete analysis
-
-**What I'm looking for:**
-• High keyword matches (80%+) across your 5 accounts
-• Conversation starters and engagement opportunities  
-• Cross-account collaboration possibilities
-• Trending topics relevant to your interests
-
-Check back in a few minutes with `bluesky opportunities` to see what I found!"""
-
-        elif any(phrase in message_lower for phrase in ['bluesky opportunities', 'bluesky suggestions', 'show opportunities']):
-            opportunities = await approval_system.get_pending_approvals(limit=10)
+            response_parts = ["🔵 **Current Bluesky Engagement Opportunities**\n"]
             
-            if not opportunities:
-                return f"""🔭 **No Pending Opportunities**
-
-Looks like your queue is empty! This could mean:
-• No recent high-relevance posts found in timelines
-• All opportunities have been reviewed
-• Accounts need re-scanning (every 3.5 hours automatically)
-
-Try: `bluesky scan` to force a fresh scan across all accounts."""
-            
-            response_lines = [f"🎯 **{len(opportunities)} Engagement Opportunities Found**\n"]
-            
-            for i, opp in enumerate(opportunities[:5], 1):
-                account_name = opp['account_id'].replace('_', ' ').title()
-                score = int(opp.get('keyword_score', 0) * 100)
-                priority = opp['priority'].title()
+            for i, item in enumerate(pending_items, 1):
+                account_info = item.get('account_info', {})
+                opportunity = item.get('opportunity_analysis', {})
                 
-                response_lines.append(f"**{i}. {account_name}** ({priority} Priority • {score}% match)")
-                response_lines.append(f"   📱 **Post:** {opp['original_post'][:150]}...")
-                response_lines.append(f"   💡 **Draft:** {opp['draft_text']}")
-                response_lines.append(f"   🎯 **Action:** {opp['engagement_type'].replace('_', ' ').title()}")
-                response_lines.append("")
+                response_parts.append(f"""**{i}. {account_info.get('username', 'Unknown Account')}**
+📊 Engagement Score: {opportunity.get('engagement_potential', 0):.0%}
+💡 Why: {opportunity.get('opportunity_reason', 'High engagement potential')}
+⏰ Post Time: {opportunity.get('post_time', 'Recently')}
+
+""")
             
-            if len(opportunities) > 5:
-                response_lines.append(f"... and {len(opportunities) - 5} more opportunities available.")
+            response_parts.append("Use the Bluesky dashboard to review and approve these opportunities.")
+            return "\n".join(response_parts)
+        
+        elif 'accounts' in message_lower or 'status' in message_lower:
+            multi_client = get_bluesky_multi_client()
+            account_statuses = multi_client.get_all_account_status()
+            configured_count = len([s for s in account_statuses.values() if s.get('configured', False)])
             
-            response_lines.extend([
-                "\n**Quick Actions:**",
-                "• `bluesky approve 1` - Approve first opportunity",
-                "• `bluesky high priority` - Show only high-priority items",
-                "• `bluesky accounts` - Check account status"
-            ])
+            response_parts = ["🔵 **Bluesky Account Status**\n"]
             
-            return "\n".join(response_lines)
-            
-        elif any(phrase in message_lower for phrase in ['bluesky accounts', 'account status', 'bluesky status']):
-            accounts_status = multi_client.get_all_accounts_status()
-            
-            response_lines = ["🔵 **Bluesky Accounts Status**\n"]
-            
-            for account_id, info in accounts_status.items():
-                account_name = account_id.replace('_', ' ').title()
-                status_emoji = "✅" if info.get('authenticated') else "❌"
-                keyword_count = info.get('keyword_count', 0)
-                personality = info.get('personality', 'unknown').title()
+            for account_id, status in account_statuses.items():
+                emoji = "✅" if status.get('authenticated', False) else "❌"
+                username = status.get('username', f'Account {account_id}')
+                last_scan = status.get('last_scan', 'Never')
                 
-                response_lines.append(f"{status_emoji} **{account_name}**")
-                response_lines.append(f"   🔑 Keywords: {keyword_count}")
-                response_lines.append(f"   🎭 Personality: {personality}")
-                response_lines.append(f"   🤖 AI Posting: {'Yes' if info.get('ai_posting_allowed') else 'Human-only'}")
-                if info.get('last_scan'):
-                    response_lines.append(f"   🕐 Last Scan: {info['last_scan'].strftime('%H:%M %m/%d')}")
-                response_lines.append("")
+                response_parts.append(f"{emoji} **{username}**")
+                response_parts.append(f"   Last scan: {last_scan}")
+                response_parts.append("")
             
-            return "\n".join(response_lines)
+            response_parts.append(f"📊 **Summary:** {configured_count}/5 accounts configured and ready")
+            return "\n".join(response_parts)
         
         else:
-            accounts_status = multi_client.get_all_accounts_status()
-            configured_count = len([a for a in accounts_status.values() if a.get('password')])
-            
-            return f"""🔵 **Bluesky Social Media Assistant**
+            return f"""🔵 **Bluesky Social Media Intelligence**
 
-Your 5-account AI social media management system is ready!
-
-📱 **Configured Accounts:** {configured_count}/5
+📱 **Configured Accounts:** {len(account_statuses)}/5
 🤖 **Features:** Keyword intelligence, engagement suggestions, approval workflow
 ⏰ **Auto-Scan:** Every 3.5 hours across all accounts
 
@@ -306,8 +292,8 @@ def detect_rss_command(message: str) -> bool:
     rss_keywords = [
         "marketing trends", "content ideas", "writing inspiration", "blog ideas",
         "social media trends", "seo trends", "marketing insights", "campaign ideas",
-        "content strategy", "latest marketing", "marketing news", "industry trends",
-        "rss insights", "marketing research", "content research", "writing help"
+        "content strategy", "latest marketing", "marketing news",
+        "industry trends", "rss insights", "marketing research", "content research", "writing help"
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in rss_keywords)
@@ -419,7 +405,6 @@ async def get_rss_marketing_context(message: str, content_type: str = None) -> s
                 ])
             
             context_parts.append("Provide insights based on these current marketing trends and data.")
-            
             return "\n".join(context_parts)
         
         return ""
@@ -428,7 +413,233 @@ async def get_rss_marketing_context(message: str, content_type: str = None) -> s
         logger.error(f"RSS marketing context generation failed: {e}")
         return "RSS_CONTEXT_ERROR: Unable to retrieve current marketing insights. Proceed with general knowledge."
 
-#-- Section 5c: File Processing Functions - 9/25/25
+#-- NEW Section 5c: Marketing Scraper Command Processing - 9/25/25
+def detect_scraper_command(message: str) -> bool:
+    """Detect marketing scraper commands"""
+    scraper_keywords = [
+        "scrape", "scraper", "analyze website", "competitor analysis", "scrape url",
+        "scrape site", "website analysis", "marketing analysis", "content analysis",
+        "scrape history", "scrape insights", "scrape data"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in scraper_keywords)
+
+def extract_url_from_message(message: str) -> str:
+    """Extract URL from scrape command message"""
+    import re
+    
+    # Look for URLs in the message
+    url_pattern = r'https?://[^\s<>"{\}|\\^`\[\]]+'
+    urls = re.findall(url_pattern, message)
+    
+    if urls:
+        return urls[0]  # Return first URL found
+    
+    # If no full URL, look for domain patterns
+    domain_pattern = r'(?:^|\s)([a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|co\.uk))'
+    domains = re.findall(domain_pattern, message)
+    
+    if domains:
+        return f"https://{domains[0]}"
+    
+    return None
+
+async def process_scraper_command(message: str, user_id: str) -> str:
+    """Process marketing scraper commands"""
+    try:
+        message_lower = message.lower()
+        
+        if 'scrape history' in message_lower:
+            # Get scrape history
+            db = ScrapedContentDB()
+            history = await db.get_scrape_history(user_id=user_id, limit=10)
+            
+            if not history:
+                return """🔍 **Marketing Scraper History**
+
+No scraping history found. Start analyzing competitors with:
+• `scrape https://example.com` - Analyze any website
+• `scrape insights` - Get analysis from previous scrapes"""
+            
+            response_parts = ["🔍 **Recent Scraping History**\n"]
+            
+            for i, item in enumerate(history, 1):
+                domain = item.get('domain', 'Unknown')
+                scraped_at = item.get('scraped_at', 'Unknown time')
+                insights_count = len(item.get('insights', []))
+                
+                response_parts.append(f"**{i}. {domain}**")
+                response_parts.append(f"   📅 Scraped: {scraped_at}")
+                response_parts.append(f"   🧠 Insights: {insights_count}")
+                response_parts.append("")
+            
+            response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
+            return "\n".join(response_parts)
+        
+        elif 'scrape insights' in message_lower:
+            # Get competitive insights from all scraped content
+            db = ScrapedContentDB()
+            analyzer = MarketingContentAnalyzer()
+            
+            recent_content = await db.get_recent_scraped_content(user_id=user_id, limit=20)
+            
+            if not recent_content:
+                return """🔍 **Marketing Scraper Insights**
+
+No scraped content available for analysis. 
+
+Start building your competitive intelligence with:
+• `scrape https://competitor.com` - Analyze competitor sites
+• `scrape https://industry-blog.com` - Analyze industry content"""
+            
+            # Generate competitive insights
+            insights = await analyzer.generate_competitive_insights(recent_content)
+            
+            response_parts = [
+                "🧠 **Competitive Intelligence Report**",
+                f"📊 Based on {len(recent_content)} recently analyzed websites",
+                ""
+            ]
+            
+            if insights.get('key_trends'):
+                response_parts.extend([
+                    "**🔥 Key Market Trends:**",
+                    *[f"• {trend}" for trend in insights['key_trends'][:5]],
+                    ""
+                ])
+            
+            if insights.get('competitive_advantages'):
+                response_parts.extend([
+                    "**💪 Competitive Opportunities:**",
+                    *[f"• {advantage}" for advantage in insights['competitive_advantages'][:3]],
+                    ""
+                ])
+            
+            if insights.get('content_gaps'):
+                response_parts.extend([
+                    "**🎯 Content Gap Analysis:**",
+                    *[f"• {gap}" for gap in insights['content_gaps'][:3]],
+                    ""
+                ])
+            
+            response_parts.extend([
+                "**📈 Strategic Recommendations:**",
+                *[f"• {rec}" for rec in insights.get('recommendations', ['Continue monitoring competitor activity'])[:3]]
+            ])
+            
+            return "\n".join(response_parts)
+        
+        else:
+            # Extract URL and scrape content
+            url = extract_url_from_message(message)
+            
+            if not url:
+                return """🔍 **Marketing Scraper Commands**
+
+**Usage:**
+• `scrape https://example.com` - Analyze any website for marketing insights
+• `scrape history` - View your scraping history  
+• `scrape insights` - Get competitive intelligence report
+
+**Examples:**
+• `scrape https://hubspot.com/blog` - Analyze HubSpot's content strategy
+• `scrape https://competitor.com` - Competitive analysis
+• `scrape https://industry-news.com` - Industry trend analysis
+
+Ready to analyze your competition? 🕵️"""
+            
+            # Perform the scrape
+            scraper = ScraperClient()
+            analyzer = MarketingContentAnalyzer()
+            db = ScrapedContentDB()
+            
+            # Show initial processing message
+            processing_msg = f"""🔍 **Analyzing Website: {url}**
+
+⏳ Extracting content...
+🧠 AI analysis in progress...
+💾 Storing insights for future reference...
+
+This may take a moment..."""
+            
+            try:
+                # Scrape the website
+                scraped_data = await scraper.scrape_url(url)
+                
+                if not scraped_data.get('success'):
+                    return f"""❌ **Scraping Failed**
+                    
+Unable to analyze {url}
+Error: {scraped_data.get('error', 'Unknown error')}
+
+Please verify the URL is accessible and try again."""
+                
+                # Analyze the content
+                analysis = await analyzer.analyze_content(
+                    scraped_data['content'],
+                    scraped_data['metadata']
+                )
+                
+                # Store in database
+                await db.store_scraped_content(
+                    url=url,
+                    content=scraped_data['content'],
+                    metadata=scraped_data['metadata'],
+                    analysis=analysis,
+                    user_id=user_id
+                )
+                
+                # Generate response
+                domain = scraped_data['metadata'].get('domain', url)
+                word_count = len(scraped_data['content'].split())
+                
+                response_parts = [
+                    f"✅ **Successfully Analyzed: {domain}**",
+                    f"📄 Content extracted: {word_count:,} words",
+                    ""
+                ]
+                
+                if analysis.get('key_insights'):
+                    response_parts.extend([
+                        "**🎯 Key Marketing Insights:**",
+                        *[f"• {insight}" for insight in analysis['key_insights'][:4]],
+                        ""
+                    ])
+                
+                if analysis.get('content_strategy'):
+                    response_parts.extend([
+                        "**📝 Content Strategy Observed:**",
+                        f"• {analysis['content_strategy'][:200]}...",
+                        ""
+                    ])
+                
+                if analysis.get('competitive_intel'):
+                    response_parts.extend([
+                        "**🕵️ Competitive Intelligence:**",
+                        *[f"• {intel}" for intel in analysis['competitive_intel'][:3]],
+                        ""
+                    ])
+                
+                response_parts.extend([
+                    f"💾 **Stored for Analysis** - Use `scrape insights` for competitive intelligence",
+                    f"📈 **View History** - Use `scrape history` to see all analyzed sites"
+                ])
+                
+                return "\n".join(response_parts)
+                
+            except Exception as e:
+                logger.error(f"Scraper processing failed: {e}")
+                return f"""❌ **Analysis Failed**
+                
+Error analyzing {url}: {str(e)}
+
+Please try again or contact support if the issue persists."""
+    
+    except Exception as e:
+        logger.error(f"Scraper command processing failed: {e}")
+        return f"❌ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
+
+#-- Section 5d: File Processing Functions - 9/25/25
 async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
     """Process uploaded files and return file information"""
     processed_files = []
@@ -595,7 +806,7 @@ async def analyze_csv_file(file_path: Path) -> Dict:
             'extracted_text': ''
         }
 
-#-- Section 6: Main Chat Endpoints - 9/25/25
+#-- Section 6: Main Chat Endpoints - updated 9/25/25 with Marketing Scraper
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(
     request: ChatRequest,
@@ -603,7 +814,7 @@ async def chat_with_ai(
     user_id: str = Depends(get_current_user_id)
 ):
     """
-    Main chat endpoint with complete integration: files, weather, Bluesky, and RSS Learning
+    Main chat endpoint with complete integration: files, weather, Bluesky, RSS Learning, and Marketing Scraper
     """
     start_time = datetime.now()
     logger.info(f"🔍 DEBUG: chat_with_ai called with message: '{request.message}'")
@@ -615,7 +826,49 @@ async def chat_with_ai(
             processed_files = await process_uploaded_files(files)
             logger.info(f"Processed {len(processed_files)} uploaded files")
         
-        # Check for Bluesky commands first
+        # Check for Marketing Scraper commands first - NEW
+        if detect_scraper_command(request.message):
+            logger.info(f"🔍 Marketing scraper command detected: {request.message}")
+            
+            scraper_response = await process_scraper_command(request.message, user_id)
+            
+            memory_manager = get_memory_manager(user_id)
+            
+            if request.thread_id:
+                thread_id = request.thread_id
+            else:
+                thread_id = await memory_manager.create_conversation_thread(
+                    platform="web_interface",
+                    title="Marketing Scraper Analysis"
+                )
+            
+            user_message_id = str(uuid.uuid4())
+            await memory_manager.add_message(
+                thread_id=thread_id,
+                role="user",
+                content=request.message
+            )
+            
+            response_message_id = str(uuid.uuid4())
+            await memory_manager.add_message(
+                thread_id=thread_id,
+                role="assistant",
+                content=scraper_response
+            )
+            
+            end_time = datetime.now()
+            response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
+            return ChatResponse(
+                message_id=response_message_id,
+                thread_id=thread_id,
+                response=scraper_response,
+                personality_used="syntaxprime",
+                response_time_ms=response_time_ms,
+                timestamp=end_time
+            )
+        
+        # Check for Bluesky commands
         if detect_bluesky_command(request.message):
             logger.info(f"🔵 Bluesky command detected: {request.message}")
             
@@ -635,57 +888,57 @@ async def chat_with_ai(
             await memory_manager.add_message(
                 thread_id=thread_id,
                 role="user",
-                content=request.message,
-                content_type="bluesky_command"
+                content=request.message
             )
             
-            ai_message_id = str(uuid.uuid4())
-            response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            
+            response_message_id = str(uuid.uuid4())
             await memory_manager.add_message(
                 thread_id=thread_id,
                 role="assistant",
-                content=bluesky_response,
-                response_time_ms=response_time_ms,
-                model_used="bluesky_assistant"
+                content=bluesky_response
             )
             
+            end_time = datetime.now()
+            response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
             return ChatResponse(
-                message_id=ai_message_id,
+                message_id=response_message_id,
                 thread_id=thread_id,
                 response=bluesky_response,
-                personality_used="bluesky_assistant",
+                personality_used="syntaxprime",
                 response_time_ms=response_time_ms,
-                knowledge_sources=[],
-                timestamp=datetime.now()
+                timestamp=end_time
             )
         
-        # Get or create conversation thread
+        # Continue with regular AI chat processing...
         memory_manager = get_memory_manager(user_id)
+        knowledge_engine = get_knowledge_engine()
+        personality_engine = get_personality_engine()
         
-        if request.thread_id:
-            thread_id = request.thread_id
-        else:
+        # Handle conversation thread
+        thread_id = request.thread_id
+        if not thread_id:
             thread_id = await memory_manager.create_conversation_thread(
                 platform="web_interface",
                 title=None
             )
         
-        # Prepare message content with file context
+        # Build message content with files if present
         message_content = request.message
         if processed_files:
-            file_context = "\n\nUploaded files:\n"
+            file_descriptions = []
             for file_info in processed_files:
-                file_context += f"- {file_info['filename']} ({file_info['file_type']}, {file_info['file_size']} bytes)\n"
+                desc = f"📎 {file_info['filename']} ({file_info['analysis']['type']}): {file_info['analysis']['description']}"
+                file_descriptions.append(desc)
+                
                 if file_info['analysis']['extracted_text']:
-                    file_context += f"  Content preview: {file_info['analysis']['extracted_text'][:200]}...\n"
-                else:
-                    file_context += f"  {file_info['analysis']['description']}\n"
-            message_content += file_context
+                    message_content += f"\n\n--- Content from {file_info['filename']} ---\n"
+                    message_content += file_info['analysis']['extracted_text'][:1000]  # Limit content
+            
+            message_content = f"{request.message}\n\nFiles uploaded:\n" + "\n".join(file_descriptions) + "\n\n" + message_content
         
         # Store user message
-        user_message_id = str(uuid.uuid4())
-        await memory_manager.add_message(
+        user_message_id = await memory_manager.add_message(
             thread_id=thread_id,
             role="user",
             content=message_content,
@@ -710,277 +963,133 @@ async def chat_with_ai(
                 logger.warning("⚠️ RSS marketing context failed to load")
         
         # Check for weather requests
-        weather_data = None
+        weather_context = None
         if detect_weather_request(request.message):
-            logger.info(f"Weather request detected for user {user_id}")
+            logger.info(f"🌦️ Weather request detected for user {user_id}")
             weather_data = await get_weather_for_user(user_id)
             
-            if weather_data and "data" in weather_data:
+            if weather_data and weather_data.get("success"):
                 weather_info = weather_data["data"]
                 weather_context = f"""
 CURRENT WEATHER DATA:
 Location: {weather_info.get('location', 'Current location')}
-Current conditions: {weather_info.get('current_conditions', 'N/A')}
 Temperature: {weather_info.get('temperature_f', 'N/A')}°F
+Humidity: {weather_info.get('humidity', 'N/A')}%
+Wind Speed: {weather_info.get('wind_speed', 'N/A')} mph
 Barometric Pressure: {weather_info.get('pressure', 'N/A')} mbar
-Pressure Change (3h): {weather_info.get('pressure_change_3h', 'N/A')} mbar
 UV Index: {weather_info.get('uv_index', 'N/A')}
-Headache Risk: {weather_info.get('headache_risk', 'N/A')}
-UV Risk: {weather_info.get('uv_risk', 'N/A')}
-Health Alerts: {', '.join(weather_info.get('health_alerts', ['None']))}
+Visibility: {weather_info.get('visibility', 'N/A')} miles
 
-Please respond naturally about the weather using this current data. Focus on health implications if relevant (headaches from pressure changes, UV protection needs, etc.).
+Please respond naturally about the weather using this current data.
 """
-                logger.info("Weather context added to AI conversation")
+                logger.info("🌤️ Weather context added to AI conversation")
             elif weather_data and "error" in weather_data:
                 weather_context = f"""
 WEATHER REQUEST DETECTED: Unfortunately, I'm having trouble accessing current weather data: {weather_data['error']}
 Please respond appropriately about being unable to access weather information.
 """
                 logger.warning(f"Weather API error: {weather_data['error']}")
-            else:
-                weather_context = """
-WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respond appropriately.
-"""
-                logger.warning("Weather service returned unexpected response")
         
-        # Search knowledge base if requested
+        # Get knowledge sources if enabled
         knowledge_sources = []
         if request.include_knowledge:
-            knowledge_engine = get_knowledge_engine()
-            knowledge_results = await knowledge_engine.search_knowledge(
+            knowledge_sources = await knowledge_engine.search_knowledge(
                 query=request.message,
-                conversation_context=conversation_history,
-                personality_id=request.personality_id,
-                limit=5
+                max_results=5
             )
-            knowledge_sources = knowledge_results
         
-        # Get personality system prompt
-        personality_engine = get_personality_engine()
-        system_prompt = personality_engine.get_personality_system_prompt(
-            personality_id=request.personality_id,
-            conversation_context=conversation_history,
-            knowledge_context=knowledge_sources
-        )
+        # Build AI messages
+        ai_messages = []
         
-        # Build messages for AI
-        messages = [{"role": "system", "content": system_prompt}]
+        # Add system message with personality and context
+        system_parts = []
         
-        # Add weather context if available
-        if weather_data and detect_weather_request(request.message):
-            messages.append({"role": "system", "content": weather_context})
+        # Get personality prompt
+        personality_prompt = personality_engine.get_personality_prompt(request.personality_id)
+        system_parts.append(personality_prompt)
         
         # Add RSS marketing context if available
-        if rss_context and not rss_context.startswith("RSS_CONTEXT_ERROR"):
-            messages.append({"role": "system", "content": rss_context})
+        if rss_context:
+            system_parts.append(rss_context)
         
-        # Add conversation history (last 10 messages)
-        for msg in conversation_history[-10:]:
-            if msg['role'] in ['user', 'assistant']:
-                messages.append({
-                    "role": msg['role'],
-                    "content": msg['content']
-                })
+        # Add weather context if available
+        if weather_context:
+            system_parts.append(weather_context)
+        
+        # Add knowledge context if available
+        if knowledge_sources:
+            knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
+            for source in knowledge_sources:
+                knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
+            system_parts.append(knowledge_context)
+        
+        ai_messages.append({
+            "role": "system",
+            "content": "\n\n".join(system_parts)
+        })
+        
+        # Add conversation history
+        ai_messages.extend(conversation_history)
         
         # Add current user message
-        messages.append({
+        ai_messages.append({
             "role": "user",
             "content": message_content
         })
         
         # Get AI response
         openrouter_client = await get_openrouter_client()
-        ai_response = await openrouter_client.chat_completion(
-            messages=messages,
-            model=None,
+        ai_response = await openrouter_client.get_completion(
+            messages=ai_messages,
+            model="anthropic/claude-3.5-sonnet:beta",
             max_tokens=4000,
             temperature=0.7
         )
         
-        # Extract response content
-        response_content = ai_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-        model_used = ai_response.get('_metadata', {}).get('model_used')
-        
-        # Process response through personality engine
-        processed_response = personality_engine.process_ai_response(
-            response=response_content,
+        # Process through personality engine
+        final_response = personality_engine.process_ai_response(
+            response=ai_response,
             personality_id=request.personality_id,
             conversation_context=conversation_history
         )
         
         # Store AI response
-        ai_message_id = str(uuid.uuid4())
-        response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-        
-        await memory_manager.add_message(
+        knowledge_source_ids = [source.get('id', '') for source in knowledge_sources]
+        response_message_id = await memory_manager.add_message(
             thread_id=thread_id,
             role="assistant",
-            content=processed_response,
-            response_time_ms=response_time_ms,
-            model_used=model_used,
-            knowledge_sources_used=[source.get('id') for source in knowledge_sources]
+            content=final_response,
+            model_used="anthropic/claude-3.5-sonnet:beta",
+            knowledge_sources_used=knowledge_source_ids
         )
         
-        logger.info(f"Chat completed - Thread: {thread_id}, Response time: {response_time_ms}ms, "
-                   f"Weather: {'Yes' if weather_data else 'No'}, "
-                   f"Bluesky: No, "
-                   f"RSS: {'Yes' if rss_context else 'No'}")
+        # Calculate response time
+        end_time = datetime.now()
+        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+        
+        logger.info(f"✅ Chat response generated in {response_time_ms}ms")
         
         return ChatResponse(
-            message_id=ai_message_id,
+            message_id=response_message_id,
             thread_id=thread_id,
-            response=processed_response,
+            response=final_response,
             personality_used=request.personality_id,
             response_time_ms=response_time_ms,
             knowledge_sources=knowledge_sources,
-            timestamp=datetime.now()
+            timestamp=end_time
         )
         
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
+        logger.error(f"Chat processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
 
-#-- Section 7: Additional Endpoints - 9/25/25
-@router.post("/chat/stream")
-async def stream_chat(request: ChatRequest):
-    """Streaming chat endpoint"""
-    # Implementation would go here for streaming responses
-    return {"message": "Streaming not yet implemented"}
-
-@router.post("/bookmarks", response_model=dict)
-async def create_bookmark(
-    bookmark_request: BookmarkRequest,
-    user_id: str = Depends(get_current_user_id)
-):
-    """Create a conversation bookmark"""
-    try:
-        memory_manager = get_memory_manager(user_id)
-        
-        bookmark_id = await memory_manager.create_bookmark(
-            thread_id=bookmark_request.thread_id,
-            message_id=bookmark_request.message_id,
-            bookmark_name=bookmark_request.bookmark_name
-        )
-        
-        return {
-            "success": True,
-            "bookmark_id": bookmark_id,
-            "message": f"Bookmark '{bookmark_request.bookmark_name}' created successfully"
-        }
-        
-    except Exception as e:
-        logger.error(f"Bookmark creation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/conversations", response_model=dict)
-async def get_user_conversations(
-    limit: int = 50,
-    user_id: str = Depends(get_current_user_id)
-):
-    """Get user's conversation threads"""
-    try:
-        conversations_query = """
-        SELECT id, title, platform, status, message_count, 
-               created_at, updated_at, last_message_at
-        FROM conversation_threads
-        WHERE user_id = $1
-        ORDER BY last_message_at DESC
-        LIMIT $2
-        """
-        
-        threads = await db_manager.fetch_all(conversations_query, user_id, limit)
-        
-        conversations = []
-        for thread in threads:
-            conversations.append({
-                'thread_id': thread['id'],
-                'title': thread['title'] or f"Conversation {thread['created_at'].strftime('%m/%d')}" if thread['created_at'] else 'New Conversation',
-                'platform': thread['platform'],
-                'status': thread['status'],
-                'message_count': thread['message_count'] or 0,
-                'created_at': thread['created_at'].isoformat() if thread['created_at'] else None,
-                'updated_at': thread['updated_at'].isoformat() if thread['updated_at'] else None,
-                'last_message_at': thread['last_message_at'].isoformat() if thread['last_message_at'] else None
-            })
-        
-        return {
-            "conversations": conversations,
-            "total_available": len(conversations)
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to get conversations: {e}")
-        return {
-            "conversations": [],
-            "total_available": 0
-        }
-
-@router.get("/personalities")
-async def get_available_personalities():
-    """Get available AI personalities"""
-    personality_engine = get_personality_engine()
-    personalities = personality_engine.get_available_personalities()
-    
-    return {
-        "personalities": [
-            {
-                "id": pid,
-                "name": config.get('name', pid),
-                "description": config.get('description', ''),
-                "is_default": pid == 'syntaxprime'
-            }
-            for pid, config in personalities.items()
-        ],
-        "default_personality": "syntaxprime"
-    }
-
-@router.get("/stats")
-async def get_ai_stats(user_id: str = Depends(get_current_user_id)):
-    """Get AI chat statistics"""
-    try:
-        conversation_stats_query = """
-        SELECT 
-            COUNT(DISTINCT ct.id) as total_conversations,
-            COUNT(cm.id) as total_messages,
-            COUNT(CASE WHEN cm.role = 'user' THEN 1 END) as user_messages,
-            COUNT(CASE WHEN cm.role = 'assistant' THEN 1 END) as assistant_messages,
-            AVG(cm.response_time_ms) as avg_response_time_ms,
-            MAX(ct.last_message_at) as last_conversation_at
-        FROM conversation_threads ct
-        LEFT JOIN conversation_messages cm ON ct.id = cm.thread_id
-        WHERE ct.user_id = $1
-        """
-        
-        stats_result = await db_manager.fetch_one(conversation_stats_query, user_id)
-        
-        return {
-            "conversation_stats": {
-                "total_conversations": stats_result['total_conversations'] or 0,
-                "total_messages": stats_result['total_messages'] or 0,
-                "user_messages": stats_result['user_messages'] or 0,
-                "assistant_messages": stats_result['assistant_messages'] or 0,
-                "average_response_time_ms": float(stats_result['avg_response_time_ms']) if stats_result['avg_response_time_ms'] else 0,
-                "last_conversation_at": stats_result['last_conversation_at'].isoformat() if stats_result['last_conversation_at'] else None
-            },
-            "integrations_active": {
-                "weather": True,
-                "bluesky": True,
-                "rss_learning": True,
-                "knowledge_base": True
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Stats retrieval failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-#-- Section 8: Module Information and Health Check Functions - 9/25/25
-def get_integration_info() -> Dict[str, Any]:
-    """Get information about the AI chat integration"""
+#-- Section 7: Integration Info and Health Check Functions - updated 9/25/25 with Marketing Scraper
+def get_integration_info():
+    """Get information about the chat integration"""
     return {
         "name": "AI Chat System",
         "version": "2.0.0",
+        "description": "Advanced chat system with file processing, weather, Bluesky, RSS Learning, and Marketing Scraper integration",
         "endpoints": [
             "/ai/chat",
             "/ai/chat/stream",
@@ -998,14 +1107,16 @@ def get_integration_info() -> Dict[str, Any]:
             "Conversation management",
             "Weather integration",
             "Bluesky social media commands",
-            "RSS learning integration for writing assistance"
+            "RSS learning integration for writing assistance",
+            "Marketing scraper for competitive analysis"  # NEW
         ],
         "file_upload_support": True,
         "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
         "supported_file_types": list(ALLOWED_EXTENSIONS),
         "weather_integration": True,
         "bluesky_integration": True,
-        "rss_learning_integration": True
+        "rss_learning_integration": True,
+        "marketing_scraper_integration": True  # NEW
     }
 
 def check_module_health() -> Dict[str, Any]:
@@ -1038,6 +1149,12 @@ def check_module_health() -> Dict[str, Any]:
     if not rss_configured:
         warnings.append("RSS Learning integration not configured (DATABASE_URL missing)")
     
+    # NEW: Check marketing scraper configuration
+    scraper_configured = bool(os.getenv("DATABASE_URL"))  # Uses same DB as RSS
+    
+    if not scraper_configured:
+        warnings.append("Marketing Scraper integration not configured (DATABASE_URL missing)")
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
@@ -1046,5 +1163,6 @@ def check_module_health() -> Dict[str, Any]:
         "max_file_size": f"{MAX_FILE_SIZE // (1024 * 1024)}MB",
         "weather_integration_available": bool(os.getenv("TOMORROW_IO_API_KEY")),
         "bluesky_integration_available": bluesky_configured,
-        "rss_learning_integration_available": rss_configured
+        "rss_learning_integration_available": rss_configured,
+        "marketing_scraper_integration_available": scraper_configured  # NEW
     }

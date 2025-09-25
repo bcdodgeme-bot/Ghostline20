@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Cookie, Response, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
+from datetime import datetime
 
 import time  # Add this with your other imports
 
@@ -27,6 +28,9 @@ from modules.integrations.bluesky import get_integration_info as bluesky_integra
 from modules.integrations.rss_learning import router as rss_learning_router
 from modules.integrations.rss_learning import get_integration_info as rss_learning_integration_info, check_module_health as rss_learning_module_health, start_rss_service
 
+#-- NEW Section 2d: Marketing Scraper Integration - added 9/25/25
+from modules.integrations.marketing_scraper import router as marketing_scraper_router
+from modules.integrations.marketing_scraper import get_integration_info as marketing_scraper_integration_info, check_module_health as marketing_scraper_module_health
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -213,8 +217,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     
     return user['id']
 
-#-- Section 10: Application Lifecycle Events - updated 9/24/25 with Bluesky
-# Update Section 10: Application Lifecycle Events - Add RSS Learning startup
+#-- Section 10: Application Lifecycle Events - updated 9/25/25 with Marketing Scraper
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -245,8 +248,8 @@ async def startup_event():
         chat_health = chat_module_health()
         if chat_health['healthy']:
             print("💬 Chat system loaded successfully")
-            print(f"   🔍 File upload support: {chat_health.get('file_upload_support', True)}")
-            print(f"   📁 Max file size: {chat_health.get('max_file_size', '10MB')}")
+            print(f"   📁 File upload support: {chat_health.get('file_upload_support', True)}")
+            print(f"   📏 Max file size: {chat_health.get('max_file_size', '10MB')}")
         else:
             print("⚠️  Chat system loaded with warnings")
             print(f"   Missing vars: {chat_health.get('missing_vars', [])}")
@@ -281,13 +284,13 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Bluesky integration health check failed: {e}")
     
-    # NEW: Check RSS Learning integration health - added 9/25/25
+    # Check RSS Learning integration health
     try:
         rss_health = rss_learning_module_health()
         if rss_health['healthy']:
             print("📰 RSS Learning integration loaded successfully")
             source_count = rss_health.get('total_sources', 8)
-            print(f"   🌐 {source_count} RSS sources configured")
+            print(f"   🌍 {source_count} RSS sources configured")
             print("   🧠 AI-powered content analysis active")
             print("   📈 Weekly background processing enabled")
             print("   🎯 Marketing insights for AI brain integration")
@@ -301,6 +304,25 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  RSS Learning integration health check failed: {e}")
     
+    # NEW: Check Marketing Scraper integration health - added 9/25/25
+    try:
+        scraper_health = marketing_scraper_module_health()
+        if scraper_health['healthy']:
+            print("🔍 Marketing Scraper integration loaded successfully")
+            print("   🌐 Website content extraction enabled")
+            print("   🧠 AI-powered competitive analysis with SyntaxPrime")
+            print("   💾 Permanent storage for scraped insights")
+            print("   💬 Chat commands: scrape [URL], scrape history, scrape insights")
+            print("   🔗 Integration with existing AI brain and memory system")
+        else:
+            print("⚠️  Marketing Scraper integration loaded with warnings")
+            print(f"   Missing vars: {scraper_health['missing_vars']}")
+            if scraper_health.get('warnings'):
+                for warning in scraper_health['warnings']:
+                    print(f"   ⚠️  {warning}")
+    except Exception as e:
+        print(f"⚠️  Marketing Scraper integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -312,7 +334,8 @@ async def startup_event():
     print("   💬 Chat Interface: http://localhost:8000/chat")
     print("   🌦️ Weather API: http://localhost:8000/integrations/weather")
     print("   🔵 Bluesky API: http://localhost:8000/bluesky")
-    print("   📰 RSS Learning: http://localhost:8000/integrations/rss")  # NEW
+    print("   📰 RSS Learning: http://localhost:8000/integrations/rss")
+    print("   🔍 Marketing Scraper: http://localhost:8000/integrations/marketing-scraper")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -321,10 +344,7 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-
-#-- Section 11: API Status and Info Endpoints - updated 9/24/25 with Bluesky
-# Update Section 11: API Status and Info Endpoints - Add RSS Learning to features
-#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning
+#-- Section 11: API Status and Health Endpoints - updated 9/25/25 with Marketing Scraper
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
@@ -347,11 +367,12 @@ async def api_status():
             "🌊 Real-time conversation streaming",
             "🌦️ Health-focused weather monitoring with Tomorrow.io",
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
-            "📰 RSS Learning system with AI-powered marketing insights",  # NEW
+            "📰 RSS Learning system with AI-powered marketing insights",
+            "🔍 AI-powered marketing scraper for competitive analysis",  # NEW
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "authentication"],  # NEW
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "authentication"],  # NEW: Added marketing-scraper
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -375,10 +396,13 @@ async def api_status():
             "bluesky_approve": "/bluesky/approve",
             "bluesky_post": "/bluesky/post",
             "bluesky_accounts": "/bluesky/accounts/status",
-            "rss_status": "/integrations/rss/status",  # NEW
-            "rss_insights": "/integrations/rss/insights",  # NEW
-            "rss_trends": "/integrations/rss/trends",  # NEW
-            "rss_writing_inspiration": "/integrations/rss/writing-inspiration",  # NEW
+            "rss_status": "/integrations/rss/status",
+            "rss_insights": "/integrations/rss/insights",
+            "rss_trends": "/integrations/rss/trends",
+            "rss_writing_inspiration": "/integrations/rss/writing-inspiration",
+            "marketing_scraper_health": "/integrations/marketing-scraper/health",  # NEW
+            "marketing_scraper_stats": "/integrations/marketing-scraper/stats",  # NEW
+            "marketing_scraper_history": "/integrations/marketing-scraper/history",  # NEW
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -399,42 +423,137 @@ async def api_status():
             "personalities": ["syntaxprime", "professional", "compassionate"],
             "api_configured": bluesky_module_health()['healthy']
         },
-        "rss_learning_system": {  # NEW
+        "rss_learning_system": {
             "sources_configured": 8,
             "features": ["ai_content_analysis", "marketing_insights", "trend_identification", "writing_assistance"],
             "processing_interval": "weekly",
             "categories": ["seo", "content_marketing", "social_media", "analytics"],
             "api_configured": rss_learning_module_health()['healthy']
+        },
+        "marketing_scraper_system": {  # NEW
+            "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
+            "commands": ["scrape [URL]", "scrape history", "scrape insights"],
+            "storage": "postgresql_scraped_content_table",
+            "ai_integration": "syntaxprime_personality",
+            "api_configured": marketing_scraper_module_health()['healthy']
         }
     }
 
-# Update integrations_info endpoint - Add RSS Learning
 @app.get("/integrations")
 async def integrations_info():
     """Get information about loaded integrations."""
-    return {
-        "integrations": {
-            "slack_clickup": get_integration_info(),
-            "ai_brain": ai_integration_info(),
-            "chat_system": chat_integration_info(),
-            "weather": weather_integration_info(),
-            "bluesky_multi_account": bluesky_integration_info(),
-            "rss_learning": rss_learning_integration_info(),  # NEW
-            "authentication": {
-                "name": "User Authentication System",
-                "version": "1.0.0",
-                "features": [
-                    "bcrypt password hashing",
-                    "session management",
-                    "timezone support",
-                    "secure cookies"
-                ],
-                "active_sessions": AuthManager.get_session_info()["active_sessions"]
-            }
+    integrations = {}
+    
+    # Slack-ClickUp integration
+    try:
+        integrations['slack_clickup'] = {
+            'info': get_integration_info(),
+            'health': check_module_health()
+        }
+    except Exception as e:
+        integrations['slack_clickup'] = {
+            'info': {'module': 'slack_clickup', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Weather integration
+    try:
+        integrations['weather'] = {
+            'info': weather_integration_info(),
+            'health': weather_module_health()
+        }
+    except Exception as e:
+        integrations['weather'] = {
+            'info': {'module': 'weather', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Bluesky integration
+    try:
+        integrations['bluesky'] = {
+            'info': bluesky_integration_info(),
+            'health': bluesky_module_health()
+        }
+    except Exception as e:
+        integrations['bluesky'] = {
+            'info': {'module': 'bluesky', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # RSS Learning integration
+    try:
+        integrations['rss_learning'] = {
+            'info': rss_learning_integration_info(),
+            'health': rss_learning_module_health()
+        }
+    except Exception as e:
+        integrations['rss_learning'] = {
+            'info': {'module': 'rss_learning', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # NEW: Marketing Scraper integration - added 9/25/25
+    try:
+        integrations['marketing_scraper'] = {
+            'info': marketing_scraper_integration_info(),
+            'health': marketing_scraper_module_health()
+        }
+    except Exception as e:
+        integrations['marketing_scraper'] = {
+            'info': {'module': 'marketing_scraper', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # AI Brain integration
+    try:
+        integrations['ai_brain'] = {
+            'info': ai_integration_info(),
+            'health': ai_module_health()
+        }
+    except Exception as e:
+        integrations['ai_brain'] = {
+            'info': {'module': 'ai_brain', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Chat integration
+    try:
+        integrations['chat'] = {
+            'info': chat_integration_info(),
+            'health': chat_module_health()
+        }
+    except Exception as e:
+        integrations['chat'] = {
+            'info': {'module': 'chat', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Authentication system info
+    integrations['authentication'] = {
+        'info': {
+            "name": "User Authentication System",
+            "version": "1.0.0",
+            "features": [
+                "bcrypt password hashing",
+                "session management",
+                "timezone support",
+                "secure cookies"
+            ]
+        },
+        'health': {
+            'healthy': True,
+            'active_sessions': AuthManager.get_session_info()["active_sessions"]
         }
     }
+    
+    return {
+        'integrations': integrations,
+        'total_modules': len(integrations),
+        'healthy_modules': sum(1 for module in integrations.values() if module['health'].get('healthy', False)),
+        'timestamp': datetime.now().isoformat()
+    }
 
-#-- Section 12: Integration Module Routers - updated 9/24/25 with Bluesky
+#-- Section 12: Integration Module Routers - updated 9/25/25 with Marketing Scraper
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -450,12 +569,14 @@ app.include_router(chat_router)
 # Include Weather integration router - added 9/24/25
 app.include_router(weather_router)
 
-# NEW: Include Bluesky Multi-Account integration router - added 9/24/25
+# Include Bluesky Multi-Account integration router - added 9/24/25
 app.include_router(bluesky_router)
 
-# Add RSS Learning router to Section 12: Integration Module Routers
 # Include RSS Learning integration router - added 9/25/25
 app.include_router(rss_learning_router)
+
+# NEW: Include Marketing Scraper integration router - added 9/25/25
+app.include_router(marketing_scraper_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
 # Periodic cleanup of expired sessions (every hour)

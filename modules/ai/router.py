@@ -37,6 +37,16 @@ except ImportError:
     RSS_LEARNING_AVAILABLE = False
     logger.warning("RSS Learning integration not available")
 
+#-- NEW Section 1b: Marketing Scraper Integration Import - added 9/25/25
+# ADD THIS after the RSS Learning import (around line 30):
+
+try:
+    from ..integrations.marketing_scraper.database_manager import ScrapedContentDB
+    MARKETING_SCRAPER_AVAILABLE = True
+except ImportError:
+    MARKETING_SCRAPER_AVAILABLE = False
+    logger.warning("Marketing Scraper integration not available")
+
 
 #-- Section 2: Pydantic Request/Response Models - 9/23/25
 class ChatRequest(BaseModel):
@@ -1022,6 +1032,9 @@ def check_module_health():
     
     # NEW: RSS learning integration is optional - added 9/25/25
     rss_learning_available = RSS_LEARNING_AVAILABLE and bool(os.getenv("DATABASE_URL"))
+    
+    # NEW: Marketing scraper integration is optional - added 9/25/25
+    marketing_scraper_available = MARKETING_SCRAPER_AVAILABLE and bool(os.getenv("DATABASE_URL"))
     
     return {
         "healthy": len(missing_vars) == 0,
