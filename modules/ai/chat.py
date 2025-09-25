@@ -43,7 +43,7 @@ from modules.integrations.bluesky.notification_manager import get_notification_m
 
 #-- NEW Section 2b: Marketing Scraper Integration Import - 9/25/25
 from modules.integrations.marketing_scraper.scraper_client import MarketingScraperClient
-from modules.integrations.marketing_scraper.content_analyzer import MarketingContentAnalyzer
+from modules.integrations.marketing_scraper.content_analyzer import ContentAnalyzer
 from modules.integrations.marketing_scraper.database_manager import ScrapedContentDB
 
 #-- Section 3: Request/Response Models - 9/25/25
@@ -479,7 +479,7 @@ No scraping history found. Start analyzing competitors with:
         elif 'scrape insights' in message_lower:
             # Get competitive insights from all scraped content
             db = ScrapedContentDB()
-            analyzer = MarketingContentAnalyzer()
+            analyzer = ContentAnalyzer()
             
             recent_content = await db.get_recent_scraped_content(user_id=user_id, limit=20)
             
