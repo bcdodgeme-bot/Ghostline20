@@ -336,8 +336,8 @@ class RSSFeedProcessor:
             sentiment_score = max(-9.99, min(9.99, float(sentiment_score)))
             
             # ADD THESE TWO LINES HERE:
-            trend_score = max(1.0, min(99.99, analysis.get('trend_score', 5.0)))
-            relevance_score = max(1.0, min(99.99, analysis.get('relevance_score', 5.0)))
+            trend_score = max(1.0, min(9.99, analysis.get('trend_score', 5.0)))
+            relevance_score = max(1.0, min(9.99, analysis.get('relevance_score', 5.0)))
             
             # Prepare item for database
             db_item = {
