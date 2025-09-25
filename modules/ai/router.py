@@ -392,6 +392,20 @@ Ready to manage your social media intelligently?"""
         
         print(f"🚀 DEBUG: process_chat_message called with message: '{chat_request.message}'")
         
+        # Check for scraper commands
+        from modules.ai.chat import detect_scraper_command, process_scraper_command
+        if detect_scraper_command(chat_request.message):
+            print(f"🔍 Scraper detected, processing...")
+            response = await process_scraper_command(chat_request.message, user_id)
+            return ChatResponse(
+                message_id=str(uuid.uuid4()),
+                thread_id=chat_request.thread_id or str(uuid.uuid4()),
+                response=response,
+                personality_used="syntaxprime",
+                response_time_ms=int((time.time() - start_time) * 1000),
+                timestamp=datetime.now()
+            )
+    
         # Get components
         memory_manager = get_memory_manager(user_id)
         knowledge_engine = get_knowledge_engine()
