@@ -802,7 +802,7 @@ async def chat_with_ai(
             processed_files = await process_uploaded_files(files)
             logger.info(f"Processed {len(processed_files)} uploaded files")
         
-        # Check for Marketing Scraper commands FIRST - NEW 9/25/25
+        # Check for Marketing Scraper commands first - NEW 9/25/25
         if detect_scraper_command(request.message):
             logger.info(f"🔍 Marketing scraper command detected: {request.message}")
             
