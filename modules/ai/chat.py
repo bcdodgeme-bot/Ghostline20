@@ -802,7 +802,7 @@ async def chat_with_ai(
             processed_files = await process_uploaded_files(files)
             logger.info(f"Processed {len(processed_files)} uploaded files")
         
-        # Check for Marketing Scraper commands first - NEW
+        # Check for Marketing Scraper commands first - NEW 9/25/25
         if detect_scraper_command(request.message):
             logger.info(f"🔍 Marketing scraper command detected: {request.message}")
             
@@ -844,7 +844,7 @@ async def chat_with_ai(
                 timestamp=end_time
             )
         
-        # Check for Bluesky commands
+        # Check for Bluesky commands - 9/24/25
         if detect_bluesky_command(request.message):
             logger.info(f"🔵 Bluesky command detected: {request.message}")
             
