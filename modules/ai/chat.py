@@ -44,7 +44,7 @@ from modules.integrations.bluesky.notification_manager import get_notification_m
 #-- NEW Section 2b: Marketing Scraper Integration Import - 9/25/25
 from modules.integrations.marketing_scraper.scraper_client import MarketingScraperClient
 from modules.integrations.marketing_scraper.content_analyzer import ContentAnalyzer
-from modules.integrations.marketing_scraper.database_manager import ScrapedContentDB
+from modules.integrations.marketing_scraper.database_manager import ScrapedContentDatabase
 
 #-- Section 3: Request/Response Models - 9/25/25
 class ChatMessage(BaseModel):
@@ -451,8 +451,8 @@ async def process_scraper_command(message: str, user_id: str) -> str:
         
         if 'scrape history' in message_lower:
             # Get scrape history
-            db = ScrapedContentDB()
-            history = await db.get_scrape_history(user_id=user_id, limit=10)
+            db = ScrapedContentDatabase()
+            history = await db.get_user_scrape_history(user_id=user_id, limit=10)
             
             if not history:
                 return """🔍 **Marketing Scraper History**
@@ -465,12 +465,12 @@ No scraping history found. Start analyzing competitors with:
             
             for i, item in enumerate(history, 1):
                 domain = item.get('domain', 'Unknown')
-                scraped_at = item.get('scraped_at', 'Unknown time')
-                insights_count = len(item.get('insights', []))
+                scraped_at = item.get('created_at', 'Unknown time')
+                word_count = item.get('word_count', 0)
                 
                 response_parts.append(f"**{i}. {domain}**")
                 response_parts.append(f"   📅 Scraped: {scraped_at}")
-                response_parts.append(f"   🧠 Insights: {insights_count}")
+                response_parts.append(f"   📝 Words: {word_count}")
                 response_parts.append("")
             
             response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
@@ -478,10 +478,11 @@ No scraping history found. Start analyzing competitors with:
         
         elif 'scrape insights' in message_lower:
             # Get competitive insights from all scraped content
-            db = ScrapedContentDB()
+            db = ScrapedContentDatabase()
             analyzer = ContentAnalyzer()
             
-            recent_content = await db.get_recent_scraped_content(user_id=user_id, limit=20)
+            # Search for recent content using empty topic to get all
+            recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
             
             if not recent_content:
                 return """🔍 **Marketing Scraper Insights**
@@ -492,41 +493,24 @@ Start building your competitive intelligence with:
 • `scrape https://competitor.com` - Analyze competitor sites
 • `scrape https://industry-blog.com` - Analyze industry content"""
             
-            # Generate competitive insights
-            insights = await analyzer.generate_competitive_insights(recent_content)
-            
+            # Generate competitive insights summary
             response_parts = [
                 "🧠 **Competitive Intelligence Report**",
                 f"📊 Based on {len(recent_content)} recently analyzed websites",
                 ""
             ]
             
-            if insights.get('key_trends'):
-                response_parts.extend([
-                    "**🔥 Key Market Trends:**",
-                    *[f"• {trend}" for trend in insights['key_trends'][:5]],
-                    ""
-                ])
+            # Show key insights from stored content
+            for i, content in enumerate(recent_content[:5], 1):
+                insights = content.get('key_insights', {})
+                response_parts.append(f"**{i}. {content['domain']}**")
+                if insights.get('value_proposition'):
+                    response_parts.append(f"   🎯 Value Prop: {insights['value_proposition'][:100]}...")
+                if insights.get('content_strategy'):
+                    response_parts.append(f"   📝 Strategy: {insights['content_strategy'][:100]}...")
+                response_parts.append("")
             
-            if insights.get('competitive_advantages'):
-                response_parts.extend([
-                    "**💪 Competitive Opportunities:**",
-                    *[f"• {advantage}" for advantage in insights['competitive_advantages'][:3]],
-                    ""
-                ])
-            
-            if insights.get('content_gaps'):
-                response_parts.extend([
-                    "**🎯 Content Gap Analysis:**",
-                    *[f"• {gap}" for gap in insights['content_gaps'][:3]],
-                    ""
-                ])
-            
-            response_parts.extend([
-                "**📈 Strategic Recommendations:**",
-                *[f"• {rec}" for rec in insights.get('recommendations', ['Continue monitoring competitor activity'])[:3]]
-            ])
-            
+            response_parts.append("🔍 Use `scrape https://newsite.com` to add more competitive intelligence!")
             return "\n".join(response_parts)
         
         else:
@@ -550,48 +534,34 @@ Ready to analyze your competition? 🕵️"""
             
             # Perform the scrape
             scraper = MarketingScraperClient()
-            analyzer = MarketingContentAnalyzer()
-            db = ScrapedContentDB()
-            
-            # Show initial processing message
-            processing_msg = f"""🔍 **Analyzing Website: {url}**
-
-⏳ Extracting content...
-🧠 AI analysis in progress...
-💾 Storing insights for future reference...
-
-This may take a moment..."""
+            analyzer = ContentAnalyzer()
+            db = ScrapedContentDatabase()
             
             try:
                 # Scrape the website
-                scraped_data = await scraper.scrape_url(url)
+                scraped_data = await scraper.scrape_website(url)
                 
-                if not scraped_data.get('success'):
+                if not scraped_data.get('scrape_status') == 'completed':
                     return f"""❌ **Scraping Failed**
                     
 Unable to analyze {url}
-Error: {scraped_data.get('error', 'Unknown error')}
+Error: {scraped_data.get('error_message', 'Unknown error')}
 
 Please verify the URL is accessible and try again."""
                 
                 # Analyze the content
-                analysis = await analyzer.analyze_content(
-                    scraped_data['content'],
-                    scraped_data['metadata']
-                )
+                analysis = await analyzer.analyze_scraped_content(scraped_data)
                 
                 # Store in database
                 await db.store_scraped_content(
-                    url=url,
-                    content=scraped_data['content'],
-                    metadata=scraped_data['metadata'],
-                    analysis=analysis,
-                    user_id=user_id
+                    user_id=user_id,
+                    scraped_data=scraped_data,
+                    analysis_results=analysis
                 )
                 
                 # Generate response
-                domain = scraped_data['metadata'].get('domain', url)
-                word_count = len(scraped_data['content'].split())
+                domain = scraped_data.get('domain', url)
+                word_count = scraped_data.get('word_count', 0)
                 
                 response_parts = [
                     f"✅ **Successfully Analyzed: {domain}**",
@@ -599,26 +569,32 @@ Please verify the URL is accessible and try again."""
                     ""
                 ]
                 
-                if analysis.get('key_insights'):
-                    response_parts.extend([
-                        "**🎯 Key Marketing Insights:**",
-                        *[f"• {insight}" for insight in analysis['key_insights'][:4]],
-                        ""
-                    ])
+                if analysis.get('competitive_insights'):
+                    insights = analysis.get('competitive_insights', {})
+                    if insights.get('value_proposition'):
+                        response_parts.extend([
+                            "**🎯 Value Proposition:**",
+                            f"• {insights['value_proposition'][:200]}...",
+                            ""
+                        ])
                 
-                if analysis.get('content_strategy'):
-                    response_parts.extend([
-                        "**📝 Content Strategy Observed:**",
-                        f"• {analysis['content_strategy'][:200]}...",
-                        ""
-                    ])
+                if analysis.get('marketing_angles'):
+                    marketing = analysis.get('marketing_angles', {})
+                    if marketing.get('content_strategy'):
+                        response_parts.extend([
+                            "**📝 Content Strategy:**",
+                            f"• {marketing['content_strategy'][:200]}...",
+                            ""
+                        ])
                 
-                if analysis.get('competitive_intel'):
-                    response_parts.extend([
-                        "**🕵️ Competitive Intelligence:**",
-                        *[f"• {intel}" for intel in analysis['competitive_intel'][:3]],
-                        ""
-                    ])
+                if analysis.get('cta_analysis'):
+                    cta = analysis.get('cta_analysis', {})
+                    if cta.get('cta_placement_strategy'):
+                        response_parts.extend([
+                            "**🔥 CTA Strategy:**",
+                            f"• {cta['cta_placement_strategy'][:200]}...",
+                            ""
+                        ])
                 
                 response_parts.extend([
                     f"💾 **Stored for Analysis** - Use `scrape insights` for competitive intelligence",
@@ -928,7 +904,7 @@ async def chat_with_ai(
         if processed_files:
             file_descriptions = []
             for file_info in processed_files:
-                desc = f"📎 {file_info['filename']} ({file_info['analysis']['type']}): {file_info['analysis']['description']}"
+                desc = f"🔎 {file_info['filename']} ({file_info['analysis']['type']}): {file_info['analysis']['description']}"
                 file_descriptions.append(desc)
                 
                 if file_info['analysis']['extracted_text']:
