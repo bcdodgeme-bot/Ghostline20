@@ -348,8 +348,8 @@ class RSSFeedProcessor:
                 'marketing_insights': analysis.get('insights', ''),
                 'actionable_tips': analysis.get('actionable_tips', []),
                 'content_type': analysis.get('content_type', 'article'),
-                'relevance_score': analysis.get('relevance_score', 5.0),
-                'trend_score': analysis.get('trend_score', 5.0),
+                'relevance_score': relevance_score,  # ← CHANGE THIS
+                'trend_score': trend_score,
                 'sentiment_score': sentiment_score,  # Now properly clamped
                 'ai_processed': True,
                 'processed': True
