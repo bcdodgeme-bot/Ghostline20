@@ -324,6 +324,12 @@ async def startup_event():
 
 #-- Section 11: API Status and Info Endpoints - updated 9/24/25 with Bluesky
 # Update Section 11: API Status and Info Endpoints - Add RSS Learning to features
+#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning
+@app.get("/health")
+async def health_check():
+    """System health check endpoint - THE MISSING PIECE!"""
+    return await get_health_status()
+
 @app.get("/api/status")
 async def api_status():
     """Comprehensive API status endpoint with system information."""
