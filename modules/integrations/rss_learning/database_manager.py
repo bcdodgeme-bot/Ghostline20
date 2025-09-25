@@ -39,7 +39,7 @@ class RSSDatabase:
             logger.error(f"Failed to get sources to fetch: {e}")
             return []
     
-    async def update_source_status(self, source_id: int, success: bool, 
+    async def update_source_status(self, source_id: int, success: bool,
                                  error: str = None, items_count: int = 0):
         """Update RSS source fetch status"""
         try:
@@ -94,7 +94,7 @@ class RSSDatabase:
         
         try:
             await self.db.execute(
-                query, 
+                query,
                 item_id,
                 item_data['title'],
                 item_data.get('description', ''),
@@ -105,6 +105,15 @@ class RSSDatabase:
     
     async def insert_feed_item(self, item_data: Dict[str, Any]) -> bool:
         """Insert new RSS feed item"""
+        
+        # NUCLEAR SAFETY: Clamp ALL numeric values to DECIMAL(3,2) range
+        if 'sentiment_score' in item_data:
+            item_data['sentiment_score'] = max(-9.99, min(9.99, float(item_data['sentiment_score'] or 0)))
+        if 'trend_score' in item_data:
+            item_data['trend_score'] = max(-9.99, min(9.99, float(item_data['trend_score'] or 5.0)))
+        if 'relevance_score' in item_data:
+            item_data['relevance_score'] = max(-9.99, min(9.99, float(item_data['relevance_score'] or 5.0)))
+        
         query = '''
             INSERT INTO rss_feed_entries (
                 source_id, title, description, link, pub_date, guid,
@@ -274,7 +283,7 @@ class RSSDatabase:
             logger.error(f"Failed to get trending topics: {e}")
             return []
     
-    async def get_content_for_writing_assistance(self, content_type: str, 
+    async def get_content_for_writing_assistance(self, content_type: str,
                                                topic: str = None) -> List[Dict[str, Any]]:
         """Get relevant content for AI writing assistance"""
         if topic:
