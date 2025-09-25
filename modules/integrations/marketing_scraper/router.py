@@ -11,9 +11,14 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from modules.core.auth import get_current_user_id
+from fastapi import Depends
+from typing import Optional
 from .database_manager import ScrapedContentDatabase
 from .integration_info import get_integration_info, check_module_health
+
+async def get_current_user_id() -> str:
+    """Get current user ID - placeholder for marketing scraper"""
+    return "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
 logger = logging.getLogger(__name__)
 

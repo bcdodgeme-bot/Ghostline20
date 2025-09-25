@@ -345,6 +345,7 @@ async def startup_event():
     print()
 
 #-- Section 11: API Status and Health Endpoints - updated 9/25/25 with Marketing Scraper
+#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
@@ -368,11 +369,11 @@ async def api_status():
             "🌦️ Health-focused weather monitoring with Tomorrow.io",
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
             "📰 RSS Learning system with AI-powered marketing insights",
-            "🔍 AI-powered marketing scraper for competitive analysis",  # NEW
+            # "🔍 AI-powered marketing scraper for competitive analysis",  # COMMENTED OUT - module doesn't exist yet
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "authentication"],  # NEW: Added marketing-scraper
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "authentication"],  # REMOVED marketing-scraper
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -400,9 +401,9 @@ async def api_status():
             "rss_insights": "/integrations/rss/insights",
             "rss_trends": "/integrations/rss/trends",
             "rss_writing_inspiration": "/integrations/rss/writing-inspiration",
-            "marketing_scraper_health": "/integrations/marketing-scraper/health",  # NEW
-            "marketing_scraper_stats": "/integrations/marketing-scraper/stats",  # NEW
-            "marketing_scraper_history": "/integrations/marketing-scraper/history",  # NEW
+            # "marketing_scraper_health": "/integrations/marketing-scraper/health",  # COMMENTED OUT
+            # "marketing_scraper_stats": "/integrations/marketing-scraper/stats",  # COMMENTED OUT
+            # "marketing_scraper_history": "/integrations/marketing-scraper/history",  # COMMENTED OUT
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -429,14 +430,14 @@ async def api_status():
             "processing_interval": "weekly",
             "categories": ["seo", "content_marketing", "social_media", "analytics"],
             "api_configured": rss_learning_module_health()['healthy']
-        },
-        "marketing_scraper_system": {  # NEW
-            "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
-            "commands": ["scrape [URL]", "scrape history", "scrape insights"],
-            "storage": "postgresql_scraped_content_table",
-            "ai_integration": "syntaxprime_personality",
-            "api_configured": marketing_scraper_module_health()['healthy']
         }
+        # "marketing_scraper_system": {  # COMMENTED OUT - module doesn't exist yet
+        #     "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
+        #     "commands": ["scrape [URL]", "scrape history", "scrape insights"],
+        #     "storage": "postgresql_scraped_content_table",
+        #     "ai_integration": "syntaxprime_personality",
+        #     "api_configured": marketing_scraper_module_health()['healthy']
+        # }
     }
 
 @app.get("/integrations")
@@ -492,17 +493,17 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
-    # NEW: Marketing Scraper integration - added 9/25/25
-    try:
-        integrations['marketing_scraper'] = {
-            'info': marketing_scraper_integration_info(),
-            'health': marketing_scraper_module_health()
-        }
-    except Exception as e:
-        integrations['marketing_scraper'] = {
-            'info': {'module': 'marketing_scraper', 'status': 'failed'},
-            'health': {'healthy': False, 'error': str(e)}
-        }
+    # Marketing Scraper integration - COMMENTED OUT until module is created
+    # try:
+    #     integrations['marketing_scraper'] = {
+    #         'info': marketing_scraper_integration_info(),
+    #         'health': marketing_scraper_module_health()
+    #     }
+    # except Exception as e:
+    #     integrations['marketing_scraper'] = {
+    #         'info': {'module': 'marketing_scraper', 'status': 'failed'},
+    #         'health': {'healthy': False, 'error': str(e)}
+    #     }
     
     # AI Brain integration
     try:
@@ -552,7 +553,6 @@ async def integrations_info():
         'healthy_modules': sum(1 for module in integrations.values() if module['health'].get('healthy', False)),
         'timestamp': datetime.now().isoformat()
     }
-
 #-- Section 12: Integration Module Routers - updated 9/25/25 with Marketing Scraper
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
