@@ -634,12 +634,13 @@ Please try again or contact support if the issue persists."""
             return ""
 
 #-- Section 6: Chat Message Processing - Updated 9/25/25 with FIXED Command Order
+#-- Section 6: Chat Message Processing - Updated 9/26/25 with PRAYER TIMES INTEGRATION
     async def process_chat_message(self,
                                  chat_request: ChatRequest,
                                  user_id: str = None) -> ChatResponse:
         """
         Process a chat message through the complete AI brain pipeline
-        FIXED: Proper command detection order
+        FIXED: Proper command detection order with Prayer Times integration
         """
         user_id = user_id or self.default_user_id
         start_time = time.time()
@@ -722,7 +723,88 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
 """
                     print(f"🌦️ WEATHER DEBUG: Weather service returned unexpected response")
             
-            # 3. FIXED: Check for Marketing Scraper commands BEFORE regular AI processing
+            # 3. NEW: Check for Prayer Times commands - Added 9/26/25
+            prayer_detected = self._detect_prayer_command(chat_request.message)
+            print(f"🕌 PRAYER DEBUG: Prayer detection result: {prayer_detected} for message: '{chat_request.message}'")
+            
+            if prayer_detected:
+                print(f"🕌 PRAYER DEBUG: Prayer command detected, processing...")
+                
+                try:
+                    prayer_response = await self._process_prayer_command(chat_request.message, user_id)
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    
+                    print(f"🕌 PRAYER DEBUG: Prayer response generated successfully")
+                    print(f"🕌 PRAYER DEBUG: Response preview: {prayer_response[:100]}...")
+                    
+                    # Store prayer response
+                    ai_message_id = await memory_manager.add_message(
+                        thread_id=thread_id,
+                        role='assistant',
+                        content=prayer_response,
+                        model_used='prayer_times_assistant',
+                        response_time_ms=response_time_ms
+                    )
+                    
+                    print(f"🕌 PRAYER DEBUG: Prayer response stored with message ID: {ai_message_id}")
+                    
+                    return ChatResponse(
+                        response=prayer_response,
+                        thread_id=thread_id,
+                        message_id=ai_message_id,
+                        personality_id="prayer_times_assistant",
+                        model_used="prayer_times_assistant",
+                        response_time_ms=response_time_ms,
+                        knowledge_sources=[],
+                        conversation_context={
+                            'thread_id': thread_id,
+                            'command_type': 'prayer_times',
+                            'message_count': 2
+                        }
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"🕌 PRAYER ERROR: Prayer processing failed with exception: {e}")
+                    logger.error(f"🕌 PRAYER ERROR: Exception details:", exc_info=True)
+                    print(f"🕌 PRAYER DEBUG: Exception during prayer processing: {e}")
+                    
+                    # Create error response for prayer system failure
+                    error_response = f"""🕌 **Prayer Time Service Error**
+                    
+I encountered an error while retrieving prayer information: {str(e)}
+
+Please try again in a few moments, or use these alternatives:
+• Try asking "What time is Dhuhr prayer?" instead
+• Check prayer times manually at IslamicFinder.org
+• Contact support if this issue persists
+
+The error has been logged for investigation."""
+                    
+                    # Store error response
+                    ai_message_id = await memory_manager.add_message(
+                        thread_id=thread_id,
+                        role='assistant',
+                        content=error_response,
+                        model_used='prayer_times_error',
+                        response_time_ms=int((time.time() - start_time) * 1000)
+                    )
+                    
+                    return ChatResponse(
+                        response=error_response,
+                        thread_id=thread_id,
+                        message_id=ai_message_id,
+                        personality_id="prayer_times_error",
+                        model_used="prayer_times_error",
+                        response_time_ms=int((time.time() - start_time) * 1000),
+                        knowledge_sources=[],
+                        conversation_context={
+                            'thread_id': thread_id,
+                            'command_type': 'prayer_times_error',
+                            'message_count': 2
+                        }
+                    )
+            
+            # 4. Check for Marketing Scraper commands
             if self._detect_scraper_command(chat_request.message):
                 print(f"🔍 SCRAPER DEBUG: Marketing scraper command detected")
                 
@@ -761,7 +843,7 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
                     print(f"🔍 SCRAPER DEBUG: Exception during processing: {e}")
                     # Fall through to regular AI processing on scraper failure
             
-            # 4. Regular AI processing (only if no special commands detected)
+            # 5. Regular AI processing (only if no special commands detected)
             print(f"🤖 DEBUG: Proceeding with regular AI processing")
             
             # Get conversation context for AI
@@ -881,19 +963,23 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
                     'message_count': context_info.get('total_messages', 0),
                     'tokens_used': context_info.get('estimated_tokens', 0),
                     'has_long_term_memory': context_info.get('has_memory_context', False),
-                    'weather_detected': weather_detected
+                    'weather_detected': weather_detected,
+                    'prayer_detected': prayer_detected
                 }
             )
             
             logger.info(f"Chat processed: {response_time_ms}ms, model: {model_used}, "
                        f"personality: {chat_request.personality_id}, "
                        f"weather: {'Yes' if weather_detected else 'No'}, "
+                       f"prayer: {'Yes' if prayer_detected else 'No'}, "
                        f"rss: {'Yes' if rss_context else 'No'}")
             
             return chat_response
             
         except Exception as e:
             logger.error(f"Chat processing failed: {e}")
+            logger.error(f"Exception details:", exc_info=True)
+            print(f"🤖 CRITICAL ERROR: Chat processing failed with: {e}")
             
             # Store error message
             error_message = f"Sorry, I encountered an error processing your message: {str(e)}"
@@ -905,6 +991,248 @@ WEATHER REQUEST DETECTED: Weather service is currently unavailable. Please respo
             )
             
             raise HTTPException(status_code=500, detail=str(e))
+
+    # NEW: Prayer Times Detection and Processing Methods - Added 9/26/25
+    def _detect_prayer_command(self, message: str) -> bool:
+        """Detect prayer-related requests"""
+        print(f"🕌 PRAYER DEBUG: Checking message '{message}' for prayer keywords")
+        
+        prayer_keywords = [
+            "prayer", "prayers", "salah", "namaz", "fajr", "dhuhr", "asr", "maghrib", "isha",
+            "prayer time", "prayer times", "next prayer", "when is prayer", "how long until",
+            "how long till", "time until prayer", "prayer schedule", "islamic time", "islamic date",
+            "when is asr", "when is fajr", "when is dhuhr", "when is maghrib", "when is isha",
+            "asr time", "fajr time", "dhuhr time", "maghrib time", "isha time"
+        ]
+        
+        message_lower = message.lower()
+        result = any(keyword in message_lower for keyword in prayer_keywords)
+        
+        print(f"🕌 PRAYER DEBUG: Detection result = {result}")
+        if result:
+            matched_keywords = [keyword for keyword in prayer_keywords if keyword in message_lower]
+            print(f"🕌 PRAYER DEBUG: Matched keywords: {matched_keywords}")
+        
+        return result
+
+    def _detect_prayer_question_type(self, message: str) -> str:
+        """Determine what type of prayer question the user is asking"""
+        print(f"🕌 PRAYER DEBUG: Analyzing question type for: '{message}'")
+        
+        message_lower = message.lower()
+        
+        if any(phrase in message_lower for phrase in ["how long", "time until", "time till", "when is next"]):
+            question_type = "next_prayer"
+        elif any(phrase in message_lower for phrase in ["prayer times today", "today's prayer", "prayer schedule", "all prayer"]):
+            question_type = "daily_schedule"
+        elif any(phrase in message_lower for phrase in ["islamic date", "hijri", "islamic calendar"]):
+            question_type = "islamic_date"
+        elif any(phrase in message_lower for phrase in ["when is asr", "when is fajr", "when is dhuhr", "when is maghrib", "when is isha", "asr time", "fajr time", "dhuhr time", "maghrib time", "isha time"]):
+            question_type = "specific_prayer_time"
+        else:
+            question_type = "general_prayer"
+        
+        print(f"🕌 PRAYER DEBUG: Question type determined: {question_type}")
+        return question_type
+
+    async def _process_prayer_command(self, message: str, user_id: str) -> str:
+        """Process prayer-related commands using the cached database system"""
+        print(f"🕌 PRAYER DEBUG: Starting prayer command processing for user {user_id}")
+        print(f"🕌 PRAYER DEBUG: Message: '{message}'")
+        
+        try:
+            # Import prayer times components (lazy import to avoid circular dependencies)
+            print(f"🕌 PRAYER DEBUG: Importing prayer times components...")
+            from ..integrations.prayer_times.database_manager import get_next_prayer, get_todays_prayers
+            print(f"🕌 PRAYER DEBUG: Prayer times components imported successfully")
+            
+            question_type = self._detect_prayer_question_type(message)
+            print(f"🕌 PRAYER DEBUG: Processing question type: {question_type}")
+            
+            if question_type == "next_prayer":
+                print(f"🕌 PRAYER DEBUG: Getting next prayer info...")
+                next_prayer_info = await get_next_prayer()
+                print(f"🕌 PRAYER DEBUG: Next prayer info result: {next_prayer_info}")
+                
+                if not next_prayer_info:
+                    print(f"🕌 PRAYER DEBUG: No next prayer info available")
+                    return """🕌 **Prayer Time Service Unavailable**
+                    
+Unable to retrieve prayer times at the moment. Please try again in a few moments."""
+                
+                prayer_name = next_prayer_info['prayer_name']
+                prayer_time = next_prayer_info['prayer_time']
+                time_until_text = next_prayer_info['time_until_text']
+                is_today = next_prayer_info['is_today']
+                
+                day_text = "today" if is_today else "tomorrow"
+                
+                print(f"🕌 PRAYER DEBUG: Next prayer response prepared: {prayer_name} at {prayer_time}")
+                
+                return f"""🕌 **Next Prayer: {prayer_name}**
+
+⏰ **Time:** {prayer_time} ({day_text})
+⏳ **Time Until:** {time_until_text}
+
+Prayer times are calculated for Merrifield, Virginia using ISNA method."""
+            
+            elif question_type == "daily_schedule":
+                print(f"🕌 PRAYER DEBUG: Getting daily prayer schedule...")
+                daily_prayers = await get_todays_prayers()
+                print(f"🕌 PRAYER DEBUG: Daily prayers result: {daily_prayers}")
+                
+                if not daily_prayers:
+                    print(f"🕌 PRAYER DEBUG: No daily prayers available")
+                    return """🕌 **Prayer Schedule Unavailable**
+                    
+Unable to retrieve today's prayer schedule. Please try again in a few moments."""
+                
+                prayer_times = daily_prayers['prayer_times']
+                islamic_date = daily_prayers['islamic_date']
+                
+                response_parts = [
+                    "🕌 **Today's Prayer Schedule**",
+                    f"📅 **Date:** {daily_prayers.get('formatted_date', 'Today')}",
+                    ""
+                ]
+                
+                if islamic_date['date'] != 'N/A':
+                    response_parts.extend([
+                        f"🌙 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                        ""
+                    ])
+                
+                response_parts.extend([
+                    "⏰ **Prayer Times:**",
+                    f"• **Fajr:** {prayer_times['fajr']}",
+                    f"• **Dhuhr:** {prayer_times['dhuhr']}",
+                    f"• **Asr:** {prayer_times['asr']}",
+                    f"• **Maghrib:** {prayer_times['maghrib']}",
+                    f"• **Isha:** {prayer_times['isha']}",
+                    "",
+                    "Calculated for Merrifield, Virginia using ISNA method."
+                ])
+                
+                print(f"🕌 PRAYER DEBUG: Daily schedule response prepared")
+                return "\n".join(response_parts)
+            
+            elif question_type == "specific_prayer_time":
+                print(f"🕌 PRAYER DEBUG: Getting specific prayer time...")
+                daily_prayers = await get_todays_prayers()
+                
+                if not daily_prayers:
+                    print(f"🕌 PRAYER DEBUG: No prayer data available for specific time")
+                    return """🕌 **Prayer Time Service Unavailable**
+                    
+Unable to retrieve prayer times at the moment. Please try again in a few moments."""
+                
+                prayer_times = daily_prayers['prayer_times']
+                message_lower = message.lower()
+                
+                # Determine which specific prayer was asked about
+                if "fajr" in message_lower:
+                    prayer_name = "Fajr"
+                    prayer_time = prayer_times['fajr']
+                elif "dhuhr" in message_lower:
+                    prayer_name = "Dhuhr"
+                    prayer_time = prayer_times['dhuhr']
+                elif "asr" in message_lower:
+                    prayer_name = "Asr"
+                    prayer_time = prayer_times['asr']
+                elif "maghrib" in message_lower:
+                    prayer_name = "Maghrib"
+                    prayer_time = prayer_times['maghrib']
+                elif "isha" in message_lower:
+                    prayer_name = "Isha"
+                    prayer_time = prayer_times['isha']
+                else:
+                    # Fallback to next prayer
+                    next_prayer_info = await get_next_prayer()
+                    if next_prayer_info:
+                        prayer_name = next_prayer_info['prayer_name']
+                        prayer_time = next_prayer_info['prayer_time']
+                    else:
+                        return "🕌 Unable to determine which prayer time you're asking about."
+                
+                print(f"🕌 PRAYER DEBUG: Specific prayer response: {prayer_name} at {prayer_time}")
+                
+                return f"""🕌 **{prayer_name} Prayer Time**
+
+⏰ **Time:** {prayer_time}
+
+Calculated for Merrifield, Virginia using ISNA method."""
+            
+            elif question_type == "islamic_date":
+                print(f"🕌 PRAYER DEBUG: Getting Islamic date...")
+                daily_prayers = await get_todays_prayers()
+                
+                if not daily_prayers:
+                    return """🕌 **Islamic Calendar Service Unavailable**
+                    
+Unable to retrieve Islamic date information at the moment. Please try again in a few moments."""
+                
+                islamic_date = daily_prayers['islamic_date']
+                
+                return f"""🌙 **Islamic Date**
+
+📅 **Today:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}
+
+Calculated using the Hijri calendar system."""
+            
+            else:
+                # General prayer information
+                print(f"🕌 PRAYER DEBUG: Providing general prayer information...")
+                next_prayer_info = await get_next_prayer()
+                daily_prayers = await get_todays_prayers()
+                
+                if not next_prayer_info or not daily_prayers:
+                    return """🕌 **Prayer Time Information**
+                    
+Prayer time service is currently unavailable. Please try again in a few moments."""
+                
+                next_prayer = next_prayer_info['prayer_name']
+                time_until = next_prayer_info['time_until_text']
+                islamic_date = daily_prayers['islamic_date']
+                
+                response_parts = [
+                    "🕌 **Prayer Time Information**",
+                    "",
+                    f"⏰ **Next Prayer:** {next_prayer} in {time_until}",
+                    ""
+                ]
+                
+                if islamic_date['date'] != 'N/A':
+                    response_parts.extend([
+                        f"📅 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                        ""
+                    ])
+                
+                response_parts.extend([
+                    "**Available Commands:**",
+                    "• 'How long till [prayer name]?' - Next prayer countdown",
+                    "• 'What are prayer times today?' - Full daily schedule",
+                    "• 'When is Asr?' - Specific prayer time",
+                    "• 'Islamic date' - Current Hijri calendar date"
+                ])
+                
+                print(f"🕌 PRAYER DEBUG: General information response prepared")
+                return "\n".join(response_parts)
+        
+        except Exception as e:
+            logger.error(f"🕌 PRAYER ERROR: Prayer command processing failed: {e}")
+            logger.error(f"🕌 PRAYER ERROR: Full exception details:", exc_info=True)
+            print(f"🕌 PRAYER DEBUG: Exception during processing: {e}")
+            
+            return f"""🕌 **Prayer Time Service Error**
+            
+An error occurred while retrieving prayer information: {str(e)}
+
+Please try again or contact support if the issue persists.
+
+**Alternative Commands:**
+• Try "What time is Dhuhr?" instead
+• Use "prayer times today" for full schedule
+• Check IslamicFinder.org for manual lookup"""
 
 #-- Section 7: AI Response Helper Methods - 9/23/25
     def _build_knowledge_context(self, knowledge_sources: List[Dict]) -> str:
