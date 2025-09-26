@@ -46,18 +46,23 @@ class MarketingScraperClient:
                 raise ValueError(f"Invalid URL format: {url}")
             
             # Fetch website content
+            print(f"🔍 SCRAPER DEBUG: Fetching content")
             raw_html, response_info = await self._fetch_content(url)
             
             # Parse HTML and extract content
+            print(f"🔍 SCRAPER DEBUG: Parsing HTML")
             soup = BeautifulSoup(raw_html, 'html.parser')
             
             # Extract basic metadata
+            print(f"🔍 SCRAPER DEBUG: Extracting metadata")
             metadata = self._extract_metadata(soup, parsed_url)
             
             # Clean and extract main content
+            print(f"🔍 SCRAPER DEBUG: Extracting clean content")
             cleaned_content = self._extract_clean_content(soup)
             
             # Analyze page structure
+            print(f"🔍 SCRAPER DEBUG: Analyzing page structure")
             page_structure = self._analyze_page_structure(soup)
             
             # Calculate processing metrics
