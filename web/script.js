@@ -47,59 +47,128 @@ class SyntaxPrimeChat {
     }
 
     setupEventListeners() {
+        // ENHANCED: Check for existing listeners to prevent duplicates
+        console.log('🔧 Setting up event listeners...');
+        
+        // Remove any existing listeners first
+        const elements = [
+            'sidebarToggle', 'newChatBtn', 'settingsBtn', 'logoutBtn',
+            'personalitySelect', 'messageInput', 'sendButton', 'fileButton', 'fileInput', 'rememberBtn'
+        ];
+        
+        elements.forEach(id => {
+            const element = document.getElementById(id);
+            if (element && element._syntaxListenersAttached) {
+                console.log(`⚠️ Listeners already attached to ${id}, skipping`);
+                return;
+            }
+        });
+
         // Header controls
-        document.getElementById('sidebarToggle').addEventListener('click', this.toggleSidebar.bind(this));
-        document.getElementById('newChatBtn').addEventListener('click', this.startNewChat.bind(this));
-        document.getElementById('settingsBtn').addEventListener('click', this.openSettings.bind(this));
-        document.getElementById('logoutBtn').addEventListener('click', this.logout.bind(this));
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        if (sidebarToggle && !sidebarToggle._syntaxListenersAttached) {
+            sidebarToggle.addEventListener('click', this.toggleSidebar.bind(this));
+            sidebarToggle._syntaxListenersAttached = true;
+        }
+
+        const newChatBtn = document.getElementById('newChatBtn');
+        if (newChatBtn && !newChatBtn._syntaxListenersAttached) {
+            newChatBtn.addEventListener('click', this.startNewChat.bind(this));
+            newChatBtn._syntaxListenersAttached = true;
+        }
+
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn && !settingsBtn._syntaxListenersAttached) {
+            settingsBtn.addEventListener('click', this.openSettings.bind(this));
+            settingsBtn._syntaxListenersAttached = true;
+        }
+
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn && !logoutBtn._syntaxListenersAttached) {
+            logoutBtn.addEventListener('click', this.logout.bind(this));
+            logoutBtn._syntaxListenersAttached = true;
+        }
 
         // Personality selector
-        document.getElementById('personalitySelect').addEventListener('change', (e) => {
-            this.currentPersonality = e.target.value;
-            this.saveSettings();
-        });
+        const personalitySelect = document.getElementById('personalitySelect');
+        if (personalitySelect && !personalitySelect._syntaxListenersAttached) {
+            personalitySelect.addEventListener('change', (e) => {
+                this.currentPersonality = e.target.value;
+                this.saveSettings();
+            });
+            personalitySelect._syntaxListenersAttached = true;
+        }
 
         // Chat input with enhanced anti-duplication
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
 
-        messageInput.addEventListener('input', this.handleInputChange.bind(this));
-        messageInput.addEventListener('keydown', this.handleKeyPress.bind(this));
+        if (messageInput && !messageInput._syntaxListenersAttached) {
+            messageInput.addEventListener('input', this.handleInputChange.bind(this));
+            messageInput.addEventListener('keydown', this.handleKeyPress.bind(this));
+            messageInput._syntaxListenersAttached = true;
+        }
         
-        // FIXED: Use the enhanced send handler from working version
-        sendButton.addEventListener('click', this.handleSendClick.bind(this));
+        // CRITICAL: Ensure only ONE click listener on send button
+        if (sendButton && !sendButton._syntaxListenersAttached) {
+            console.log('🔧 Attaching click listener to send button');
+            sendButton.addEventListener('click', this.handleSendClick.bind(this));
+            sendButton._syntaxListenersAttached = true;
+        } else if (sendButton) {
+            console.log('⚠️ Send button already has listeners attached');
+        }
 
         // File upload - FIXED: Correct element IDs
         const fileButton = document.getElementById('fileButton');
         const fileInput = document.getElementById('fileInput');
         
-        if (fileButton && fileInput) {
+        if (fileButton && fileInput && !fileButton._syntaxListenersAttached) {
             fileButton.addEventListener('click', () => fileInput.click());
             fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+            fileButton._syntaxListenersAttached = true;
+            fileInput._syntaxListenersAttached = true;
         }
 
         // Remember button
         const rememberBtn = document.getElementById('rememberBtn');
-        if (rememberBtn) {
+        if (rememberBtn && !rememberBtn._syntaxListenersAttached) {
             rememberBtn.addEventListener('click', this.showBookmarkModal.bind(this));
+            rememberBtn._syntaxListenersAttached = true;
         }
 
         // Modal handlers
         this.setupModalHandlers();
+        
+        console.log('✅ Event listeners setup complete');
     }
 
-    // ENHANCED: Anti-duplication send handler from working version
+    // ENHANCED: Anti-duplication send handler with detailed logging
     handleSendClick(event) {
+        console.log('🖱️ handleSendClick called');
         event.preventDefault();
         event.stopPropagation();
 
-        // Anti-duplication protection
+        // Anti-duplication protection with detailed logging
         const now = Date.now();
-        if (this.isSubmitting || (now - this.lastSubmitTime) < 1000) {
-            console.log('⛔️ Double submission prevented');
+        const timeSinceLastSubmit = now - this.lastSubmitTime;
+        
+        console.log('🔍 Submit check:', {
+            isSubmitting: this.isSubmitting,
+            timeSinceLastSubmit,
+            cooldownRequired: 1000
+        });
+
+        if (this.isSubmitting) {
+            console.log('⛔️ BLOCKED: Already submitting');
+            return;
+        }
+        
+        if (timeSinceLastSubmit < 1000) {
+            console.log('⛔️ BLOCKED: Within cooldown period');
             return;
         }
 
+        console.log('✅ Proceeding with sendMessage()');
         this.sendMessage();
     }
 
@@ -221,27 +290,39 @@ class SyntaxPrimeChat {
         }
     }
 
-    // ENHANCED: Send message with working version improvements
+    // ENHANCED: Send message with detailed duplication tracking
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
+        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        if (!message && this.uploadedFiles.length === 0) return;
+        console.log(`🚀 sendMessage() called - ID: ${messageId}`);
+        console.log(`📝 Message content: "${message}"`);
 
-        // CRITICAL: Anti-duplication protection
-        if (this.isSubmitting) {
-            console.log('⛔️ Already submitting, ignoring duplicate call');
+        if (!message && this.uploadedFiles.length === 0) {
+            console.log('❌ Empty message, returning early');
             return;
         }
 
+        // CRITICAL: Enhanced anti-duplication with message tracking
+        if (this.isSubmitting) {
+            console.log(`⛔️ DUPLICATE BLOCKED: Already submitting (ID: ${messageId})`);
+            return;
+        }
+
+        console.log(`🔒 Setting isSubmitting = true (ID: ${messageId})`);
         this.isSubmitting = true;
         this.lastSubmitTime = Date.now();
 
         // Disable input while sending
         this.setInputState(false);
 
-        // Add user message to chat
-        this.addMessage('user', message, { files: this.uploadedFiles.slice() });
+        // Add user message to chat with unique ID
+        console.log(`👤 Adding user message (ID: ${messageId})`);
+        this.addMessage('user', message, {
+            files: this.uploadedFiles.slice(),
+            clientMessageId: messageId
+        });
 
         // Clear input
         messageInput.value = '';
@@ -252,14 +333,14 @@ class SyntaxPrimeChat {
             // Show typing indicator
             this.showTypingIndicator();
 
-            // ENHANCED: Better datetime context from working version
+            // Enhanced datetime context from working version
             const currentDateTime = new Date();
             const requestData = {
                 message: message,
                 personality_id: this.currentPersonality,
                 thread_id: this.currentThreadId,
                 include_knowledge: true,
-                // Enhanced context format
+                client_message_id: messageId, // Track client-side message ID
                 context: {
                     current_date: currentDateTime.toISOString().split('T')[0],
                     current_time: currentDateTime.toLocaleTimeString('en-US', { hour12: false }),
@@ -268,12 +349,16 @@ class SyntaxPrimeChat {
                 }
             };
 
-            console.log('📤 Sending request with context:', requestData.context);
+            console.log(`📤 Sending API request (ID: ${messageId}):`, requestData.context);
 
             // Send request
             const response = await this.apiCall('/ai/chat', 'POST', requestData);
 
-            console.log('📥 Received response:', response);
+            console.log(`📥 Received API response (ID: ${messageId}):`, {
+                messageId: response.message_id,
+                threadId: response.thread_id,
+                personalityUsed: response.personality_used
+            });
 
             // Update thread ID
             this.currentThreadId = response.thread_id;
@@ -281,9 +366,11 @@ class SyntaxPrimeChat {
             // Hide typing indicator
             this.hideTypingIndicator();
 
-            // Add AI response
+            // Add AI response with response tracking
+            console.log(`🤖 Adding AI response (ID: ${messageId} -> ${response.message_id})`);
             this.addMessage('assistant', response.response, {
                 messageId: response.message_id,
+                clientMessageId: messageId,
                 personality: response.personality_used,
                 responseTime: response.response_time_ms,
                 knowledgeSources: response.knowledge_sources || []
@@ -293,11 +380,15 @@ class SyntaxPrimeChat {
             this.showRememberButton(response.message_id);
 
         } catch (error) {
+            console.error(`❌ Chat error (ID: ${messageId}):`, error);
             this.hideTypingIndicator();
-            this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.', { error: true });
-            console.error('Chat error:', error);
+            this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.', {
+                error: true,
+                clientMessageId: messageId
+            });
         } finally {
             // CRITICAL: Always re-enable input and reset submission flag
+            console.log(`🔓 Resetting isSubmitting = false (ID: ${messageId})`);
             this.setInputState(true);
             this.isSubmitting = false;
             messageInput.focus();
