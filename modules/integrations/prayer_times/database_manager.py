@@ -141,6 +141,50 @@ class PrayerDatabaseManager:
                 except (ValueError, TypeError):
                     islamic_year = None
             
+            # 🔍 DEBUG LOGGING - CRITICAL DIAGNOSTIC INFO
+            logger.info("🔍 DEBUG: About to INSERT prayer times to database")
+            logger.info(f"  api_data success: {api_data.get('success')}")
+            logger.info(f"  target_date: {target_date}")
+            logger.info(f"  location_name: {location_name}")
+            
+            # Check the prayer_times dictionary
+            logger.info(f"  prayer_times dict: {prayer_times}")
+            logger.info(f"  prayer_times type: {type(prayer_times)}")
+            
+            for prayer_name, prayer_time in prayer_times.items():
+                logger.info(f"    {prayer_name}: {prayer_time}")
+                logger.info(f"      type: {type(prayer_time)}")
+                logger.info(f"      repr: {repr(prayer_time)}")
+                logger.info(f"      str: {str(prayer_time)}")
+                
+                # Check if it's a valid time object
+                if hasattr(prayer_time, 'hour'):
+                    logger.info(f"      hour: {prayer_time.hour}, minute: {prayer_time.minute}")
+                else:
+                    logger.info(f"      ❌ NOT A TIME OBJECT!")
+            
+            # Check Islamic date info
+            logger.info(f"  islamic_date_info: {islamic_date_info}")
+            logger.info(f"  islamic_year: {islamic_year} (type: {type(islamic_year)})")
+            
+            # Check the actual parameters being passed to the query
+            insert_params = [
+                self.user_id, target_date, location_name, lat, lng,
+                prayer_times["fajr"], prayer_times["dhuhr"], prayer_times["asr"],
+                prayer_times["maghrib"], prayer_times["isha"],
+                islamic_date_info.get("islamic_date"),
+                islamic_date_info.get("islamic_month"),
+                islamic_year,
+                api_data["calculation_method"],
+                api_data["location"]["timezone"],
+                json.dumps(api_data["raw_api_response"])
+            ]
+            
+            logger.info("🔍 DEBUG: INSERT parameters:")
+            for i, param in enumerate(insert_params, 1):
+                logger.info(f"    ${i}: {param} (type: {type(param)})")
+            # 🔍 END DEBUG LOGGING
+            
             # Insert/update in database
             query = """
             INSERT INTO prayer_times_cache (
@@ -188,6 +232,22 @@ class PrayerDatabaseManager:
             
             logger.info(f"✅ Cached prayer times for {target_date} (ID: {result_id})")
             
+            # 🔍 DEBUG: Verify what was actually stored
+            if result_id:
+                verify_query = """
+                SELECT fajr_time, dhuhr_time, asr_time, maghrib_time, isha_time 
+                FROM prayer_times_cache 
+                WHERE id = $1
+                """
+                stored_data = await self.db.fetch_one(verify_query, result_id)
+                if stored_data:
+                    logger.info("🔍 DEBUG: Verified stored data in database:")
+                    logger.info(f"  Stored Fajr: {stored_data['fajr_time']} (type: {type(stored_data['fajr_time'])})")
+                    logger.info(f"  Stored Dhuhr: {stored_data['dhuhr_time']} (type: {type(stored_data['dhuhr_time'])})")
+                    logger.info(f"  Stored Asr: {stored_data['asr_time']} (type: {type(stored_data['asr_time'])})")
+                    logger.info(f"  Stored Maghrib: {stored_data['maghrib_time']} (type: {type(stored_data['maghrib_time'])})")
+                    logger.info(f"  Stored Isha: {stored_data['isha_time']} (type: {type(stored_data['isha_time'])})")
+            
             # Return formatted response
             return self._format_prayer_times_response(
                 target_date, location_name, lat, lng, prayer_times,
@@ -196,6 +256,7 @@ class PrayerDatabaseManager:
             
         except Exception as e:
             logger.error(f"Error caching prayer times: {e}")
+            logger.error(f"Exception details:", exc_info=True)
             return None
     
     async def _get_cached_prayer_times(self, target_date: date, location_name: str) -> Optional[Dict[str, Any]]:
@@ -228,6 +289,14 @@ class PrayerDatabaseManager:
             row = await self.db.fetch_one(query, self.user_id, target_date, location_name)
             
             if row:
+                # 🔍 DEBUG: Check what we retrieved from database
+                logger.info("🔍 DEBUG: Retrieved cached prayer times from database:")
+                logger.info(f"  Retrieved Fajr: {row['fajr_time']} (type: {type(row['fajr_time'])})")
+                logger.info(f"  Retrieved Dhuhr: {row['dhuhr_time']} (type: {type(row['dhuhr_time'])})")
+                logger.info(f"  Retrieved Asr: {row['asr_time']} (type: {type(row['asr_time'])})")
+                logger.info(f"  Retrieved Maghrib: {row['maghrib_time']} (type: {type(row['maghrib_time'])})")
+                logger.info(f"  Retrieved Isha: {row['isha_time']} (type: {type(row['isha_time'])})")
+                
                 return self._format_prayer_times_response(
                     row["date"], row["location_name"],
                     float(row["latitude"]), float(row["longitude"]),

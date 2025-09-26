@@ -25,3 +25,6 @@ modules/integrations/rss_learning/__pycache__/database_manager.cpython-311.pyc
 modules/integrations/rss_learning/__pycache__/feed_processor.cpython-311.pyc
 modules/integrations/rss_learning/__pycache__/marketing_insights.cpython-311.pyc
 modules/integrations/rss_learning/__pycache__/router.cpython-311.pyc
+modules/integrations/prayer_times/__pycache__/__init__.cpython-311.pyc
+modules/integrations/prayer_times/__pycache__/database_manager.cpython-311.pyc
+modules/integrations/prayer_times/__pycache__/router.cpython-311.pyc
