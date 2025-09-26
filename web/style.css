@@ -1,7 +1,8 @@
 // =============================================================================
-// Syntax Prime V2 - FIXED Chat Interface JavaScript with Anti-Duplication
-// Fixes: Double submission prevention, DOM ready protection, proper initialization
-// Date: 9/26/25
+// Syntax Prime V2 - Fixed Chat Interface JavaScript with Feedback System
+// Fixes: API errors, input visibility, submit button, request format, feedback buttons
+// Date: 9/23/25
+// UPDATED: 9/26/25 - Added anti-duplication and datetime context
 // =============================================================================
 
 //-- Section 1: Core Class Setup and Constructor - 9/26/25
@@ -300,8 +301,6 @@ class SyntaxPrimeChat {
         }
     }
 
-// ... [REST OF THE EXISTING METHODS REMAIN THE SAME] ...
-
 //-- Section 8: Message Display with Feedback Buttons - 9/23/25
     addMessage(role, content, metadata = {}) {
         const messagesContainer = document.getElementById('chatMessages');
@@ -432,7 +431,7 @@ class SyntaxPrimeChat {
         messageDiv._messageContent = content;
     }
 
-    // NEW: Feedback Submission System - 9/26/25
+//-- Section 9: NEW Feedback Submission System - 9/23/25
     async submitFeedback(messageId, feedbackType) {
         try {
             // Visual feedback first
@@ -458,16 +457,27 @@ class SyntaxPrimeChat {
                 feedback_text: null
             });
 
-            this.showSuccess(response.message || 'Feedback submitted successfully');
+            // Show success notification with the emoji and message
+            this.showSuccess(response.message);
             
+            // Special effect for personality feedback
+            if (feedbackType === 'personality') {
+                setTimeout(() => {
+                    this.showNotification('🖕 Perfect personality recorded! More of this energy coming up!', 'success');
+                }, 500);
+            }
+            
+            console.log('Feedback submitted successfully:', response);
+
         } catch (error) {
             console.error('Feedback submission failed:', error);
             this.showError('Failed to submit feedback. Please try again.');
         }
     }
 
-    // Message formatting
+//-- Section 10: Message Content Formatting - 9/23/25
     formatMessageContent(content) {
+        // Basic markdown-like formatting
         return content
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -475,17 +485,40 @@ class SyntaxPrimeChat {
             .replace(/\n/g, '<br>');
     }
 
-    // Input handling
+//-- Section 11: Input Handling and Validation - 9/23/25
     handleInputChange() {
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
         
+        // Update character count
         this.updateCharCount();
         
+        // Enable/disable send button
         const hasContent = messageInput.value.trim().length > 0 || this.uploadedFiles.length > 0;
-        sendButton.disabled = !hasContent || this.isSubmitting;
+        sendButton.disabled = !hasContent || this.isTyping;
         
+        // Auto-resize textarea
         this.autoResizeTextarea();
+    }
+
+//-- Section 12: Textarea Auto-Resize and UI Updates - 9/23/25
+    autoResizeTextarea() {
+        const textarea = document.getElementById('messageInput');
+        // Reset height to auto to get correct scrollHeight
+        textarea.style.height = 'auto';
+        // Set height to scrollHeight but cap at reasonable max
+        const newHeight = Math.min(textarea.scrollHeight, 150);
+        textarea.style.height = newHeight + 'px';
+        
+        // Ensure the input container is visible
+        const inputContainer = document.querySelector('.chat-input-container');
+        const chatMessages = document.querySelector('.chat-messages');
+        
+        // Adjust chat messages height to account for input area
+        if (inputContainer && chatMessages) {
+            const inputHeight = inputContainer.offsetHeight;
+            chatMessages.style.paddingBottom = `${inputHeight + 20}px`;
+        }
     }
 
     updateCharCount() {
@@ -497,6 +530,7 @@ class SyntaxPrimeChat {
         if (charCount) {
             charCount.textContent = `${currentLength}/${maxLength}`;
             
+            // Change color when approaching limit
             if (currentLength > maxLength * 0.8) {
                 charCount.style.color = 'var(--warning)';
             } else {
@@ -505,20 +539,14 @@ class SyntaxPrimeChat {
         }
     }
 
-    autoResizeTextarea() {
-        const textarea = document.getElementById('messageInput');
-        textarea.style.height = 'auto';
-        const newHeight = Math.min(textarea.scrollHeight, 150);
-        textarea.style.height = newHeight + 'px';
-    }
-
-    // Typing indicator
     showTypingIndicator() {
         const messagesContainer = document.getElementById('chatMessages');
         
         // Remove existing typing indicator
         const existing = document.getElementById('typingIndicator');
-        if (existing) existing.remove();
+        if (existing) {
+            existing.remove();
+        }
         
         const typingDiv = document.createElement('div');
         typingDiv.id = 'typingIndicator';
@@ -536,6 +564,7 @@ class SyntaxPrimeChat {
         `;
         messagesContainer.appendChild(typingDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        this.isTyping = true;
     }
 
     hideTypingIndicator() {
@@ -543,6 +572,7 @@ class SyntaxPrimeChat {
         if (typingIndicator) {
             typingIndicator.remove();
         }
+        this.isTyping = false;
     }
 
     showRememberButton(messageId) {
@@ -555,7 +585,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // File handling
+//-- Section 13: File Upload Functions - 9/23/25
     handleFileSelect(event) {
         const files = Array.from(event.target.files);
         files.forEach(file => this.addUploadedFile(file));
@@ -590,29 +620,27 @@ class SyntaxPrimeChat {
         const filesContainer = document.getElementById('uploadedFiles');
 
         if (this.uploadedFiles.length > 0) {
-            if (uploadArea) uploadArea.style.display = 'block';
-            if (filesContainer) {
-                filesContainer.innerHTML = '';
-                
-                this.uploadedFiles.forEach((file, index) => {
-                    const fileDiv = document.createElement('div');
-                    fileDiv.className = 'uploaded-file';
-                    fileDiv.innerHTML = `
-                        <span>${this.getFileIcon(file.type)} ${file.name}</span>
-                        <button class="file-remove" onclick="syntaxChat.removeFile(${index})" title="Remove">×</button>
-                    `;
-                    filesContainer.appendChild(fileDiv);
-                });
-            }
+            uploadArea.style.display = 'block';
+            filesContainer.innerHTML = '';
+
+            this.uploadedFiles.forEach((file, index) => {
+                const fileDiv = document.createElement('div');
+                fileDiv.className = 'uploaded-file';
+                fileDiv.innerHTML = `
+                    <span>${this.getFileIcon(file.type)} ${file.name}</span>
+                    <button class="file-remove" onclick="syntaxChat.removeFile(${index})" title="Remove">×</button>
+                `;
+                filesContainer.appendChild(fileDiv);
+            });
         } else {
-            if (uploadArea) uploadArea.style.display = 'none';
+            uploadArea.style.display = 'none';
         }
     }
 
     removeFile(index) {
         this.uploadedFiles.splice(index, 1);
         this.updateFileUploadArea();
-        this.handleInputChange();
+        this.handleInputChange(); // Update send button state
     }
 
     clearUploadedFiles() {
@@ -627,7 +655,65 @@ class SyntaxPrimeChat {
         return '📎';
     }
 
-    // Notifications
+//-- Section 14: Drag and Drop Functions - 9/23/25
+    setupDragAndDrop() {
+        const chatContainer = document.querySelector('.chat-container');
+        let dragCounter = 0;
+
+        chatContainer.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            this.showDragOverlay();
+        });
+
+        chatContainer.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter === 0) {
+                this.hideDragOverlay();
+            }
+        });
+
+        chatContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+
+        chatContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            this.hideDragOverlay();
+            
+            const files = Array.from(e.dataTransfer.files);
+            files.forEach(file => this.addUploadedFile(file));
+        });
+    }
+
+    showDragOverlay() {
+        let overlay = document.getElementById('dragOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'dragOverlay';
+            overlay.className = 'drag-overlay';
+            overlay.innerHTML = `
+                <div class="drag-content">
+                    <div class="drag-icon">📁</div>
+                    <h3>Drop files here</h3>
+                    <p>Supports images, PDFs, text files, and CSV</p>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+    }
+
+    hideDragOverlay() {
+        const overlay = document.getElementById('dragOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+
+//-- Section 15: Notification System - 9/23/25
     showError(message) {
         this.showNotification(message, 'error');
     }
@@ -667,7 +753,7 @@ class SyntaxPrimeChat {
         }, 5000);
     }
 
-    // UI Controls
+//-- Section 16: UI Control Methods - 9/23/25
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         sidebar.classList.toggle('collapsed');
@@ -704,9 +790,11 @@ class SyntaxPrimeChat {
     }
 
     rememberMessage(messageId) {
+        // Implement bookmark functionality
         this.showSuccess('Remember functionality coming soon!');
     }
 
+//-- Section 17: Modal Management - 9/23/25
     showModal(modal) {
         modal.classList.add('active');
         modal.style.display = 'flex';
@@ -737,6 +825,7 @@ class SyntaxPrimeChat {
         this.showSuccess('Bookmark saved!');
     }
 
+//-- Section 18: Authentication Management - 9/23/25
     logout() {
         fetch('/auth/logout', {
             method: 'POST',
@@ -748,11 +837,26 @@ class SyntaxPrimeChat {
         });
     }
 
-    // Conversation management
+//-- Section 19: Conversation Management - 9/23/25
     async loadPersonalities() {
         try {
             const response = await this.apiCall('/ai/personalities');
-            // Handle personalities if needed
+            
+            if (response && response.personalities) {
+                const select = document.getElementById('personalitySelect');
+                select.innerHTML = '';
+                
+                response.personalities.forEach(personality => {
+                    const option = document.createElement('option');
+                    option.value = personality.id;
+                    option.textContent = personality.name;
+                    if (personality.is_default) {
+                        option.selected = true;
+                        this.currentPersonality = personality.id;
+                    }
+                    select.appendChild(option);
+                });
+            }
         } catch (error) {
             console.error('Failed to load personalities:', error);
         }
@@ -761,31 +865,68 @@ class SyntaxPrimeChat {
     async loadConversations() {
         try {
             const response = await this.apiCall('/ai/conversations');
-            // Handle conversations if needed
+            
+            if (response && response.conversations) {
+                const conversationsList = document.querySelector('.conversations-list');
+                const loadingElement = conversationsList.querySelector('.loading-conversations');
+                
+                if (loadingElement) {
+                    loadingElement.remove();
+                }
+                
+                response.conversations.forEach(conversation => {
+                    const convDiv = document.createElement('div');
+                    convDiv.className = 'conversation-item';
+                    if (conversation.thread_id === this.currentThreadId) {
+                        convDiv.classList.add('active');
+                    }
+                    
+                    convDiv.innerHTML = `
+                        <div class="conversation-title">${conversation.title || 'New Conversation'}</div>
+                        <div class="conversation-meta">
+                            <span>${conversation.message_count || 0} messages</span>
+                            <span>${new Date(conversation.last_message_at).toLocaleDateString()}</span>
+                        </div>
+                    `;
+                    
+                    convDiv.addEventListener('click', () => {
+                        this.loadConversation(conversation.thread_id);
+                    });
+                    
+                    conversationsList.appendChild(convDiv);
+                });
+            }
         } catch (error) {
             console.error('Failed to load conversations:', error);
+            const conversationsList = document.querySelector('.conversations-list');
+            conversationsList.innerHTML = '<div class="error">Failed to load conversations</div>';
         }
     }
 
-    setupDragAndDrop() {
-        // Basic drag and drop setup
-        const chatContainer = document.querySelector('.chat-container');
-        if (!chatContainer) return;
-
-        chatContainer.addEventListener('dragover', (e) => {
-            e.preventDefault();
-        });
-
-        chatContainer.addEventListener('drop', (e) => {
-            e.preventDefault();
-            const files = Array.from(e.dataTransfer.files);
-            files.forEach(file => this.addUploadedFile(file));
-        });
+    async loadConversation(threadId) {
+        try {
+            this.currentThreadId = threadId;
+            const response = await this.apiCall(`/ai/conversations/${threadId}`);
+            
+            if (response && response.messages) {
+                const messagesContainer = document.getElementById('chatMessages');
+                messagesContainer.innerHTML = '';
+                
+                response.messages.forEach(message => {
+                    this.addMessage(message.role, message.content, {
+                        messageId: message.id,
+                        timestamp: message.created_at
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load conversation:', error);
+            this.showError('Failed to load conversation');
+        }
     }
-
 }
 
-//-- Section 19: FIXED App Initialization with DOM Ready Protection - 9/26/25
+//-- Section 20: FIXED App Initialization with DOM Ready Protection - 9/26/25
 // CRITICAL FIX: Only initialize when DOM is ready and only once
 let syntaxChat = null;
 
