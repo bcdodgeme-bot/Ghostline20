@@ -10,8 +10,8 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 # Import existing AI components from Syntax Prime V2
-# from modules.ai.openrouter_client import get_openrouter_client
-# from modules.ai.personality_engine import get_personality_engine
+from modules.ai.openrouter_client import get_openrouter_client
+from modules.ai.personality_engine import get_personality_engine
 
 logger = logging.getLogger(__name__)
 
