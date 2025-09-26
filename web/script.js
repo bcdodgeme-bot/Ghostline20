@@ -206,7 +206,9 @@ class SyntaxPrimeChat {
             console.error('❌ Chat error:', error);
             this.hideTypingIndicator();
             this.addMessage('assistant', `Sorry, I encountered an error: ${error.message || 'Please try again.'}`);
-        } finally {
+        }
+        
+        finally {
             // FIXED: Always reset submission state
             this.isSubmitting = false;
             this.setInputState(true);
@@ -226,11 +228,9 @@ class SyntaxPrimeChat {
         // Update character count
         this.updateCharCount();
         
-        // FIXED: Enhanced send button state management
+        // FIXED: Simple and working button state
         const hasContent = messageInput.value.trim().length > 0 || this.uploadedFiles.length > 0;
-        const canSend = hasContent && !this.isTyping && !this.isSubmitting;
-        
-        sendButton.disabled = !canSend;
+        sendButton.disabled = !hasContent || this.isTyping;
         
         // Auto-resize textarea
         this.autoResizeTextarea();
@@ -442,7 +442,10 @@ class SyntaxPrimeChat {
     openSettings() { console.log('Open settings'); }
     logout() { window.location.href = '/'; }
     loadPersonalities() { console.log('Load personalities'); }
-    loadConversations() { console.log('Load conversations'); }
+    loadConversations() {
+        // Conversations feature not implemented yet
+        console.log('Conversations sidebar will be implemented later');
+    }
     setupDragAndDrop() { console.log('Setup drag and drop'); }
     handleFileUpload() { console.log('Handle file upload'); }
     clearUploadedFiles() { this.uploadedFiles = []; }
