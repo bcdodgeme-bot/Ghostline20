@@ -1,7 +1,7 @@
 # modules/ai/chat.py
-# AI Chat Router for Syntax Prime V2 - COMPLETE REWRITE WITH RSS LEARNING + MARKETING SCRAPER
-# Clean, sectioned chat endpoint with file upload, weather, Bluesky, RSS Learning, and Marketing Scraper integration
-# Date: 9/25/25
+# AI Chat Router for Syntax Prime V2 - COMPLETE REWRITE WITH RSS LEARNING + MARKETING SCRAPER + PRAYER TIMES
+# Clean, sectioned chat endpoint with file upload, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times integration
+# Date: 9/26/25
 
 #-- Section 1: Core Imports - 9/25/25
 import os
@@ -45,6 +45,10 @@ from modules.integrations.bluesky.notification_manager import get_notification_m
 from modules.integrations.marketing_scraper.scraper_client import MarketingScraperClient
 from modules.integrations.marketing_scraper.content_analyzer import ContentAnalyzer
 from modules.integrations.marketing_scraper.database_manager import ScrapedContentDatabase
+
+#-- NEW Section 2c: Prayer Times Integration Import - 9/26/25
+from modules.integrations.prayer_times.database_manager import get_prayer_database_manager, get_next_prayer, get_todays_prayers
+
 
 #-- Section 3: Request/Response Models - 9/25/25
 class ChatMessage(BaseModel):
@@ -615,7 +619,161 @@ Please try again or contact support if the issue persists."""
         logger.error(f"Scraper command processing failed: {e}")
         return f"❌ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
 
-#-- Section 5d: File Processing Functions - 9/25/25
+#-- NEW Section 5d: Prayer Times Command Processing - 9/26/25
+def detect_prayer_command(message: str) -> bool:
+    """Detect prayer-related requests"""
+    prayer_keywords = [
+        "prayer", "prayers", "salah", "namaz", "fajr", "dhuhr", "asr", "maghrib", "isha",
+        "prayer time", "prayer times", "next prayer", "when is prayer", "how long until",
+        "how long till", "time until prayer", "prayer schedule", "islamic time", "islamic date"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in prayer_keywords)
+
+def detect_prayer_question_type(message: str) -> str:
+    """Determine what type of prayer question the user is asking"""
+    message_lower = message.lower()
+    
+    if any(phrase in message_lower for phrase in ["how long", "time until", "time till", "when is next"]):
+        return "next_prayer"
+    elif any(phrase in message_lower for phrase in ["prayer times today", "today's prayer", "prayer schedule", "all prayer"]):
+        return "daily_schedule"
+    elif any(phrase in message_lower for phrase in ["islamic date", "hijri", "islamic calendar"]):
+        return "islamic_date"
+    else:
+        return "general_prayer"
+
+async def process_prayer_command(message: str, user_id: str) -> str:
+    """Process prayer-related commands using the cached database system"""
+    try:
+        question_type = detect_prayer_question_type(message)
+        
+        if question_type == "next_prayer":
+            # "How long till Dhuhr?" type questions
+            next_prayer_info = await get_next_prayer()
+            
+            if not next_prayer_info:
+                return """🕌 **Prayer Time Service Unavailable**
+                
+Unable to retrieve prayer times at the moment. Please try again in a few moments."""
+            
+            prayer_name = next_prayer_info['prayer_name']
+            prayer_time = next_prayer_info['prayer_time']
+            time_until_text = next_prayer_info['time_until_text']
+            is_today = next_prayer_info['is_today']
+            
+            day_text = "today" if is_today else "tomorrow"
+            
+            return f"""🕌 **Next Prayer: {prayer_name}**
+
+⏰ **Time:** {prayer_time} ({day_text})
+⏳ **Time Until:** {time_until_text}
+
+Prayer times are calculated for Merrifield, Virginia using ISNA method."""
+        
+        elif question_type == "daily_schedule":
+            # "What are prayer times today?" type questions
+            daily_prayers = await get_todays_prayers()
+            
+            if not daily_prayers:
+                return """🕌 **Prayer Schedule Unavailable**
+                
+Unable to retrieve today's prayer schedule. Please try again in a few moments."""
+            
+            prayer_times = daily_prayers['prayer_times']
+            islamic_date = daily_prayers['islamic_date']
+            formatted_date = daily_prayers.get('formatted_date', daily_prayers['date'])
+            
+            response_parts = [
+                f"🕌 **Prayer Times for {formatted_date}**",
+                ""
+            ]
+            
+            # Add Islamic date if available
+            if islamic_date['date'] != 'N/A':
+                response_parts.extend([
+                    f"📅 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                    ""
+                ])
+            
+            response_parts.extend([
+                "🕐 **Daily Prayer Schedule:**",
+                f"   **Fajr:** {prayer_times['fajr']}",
+                f"   **Dhuhr:** {prayer_times['dhuhr']}",
+                f"   **Asr:** {prayer_times['asr']}",
+                f"   **Maghrib:** {prayer_times['maghrib']}",
+                f"   **Isha:** {prayer_times['isha']}",
+                "",
+                "📍 Calculated for Merrifield, Virginia using ISNA method"
+            ])
+            
+            return "\n".join(response_parts)
+        
+        elif question_type == "islamic_date":
+            # Islamic calendar questions
+            daily_prayers = await get_todays_prayers()
+            
+            if not daily_prayers or daily_prayers['islamic_date']['date'] == 'N/A':
+                return """📅 **Islamic Calendar Information**
+                
+Islamic date information is currently unavailable. Please try again later."""
+            
+            islamic_date = daily_prayers['islamic_date']
+            gregorian_date = daily_prayers.get('formatted_date', daily_prayers['date'])
+            
+            return f"""📅 **Islamic Calendar Information**
+
+**Today's Date:**
+🗓️ Gregorian: {gregorian_date}
+🌙 Islamic: {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}
+
+Islamic dates are calculated using the AlAdhan calendar system."""
+        
+        else:
+            # General prayer information
+            next_prayer_info = await get_next_prayer()
+            daily_prayers = await get_todays_prayers()
+            
+            if not next_prayer_info or not daily_prayers:
+                return """🕌 **Prayer Time Information**
+                
+Prayer time service is currently unavailable. Please try again in a few moments."""
+            
+            next_prayer = next_prayer_info['prayer_name']
+            time_until = next_prayer_info['time_until_text']
+            islamic_date = daily_prayers['islamic_date']
+            
+            response_parts = [
+                "🕌 **Prayer Time Information**",
+                "",
+                f"⏰ **Next Prayer:** {next_prayer} in {time_until}",
+                ""
+            ]
+            
+            if islamic_date['date'] != 'N/A':
+                response_parts.extend([
+                    f"📅 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                    ""
+                ])
+            
+            response_parts.extend([
+                "**Available Commands:**",
+                "• 'How long till [prayer name]?' - Next prayer countdown",
+                "• 'What are prayer times today?' - Full daily schedule",
+                "• 'Islamic date' - Current Hijri calendar date"
+            ])
+            
+            return "\n".join(response_parts)
+    
+    except Exception as e:
+        logger.error(f"Prayer command processing failed: {e}")
+        return f"""🕌 **Prayer Time Service Error**
+        
+An error occurred while retrieving prayer information: {str(e)}
+
+Please try again or contact support if the issue persists."""
+
+#-- Section 5e: File Processing Functions - 9/25/25
 async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
     """Process uploaded files and return file information"""
     processed_files = []
@@ -782,7 +940,7 @@ async def analyze_csv_file(file_path: Path) -> Dict:
             'extracted_text': ''
         }
 
-#-- Section 6: Main Chat Endpoints - updated 9/25/25 with Marketing Scraper
+#-- Section 6: Main Chat Endpoints - updated 9/26/25 with Prayer Times Integration
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(
     request: ChatRequest,
@@ -790,7 +948,7 @@ async def chat_with_ai(
     user_id: str = Depends(get_current_user_id)
 ):
     """
-    Main chat endpoint with complete integration: files, weather, Bluesky, RSS Learning, and Marketing Scraper
+    Main chat endpoint with complete integration: files, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times
     """
     start_time = datetime.now()
     logger.info(f"🔍 DEBUG: chat_with_ai called with message: '{request.message}'")
@@ -802,7 +960,7 @@ async def chat_with_ai(
             processed_files = await process_uploaded_files(files)
             logger.info(f"Processed {len(processed_files)} uploaded files")
         
-        # Check for Marketing Scraper commands FIRST - NEW 9/25/25
+        # Check for Marketing Scraper commands FIRST - 9/25/25
         scraper_detected = detect_scraper_command(request.message)
         logger.info(f"🔍 Scraper detection result: {scraper_detected} for message: '{request.message}'")
 
@@ -852,6 +1010,57 @@ async def chat_with_ai(
                 response_time_ms=response_time_ms,
                 timestamp=end_time
             )
+        
+        # Check for Prayer Times commands - NEW 9/26/25
+        prayer_detected = detect_prayer_command(request.message)
+        logger.info(f"🕌 Prayer detection result: {prayer_detected} for message: '{request.message}'")
+
+        if prayer_detected:
+            logger.info(f"🕌 Prayer command detected: {request.message}")
+            
+            try:
+                prayer_response = await process_prayer_command(request.message, user_id)
+                logger.info(f"🕌 Prayer response generated: {prayer_response[:100]}...")
+                
+                memory_manager = get_memory_manager(user_id)
+                
+                if request.thread_id:
+                    thread_id = request.thread_id
+                else:
+                    thread_id = await memory_manager.create_conversation_thread(
+                        platform="web_interface",
+                        title="Prayer Times Query"
+                    )
+                
+                user_message_id = str(uuid.uuid4())
+                await memory_manager.add_message(
+                    thread_id=thread_id,
+                    role="user",
+                    content=request.message
+                )
+                
+                response_message_id = str(uuid.uuid4())
+                await memory_manager.add_message(
+                    thread_id=thread_id,
+                    role="assistant",
+                    content=prayer_response
+                )
+                
+                end_time = datetime.now()
+                response_time_ms = int((end_time - start_time).total_seconds() * 1000)
+                
+                return ChatResponse(
+                    message_id=response_message_id,
+                    thread_id=thread_id,
+                    response=prayer_response,
+                    personality_used="syntaxprime",
+                    response_time_ms=response_time_ms,
+                    timestamp=end_time
+                )
+                
+            except Exception as e:
+                logger.error(f"🕌 Prayer processing failed with exception: {e}")
+                # Fall through to regular AI if prayer system fails
         
         # Check for Bluesky commands - 9/24/25
         if detect_bluesky_command(request.message):
@@ -1068,13 +1277,13 @@ Please respond appropriately about being unable to access weather information.
         logger.error(f"Chat processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
 
-#-- Section 7: Integration Info and Health Check Functions - updated 9/25/25 with Marketing Scraper
+#-- Section 7: Integration Info and Health Check Functions - updated 9/26/25 with Prayer Times
 def get_integration_info():
     """Get information about the chat integration"""
     return {
         "name": "AI Chat System",
         "version": "2.0.0",
-        "description": "Advanced chat system with file processing, weather, Bluesky, RSS Learning, and Marketing Scraper integration",
+        "description": "Advanced chat system with file processing, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times integration",
         "endpoints": [
             "/ai/chat",
             "/ai/chat/stream",
@@ -1093,7 +1302,8 @@ def get_integration_info():
             "Weather integration",
             "Bluesky social media commands",
             "RSS learning integration for writing assistance",
-            "Marketing scraper for competitive analysis"  # NEW
+            "Marketing scraper for competitive analysis",
+            "Prayer times integration for Islamic practice"  # NEW
         ],
         "file_upload_support": True,
         "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
@@ -1101,7 +1311,8 @@ def get_integration_info():
         "weather_integration": True,
         "bluesky_integration": True,
         "rss_learning_integration": True,
-        "marketing_scraper_integration": True  # NEW
+        "marketing_scraper_integration": True,
+        "prayer_times_integration": True  # NEW
     }
 
 def check_module_health() -> Dict[str, Any]:
@@ -1134,11 +1345,17 @@ def check_module_health() -> Dict[str, Any]:
     if not rss_configured:
         warnings.append("RSS Learning integration not configured (DATABASE_URL missing)")
     
-    # NEW: Check marketing scraper configuration
+    # Check marketing scraper configuration
     scraper_configured = bool(os.getenv("DATABASE_URL"))  # Uses same DB as RSS
     
     if not scraper_configured:
         warnings.append("Marketing Scraper integration not configured (DATABASE_URL missing)")
+    
+    # NEW: Check prayer times configuration
+    prayer_configured = bool(os.getenv("DATABASE_URL"))  # Uses same DB as others
+    
+    if not prayer_configured:
+        warnings.append("Prayer Times integration not configured (DATABASE_URL missing)")
     
     return {
         "healthy": len(missing_vars) == 0,
@@ -1149,5 +1366,6 @@ def check_module_health() -> Dict[str, Any]:
         "weather_integration_available": bool(os.getenv("TOMORROW_IO_API_KEY")),
         "bluesky_integration_available": bluesky_configured,
         "rss_learning_integration_available": rss_configured,
-        "marketing_scraper_integration_available": scraper_configured  # NEW
+        "marketing_scraper_integration_available": scraper_configured,
+        "prayer_times_integration_available": prayer_configured  # NEW
     }

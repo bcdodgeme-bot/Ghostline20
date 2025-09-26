@@ -1294,7 +1294,8 @@ def get_integration_info():
             "Weather integration with health monitoring",
             "Bluesky social media command processing",
             "RSS learning integration for marketing writing assistance",
-            "Marketing scraper for competitive analysis"  # NEW
+            "Marketing scraper for competitive analysis",  # NEW
+            "Prayer times integration for Islamic practice"  # NEW 9/26/25
         ],
         "default_user_id": orchestrator.default_user_id
     }
@@ -1326,6 +1327,9 @@ def check_module_health():
     # Marketing scraper integration is optional - NEW
     marketing_scraper_available = MARKETING_SCRAPER_AVAILABLE and bool(os.getenv("DATABASE_URL"))
     
+    # Prayer times integration is optional - NEW 9/26/25
+    prayer_times_available = bool(os.getenv("DATABASE_URL"))
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
@@ -1334,5 +1338,6 @@ def check_module_health():
         "weather_integration_available": weather_available,
         "bluesky_integration_available": bluesky_available,
         "rss_learning_integration_available": rss_learning_available,
-        "marketing_scraper_integration_available": marketing_scraper_available  # NEW
+        "marketing_scraper_integration_available": marketing_scraper_available,  # NEW
+        "prayer_times_integration_available": prayer_times_available  # NEW 9/26/25
     }

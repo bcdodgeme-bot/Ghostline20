@@ -32,6 +32,10 @@ from modules.integrations.rss_learning import get_integration_info as rss_learni
 from modules.integrations.marketing_scraper import router as marketing_scraper_router
 from modules.integrations.marketing_scraper import get_integration_info as marketing_scraper_integration_info, check_module_health as marketing_scraper_module_health
 
+#-- NEW Section 2e: Prayer Times Integration - added 9/26/25
+from modules.integrations.prayer_times import router as prayer_times_router
+from modules.integrations.prayer_times import get_integration_info as prayer_times_integration_info, check_module_health as prayer_times_module_health
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -345,7 +349,7 @@ async def startup_event():
     print()
 
 #-- Section 11: API Status and Health Endpoints - updated 9/25/25 with Marketing Scraper
-#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning
+#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning, 9/26/25 with Prayer Times
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
@@ -370,10 +374,11 @@ async def api_status():
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
             "📰 RSS Learning system with AI-powered marketing insights",
             # "🔍 AI-powered marketing scraper for competitive analysis",  # COMMENTED OUT - module doesn't exist yet
+            "🕌 Islamic prayer times with intelligent scheduling",  # NEW 9/26/25
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "authentication"],  # REMOVED marketing-scraper
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "prayer-times", "authentication"],  # ADDED prayer-times
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -404,6 +409,8 @@ async def api_status():
             # "marketing_scraper_health": "/integrations/marketing-scraper/health",  # COMMENTED OUT
             # "marketing_scraper_stats": "/integrations/marketing-scraper/stats",  # COMMENTED OUT
             # "marketing_scraper_history": "/integrations/marketing-scraper/history",  # COMMENTED OUT
+            "prayer_times_status": "/integrations/prayer-times/status",  # NEW 9/26/25
+            "prayer_times_health": "/integrations/prayer-times/health",  # NEW 9/26/25
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -430,6 +437,14 @@ async def api_status():
             "processing_interval": "weekly",
             "categories": ["seo", "content_marketing", "social_media", "analytics"],
             "api_configured": rss_learning_module_health()['healthy']
+        },
+        "prayer_times_system": {  # NEW 9/26/25
+            "features": ["daily_prayer_scheduling", "islamic_calendar_integration", "chat_commands", "aladhan_api"],
+            "commands": ["How long till [prayer]?", "What are prayer times today?", "Islamic date"],
+            "calculation_method": "ISNA",
+            "location": "Merrifield, Virginia",
+            "cache_system": "midnight_refresh",
+            "api_configured": True  # AlAdhan API is free, no key needed
         }
         # "marketing_scraper_system": {  # COMMENTED OUT - module doesn't exist yet
         #     "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
@@ -493,6 +508,35 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
+    # Prayer Times integration - NEW 9/26/25
+    try:
+        # Since we don't have a full router yet, create basic health info
+        integrations['prayer_times'] = {
+            'info': {
+                'module': 'prayer_times',
+                'version': '1.0.0',
+                'description': 'Islamic prayer times with intelligent scheduling',
+                'features': [
+                    'Daily prayer time calculation',
+                    'Islamic calendar integration',
+                    'Chat command interface',
+                    'AlAdhan API integration',
+                    'Database caching system'
+                ]
+            },
+            'health': {
+                'healthy': bool(os.getenv("DATABASE_URL")),
+                'database_available': bool(os.getenv("DATABASE_URL")),
+                'aladhan_api_available': True,  # Free API, no key needed
+                'cache_system_ready': True
+            }
+        }
+    except Exception as e:
+        integrations['prayer_times'] = {
+            'info': {'module': 'prayer_times', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
     # Marketing Scraper integration - COMMENTED OUT until module is created
     # try:
     #     integrations['marketing_scraper'] = {
@@ -553,6 +597,7 @@ async def integrations_info():
         'healthy_modules': sum(1 for module in integrations.values() if module['health'].get('healthy', False)),
         'timestamp': datetime.now().isoformat()
     }
+
 #-- Section 12: Integration Module Routers - updated 9/25/25 with Marketing Scraper
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
@@ -577,6 +622,9 @@ app.include_router(rss_learning_router)
 
 # NEW: Include Marketing Scraper integration router - added 9/25/25
 app.include_router(marketing_scraper_router)
+
+# NEW: Include Prayer Times integration router - added 9/26/25
+app.include_router(prayer_times_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
 # Periodic cleanup of expired sessions (every hour)
