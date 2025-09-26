@@ -1,32 +1,32 @@
-// =============================================================================
-// Syntax Prime V2 - FIXED Chat Interface JavaScript with Anti-Duplication
-// Fixes: Double submission prevention, DOM ready protection, proper initialization
-// Date: 9/26/25
-// =============================================================================
+//=============================================================================
+// Syntax Prime V2 - Chat Interface JavaScript
+// Handles chat, file uploads, bookmarks, and personality switching
+// UPDATED: 9/26/25 - Added minimal anti-duplication fixes
+//=============================================================================
 
-//-- Section 1: Core Class Setup and Constructor - 9/26/25
 class SyntaxPrimeChat {
     constructor() {
-        this.apiBase = window.location.origin;
+        this.apiBase = window.location.origin; // Assumes API is on same domain
         this.currentThreadId = null;
         this.currentPersonality = 'syntaxprime';
         this.uploadedFiles = [];
         this.isTyping = false;
         this.bookmarkToCreate = null;
-        this.isSubmitting = false; // NEW: Prevent double submission
-        this.lastSubmitTime = 0;   // NEW: Debounce protection
-        
+        // NEW: Anti-duplication protection
+        this.isSubmitting = false;
+        this.lastSubmitTime = 0;
+
         this.init();
     }
 
-//-- Section 2: Initialization and Event Listeners - 9/26/25
+    // === Initialization ===
     init() {
         this.setupEventListeners();
         this.loadPersonalities();
         this.loadConversations();
         this.setupDragAndDrop();
         this.autoResizeTextarea();
-        
+
         // Focus message input
         document.getElementById('messageInput').focus();
     }
@@ -44,21 +44,21 @@ class SyntaxPrimeChat {
             this.saveSettings();
         });
 
-        // Chat input with anti-duplication protection
+        // Chat input
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
-        
+
         messageInput.addEventListener('input', this.handleInputChange.bind(this));
         messageInput.addEventListener('keydown', this.handleKeyPress.bind(this));
-        
-        // FIXED: Only allow one event listener and add protection
+
+        // UPDATED: Add anti-duplication protection
         sendButton.addEventListener('click', this.handleSendClick.bind(this));
 
         // File upload
         document.getElementById('fileButton').addEventListener('click', () => {
             document.getElementById('fileInput').click();
         });
-        
+
         document.getElementById('fileInput').addEventListener('change', this.handleFileSelect.bind(this));
 
         // Remember This button
@@ -68,12 +68,11 @@ class SyntaxPrimeChat {
         this.setupModalHandlers();
     }
 
-//-- Section 3: NEW Anti-Duplication Send Handler - 9/26/25
+    // NEW: Anti-duplication send handler
     handleSendClick(event) {
         event.preventDefault();
         event.stopPropagation();
         
-        // Anti-duplication protection
         const now = Date.now();
         if (this.isSubmitting || (now - this.lastSubmitTime) < 1000) {
             console.log('🛡️ Double submission prevented');
@@ -83,25 +82,6 @@ class SyntaxPrimeChat {
         this.sendMessage();
     }
 
-    handleKeyPress(event) {
-        // FIXED: Only submit on Enter (not Shift+Enter) with anti-duplication
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            event.stopPropagation();
-            
-            const now = Date.now();
-            if (this.isSubmitting || (now - this.lastSubmitTime) < 1000) {
-                console.log('🛡️ Double submission prevented (Enter key)');
-                return;
-            }
-            
-            if (!document.getElementById('sendButton').disabled && !this.isTyping) {
-                this.sendMessage();
-            }
-        }
-    }
-
-//-- Section 4: Modal Event Handlers - 9/23/25
     setupModalHandlers() {
         // Bookmark modal
         const bookmarkModal = document.getElementById('bookmarkModal');
@@ -130,87 +110,48 @@ class SyntaxPrimeChat {
         });
     }
 
-//-- Section 5: API Communication with Error Handling - 9/23/25
+    // === API Communication ===
     async apiCall(endpoint, method = 'GET', data = null) {
         try {
             const options = {
                 method,
-                headers: {},
-                credentials: 'include'
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionStorage.getItem('syntaxprime_password')}` // Simple auth
+                }
             };
 
             if (data && method !== 'GET') {
                 if (data instanceof FormData) {
-                    // Let browser set content-type for FormData
+                    delete options.headers['Content-Type']; // Let browser set it for FormData
                     options.body = data;
                 } else {
-                    options.headers['Content-Type'] = 'application/json';
                     options.body = JSON.stringify(data);
                 }
             }
 
             const response = await fetch(`${this.apiBase}${endpoint}`, options);
-            
-            if (response.status === 401) {
-                this.logout();
-                return;
-            }
-            
-            // Parse response
-            let responseData;
-            const contentType = response.headers.get('content-type');
-            
-            if (contentType && contentType.includes('application/json')) {
-                responseData = await response.json();
-            } else {
-                responseData = await response.text();
-            }
-            
+
             if (!response.ok) {
-                // Handle different error response formats
-                let errorMessage = 'Unknown error';
-                
-                if (typeof responseData === 'object' && responseData.detail) {
-                    if (Array.isArray(responseData.detail)) {
-                        // FastAPI validation errors
-                        errorMessage = responseData.detail.map(err => `${err.loc?.join('.')}: ${err.msg}`).join(', ');
-                    } else {
-                        errorMessage = responseData.detail;
-                    }
-                } else if (typeof responseData === 'string') {
-                    errorMessage = responseData;
-                } else if (typeof responseData === 'object' && responseData.message) {
-                    errorMessage = responseData.message;
-                }
-                
-                throw new Error(`HTTP ${response.status}: ${errorMessage}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
             }
 
-            return responseData;
-            
+            return await response.json();
         } catch (error) {
             console.error('API call failed:', error);
-            
-            // Show user-friendly error message
-            let displayMessage = error.message;
-            if (error.message.includes('Failed to fetch')) {
-                displayMessage = 'Connection error. Please check your internet connection.';
-            } else if (error.message.includes('422')) {
-                displayMessage = 'Invalid request format. Please try again.';
-            }
-            
-            this.showError(displayMessage);
+            this.showError(`Request failed: ${error.message}`);
             throw error;
         }
     }
 
-//-- Section 6: FIXED Chat Message Sending with Anti-Duplication - 9/26/25
+    // === Chat Functions ===
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
-        
+
         if (!message && this.uploadedFiles.length === 0) return;
-        
+
         // CRITICAL: Anti-duplication protection
         if (this.isSubmitting) {
             console.log('🛡️ Already submitting, ignoring duplicate call');
@@ -220,12 +161,12 @@ class SyntaxPrimeChat {
         this.isSubmitting = true;
         this.lastSubmitTime = Date.now();
 
-        // Disable input while sending
+        // Disable input
         this.setInputState(false);
-        
+
         // Add user message to chat
         this.addMessage('user', message, { files: this.uploadedFiles.slice() });
-        
+
         // Clear input
         messageInput.value = '';
         this.updateCharCount();
@@ -235,7 +176,7 @@ class SyntaxPrimeChat {
             // Show typing indicator
             this.showTypingIndicator();
 
-            // FIXED: Prepare request with current date/time for Syntax
+            // Prepare request data with datetime context
             const currentDateTime = new Date();
             const requestData = {
                 message: message,
@@ -244,22 +185,22 @@ class SyntaxPrimeChat {
                 include_knowledge: true,
                 // NEW: Provide current date/time context for Syntax
                 context: {
-                    current_date: currentDateTime.toISOString().split('T')[0], // YYYY-MM-DD
-                    current_time: currentDateTime.toLocaleTimeString('en-US', { hour12: false }), // 24-hour format
+                    current_date: currentDateTime.toISOString().split('T')[0],
+                    current_time: currentDateTime.toLocaleTimeString('en-US', { hour12: false }),
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                     timestamp: currentDateTime.toISOString()
                 }
             };
 
-            // Send request using proper JSON format
+            // Send message
             const response = await this.apiCall('/ai/chat', 'POST', requestData);
-            
+
             // Update thread ID
             this.currentThreadId = response.thread_id;
-            
+
             // Hide typing indicator
             this.hideTypingIndicator();
-            
+
             // Add AI response
             this.addMessage('assistant', response.response, {
                 messageId: response.message_id,
@@ -267,10 +208,10 @@ class SyntaxPrimeChat {
                 responseTime: response.response_time_ms,
                 knowledgeSources: response.knowledge_sources || []
             });
-            
-            // Show remember button for the last assistant message
+
+            // Show remember button
             this.showRememberButton(response.message_id);
-            
+
         } catch (error) {
             this.hideTypingIndicator();
             this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.', { error: true });
@@ -283,30 +224,10 @@ class SyntaxPrimeChat {
         }
     }
 
-//-- Section 7: Input State Management - 9/26/25
-    setInputState(enabled) {
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
-        const fileButton = document.getElementById('fileButton');
-        
-        messageInput.disabled = !enabled;
-        sendButton.disabled = !enabled || this.isSubmitting;
-        fileButton.disabled = !enabled;
-        
-        if (enabled) {
-            sendButton.classList.remove('loading');
-        } else {
-            sendButton.classList.add('loading');
-        }
-    }
-
-// ... [REST OF THE EXISTING METHODS REMAIN THE SAME] ...
-
-//-- Section 8: Message Display with Feedback Buttons - 9/23/25
     addMessage(role, content, metadata = {}) {
         const messagesContainer = document.getElementById('chatMessages');
         const welcomeMessage = messagesContainer.querySelector('.welcome-message');
-        
+
         // Remove welcome message on first interaction
         if (welcomeMessage) {
             welcomeMessage.remove();
@@ -318,7 +239,7 @@ class SyntaxPrimeChat {
 
         const avatar = document.createElement('div');
         avatar.className = 'message-avatar';
-        
+
         if (role === 'user') {
             avatar.innerHTML = '👤';
         } else {
@@ -352,12 +273,12 @@ class SyntaxPrimeChat {
 
         contentDiv.appendChild(bubble);
 
-        // Add message actions for assistant messages with feedback buttons
+        // Add message actions for assistant messages
         if (role === 'assistant' && !metadata.error) {
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'message-actions';
-            
-            // Create Copy button
+
+            // Copy button
             const copyBtn = document.createElement('button');
             copyBtn.className = 'message-action';
             copyBtn.title = 'Copy';
@@ -368,8 +289,8 @@ class SyntaxPrimeChat {
                 </svg>
             `;
             copyBtn.addEventListener('click', () => this.copyMessage(metadata.messageId));
-            
-            // Create Remember button
+
+            // Remember button
             const rememberBtn = document.createElement('button');
             rememberBtn.className = 'message-action remember-action';
             rememberBtn.title = 'Remember This';
@@ -380,32 +301,32 @@ class SyntaxPrimeChat {
                 </svg>
             `;
             rememberBtn.addEventListener('click', () => this.rememberMessage(metadata.messageId));
-            
-            // Create feedback buttons
+
+            // Feedback buttons
             const goodBtn = document.createElement('button');
             goodBtn.className = 'message-action feedback-good';
             goodBtn.title = 'Good Answer';
             goodBtn.innerHTML = '👍';
             goodBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good_answer'));
-            
+
             const badBtn = document.createElement('button');
             badBtn.className = 'message-action feedback-bad';
             badBtn.title = 'Bad Answer';
             badBtn.innerHTML = '👎';
             badBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'bad_answer'));
-            
+
             const personalityBtn = document.createElement('button');
             personalityBtn.className = 'message-action feedback-personality';
             personalityBtn.title = 'Good Personality';
             personalityBtn.innerHTML = '🎭';
             personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good_personality'));
-            
+
             actionsDiv.appendChild(copyBtn);
             actionsDiv.appendChild(rememberBtn);
             actionsDiv.appendChild(goodBtn);
             actionsDiv.appendChild(badBtn);
             actionsDiv.appendChild(personalityBtn);
-            
+
             contentDiv.appendChild(actionsDiv);
         }
 
@@ -432,12 +353,516 @@ class SyntaxPrimeChat {
         messageDiv._messageContent = content;
     }
 
-// ... [ALL OTHER EXISTING METHODS CONTINUE AS BEFORE] ...
+    async submitFeedback(messageId, feedbackType) {
+        try {
+            // Visual feedback first
+            const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (messageDiv) {
+                const feedbackBtn = messageDiv.querySelector(`.feedback-${feedbackType}`);
+                if (feedbackBtn) {
+                    feedbackBtn.style.background = 'var(--accent-primary)';
+                    feedbackBtn.style.color = 'white';
+                    feedbackBtn.style.transform = 'scale(0.9)';
+                    setTimeout(() => {
+                        feedbackBtn.style.background = '';
+                        feedbackBtn.style.color = '';
+                        feedbackBtn.style.transform = '';
+                    }, 1000);
+                }
+            }
 
+            // Submit feedback to backend
+            const response = await this.apiCall('/ai/feedback', 'POST', {
+                message_id: messageId,
+                feedback_type: feedbackType,
+                feedback_text: null
+            });
+
+            this.showSuccess(response.message || 'Feedback submitted successfully');
+
+        } catch (error) {
+            console.error('Feedback submission failed:', error);
+            this.showError('Failed to submit feedback. Please try again.');
+        }
+    }
+
+    formatMessageContent(content) {
+        return content
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/`(.*?)`/g, '<code>$1</code>')
+            .replace(/\n/g, '<br>');
+    }
+
+    // === Input Handling ===
+    handleInputChange() {
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        this.updateCharCount();
+
+        const hasContent = messageInput.value.trim().length > 0 || this.uploadedFiles.length > 0;
+        sendButton.disabled = !hasContent || this.isTyping || this.isSubmitting;
+
+        this.autoResizeTextarea();
+    }
+
+    handleKeyPress(event) {
+        // UPDATED: Add anti-duplication protection
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const now = Date.now();
+            if (this.isSubmitting || (now - this.lastSubmitTime) < 1000) {
+                console.log('🛡️ Double submission prevented (Enter key)');
+                return;
+            }
+            
+            if (!document.getElementById('sendButton').disabled && !this.isTyping) {
+                this.sendMessage();
+            }
+        }
+    }
+
+    setInputState(enabled) {
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const fileButton = document.getElementById('fileButton');
+
+        messageInput.disabled = !enabled;
+        sendButton.disabled = !enabled || this.isSubmitting;
+        fileButton.disabled = !enabled;
+
+        if (enabled) {
+            sendButton.classList.remove('loading');
+        } else {
+            sendButton.classList.add('loading');
+        }
+    }
+
+    autoResizeTextarea() {
+        const textarea = document.getElementById('messageInput');
+        textarea.style.height = 'auto';
+        const newHeight = Math.min(textarea.scrollHeight, 150);
+        textarea.style.height = newHeight + 'px';
+
+        const inputContainer = document.querySelector('.chat-input-container');
+        const chatMessages = document.querySelector('.chat-messages');
+
+        if (inputContainer && chatMessages) {
+            const inputHeight = inputContainer.offsetHeight;
+            chatMessages.style.paddingBottom = `${inputHeight + 20}px`;
+        }
+    }
+
+    updateCharCount() {
+        const messageInput = document.getElementById('messageInput');
+        const charCount = document.getElementById('charCount');
+        const currentLength = messageInput.value.length;
+        const maxLength = 8000;
+
+        if (charCount) {
+            charCount.textContent = `${currentLength}/${maxLength}`;
+
+            if (currentLength > maxLength * 0.8) {
+                charCount.style.color = 'var(--warning)';
+            } else {
+                charCount.style.color = 'var(--text-tertiary)';
+            }
+        }
+    }
+
+    showTypingIndicator() {
+        const messagesContainer = document.getElementById('chatMessages');
+
+        const existing = document.getElementById('typingIndicator');
+        if (existing) {
+            existing.remove();
+        }
+
+        const typingDiv = document.createElement('div');
+        typingDiv.id = 'typingIndicator';
+        typingDiv.className = 'typing-indicator';
+        typingDiv.innerHTML = `
+            <div class="message-avatar">
+                <img src="static/syntax-buffering.png" alt="Syntax" style="width: 32px; height: 32px; object-fit: contain; border-radius: 50%;">
+            </div>
+            <div class="typing-dots">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+            <span>Syntax is thinking...</span>
+        `;
+        messagesContainer.appendChild(typingDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        this.isTyping = true;
+    }
+
+    hideTypingIndicator() {
+        const typingIndicator = document.getElementById('typingIndicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+        this.isTyping = false;
+    }
+
+    showRememberButton(messageId) {
+        const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageDiv) {
+            const rememberBtn = messageDiv.querySelector('.remember-action');
+            if (rememberBtn) {
+                rememberBtn.style.display = 'block';
+            }
+        }
+    }
+
+    // === File Handling ===
+    handleFileSelect(event) {
+        const files = Array.from(event.target.files);
+        files.forEach(file => this.addUploadedFile(file));
+        event.target.value = '';
+    }
+
+    addUploadedFile(file) {
+        if (!this.validateFile(file)) return;
+        this.uploadedFiles.push(file);
+        this.updateFileUploadArea();
+    }
+
+    validateFile(file) {
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        const allowedTypes = ['image/', 'application/pdf', 'text/', 'text/csv'];
+
+        if (file.size > maxSize) {
+            this.showError(`File "${file.name}" is too large. Maximum size is 10MB.`);
+            return false;
+        }
+
+        if (!allowedTypes.some(type => file.type.startsWith(type))) {
+            this.showError(`File type not supported: ${file.type}`);
+            return false;
+        }
+
+        return true;
+    }
+
+    updateFileUploadArea() {
+        const uploadArea = document.getElementById('fileUploadArea');
+        const filesContainer = document.getElementById('uploadedFiles');
+
+        if (this.uploadedFiles.length > 0) {
+            if (uploadArea) uploadArea.style.display = 'block';
+            if (filesContainer) {
+                filesContainer.innerHTML = '';
+
+                this.uploadedFiles.forEach((file, index) => {
+                    const fileDiv = document.createElement('div');
+                    fileDiv.className = 'uploaded-file';
+                    fileDiv.innerHTML = `
+                        <span>${this.getFileIcon(file.type)} ${file.name}</span>
+                        <button class="file-remove" onclick="syntaxChat.removeFile(${index})" title="Remove">×</button>
+                    `;
+                    filesContainer.appendChild(fileDiv);
+                });
+            }
+        } else {
+            if (uploadArea) uploadArea.style.display = 'none';
+        }
+    }
+
+    removeFile(index) {
+        this.uploadedFiles.splice(index, 1);
+        this.updateFileUploadArea();
+        this.handleInputChange();
+    }
+
+    clearUploadedFiles() {
+        this.uploadedFiles = [];
+        this.updateFileUploadArea();
+    }
+
+    getFileIcon(mimeType) {
+        if (mimeType.startsWith('image/')) return '🖼️';
+        if (mimeType === 'application/pdf') return '📄';
+        if (mimeType.startsWith('text/')) return '📝';
+        return '📎';
+    }
+
+    // === UI Controls ===
+    toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        sidebar.classList.toggle('collapsed');
+
+        if (window.innerWidth <= 768) {
+            sidebar.classList.toggle('open');
+        }
+    }
+
+    startNewChat() {
+        this.currentThreadId = null;
+        const messagesContainer = document.getElementById('chatMessages');
+        messagesContainer.innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">
+                    <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 80px; height: 80px; object-fit: contain;">
+                </div>
+                <h2>New Conversation Started</h2>
+                <p>Ready to assist with 38% more sarcasm and full memory sync.</p>
+            </div>
+        `;
+
+        document.getElementById('messageInput').focus();
+    }
+
+    copyMessage(messageId) {
+        const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageDiv) {
+            const text = messageDiv.querySelector('.message-text').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                this.showSuccess('Message copied to clipboard');
+            });
+        }
+    }
+
+    rememberMessage(messageId) {
+        this.showSuccess('Remember functionality coming soon!');
+    }
+
+    // === Modals ===
+    showModal(modal) {
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+    }
+
+    hideModal(modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
+    }
+
+    openSettings() {
+        this.showModal(document.getElementById('settingsModal'));
+    }
+
+    saveSettings() {
+        this.hideModal(document.getElementById('settingsModal'));
+        this.showSuccess('Settings saved!');
+    }
+
+    showBookmarkModal() {
+        this.showModal(document.getElementById('bookmarkModal'));
+    }
+
+    saveBookmark() {
+        this.hideModal(document.getElementById('bookmarkModal'));
+        this.showSuccess('Bookmark saved!');
+    }
+
+    logout() {
+        fetch('/auth/logout', {
+            method: 'POST',
+            credentials: 'include'
+        }).finally(() => {
+            sessionStorage.clear();
+            localStorage.clear();
+            window.location.href = '/';
+        });
+    }
+
+    // === Notifications ===
+    showError(message) {
+        this.showNotification(message, 'error');
+    }
+
+    showSuccess(message) {
+        this.showNotification(message, 'success');
+    }
+
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#ef4444' : type === 'success' ? '#10b981' : '#7b61ff'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10001;
+            animation: slideInRight 0.3s ease;
+            max-width: 400px;
+            word-wrap: break-word;
+        `;
+
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            notification.style.animation = 'slideOutRight 0.3s ease';
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
+            }, 300);
+        }, 5000);
+    }
+
+    // === Data Loading ===
+    async loadPersonalities() {
+        try {
+            const response = await this.apiCall('/ai/personalities');
+
+            if (response && response.personalities) {
+                const select = document.getElementById('personalitySelect');
+                select.innerHTML = '';
+
+                response.personalities.forEach(personality => {
+                    const option = document.createElement('option');
+                    option.value = personality.id;
+                    option.textContent = personality.name;
+                    if (personality.is_default) {
+                        option.selected = true;
+                        this.currentPersonality = personality.id;
+                    }
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load personalities:', error);
+        }
+    }
+
+    async loadConversations() {
+        try {
+            const response = await this.apiCall('/ai/conversations');
+
+            if (response && response.conversations) {
+                const conversationsList = document.querySelector('.conversations-list');
+                const loadingElement = conversationsList.querySelector('.loading-conversations');
+
+                if (loadingElement) {
+                    loadingElement.remove();
+                }
+
+                response.conversations.forEach(conversation => {
+                    const convDiv = document.createElement('div');
+                    convDiv.className = 'conversation-item';
+                    if (conversation.thread_id === this.currentThreadId) {
+                        convDiv.classList.add('active');
+                    }
+
+                    convDiv.innerHTML = `
+                        <div class="conversation-title">${conversation.title || 'New Conversation'}</div>
+                        <div class="conversation-meta">
+                            <span>${conversation.message_count || 0} messages</span>
+                            <span>${new Date(conversation.last_message_at).toLocaleDateString()}</span>
+                        </div>
+                    `;
+
+                    convDiv.addEventListener('click', () => {
+                        this.loadConversation(conversation.thread_id);
+                    });
+
+                    conversationsList.appendChild(convDiv);
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load conversations:', error);
+            const conversationsList = document.querySelector('.conversations-list');
+            if (conversationsList) {
+                conversationsList.innerHTML = '<div class="error">Failed to load conversations</div>';
+            }
+        }
+    }
+
+    async loadConversation(threadId) {
+        try {
+            this.currentThreadId = threadId;
+            const response = await this.apiCall(`/ai/conversations/${threadId}`);
+
+            if (response && response.messages) {
+                const messagesContainer = document.getElementById('chatMessages');
+                messagesContainer.innerHTML = '';
+
+                response.messages.forEach(message => {
+                    this.addMessage(message.role, message.content, {
+                        messageId: message.id,
+                        timestamp: message.created_at
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load conversation:', error);
+            this.showError('Failed to load conversation');
+        }
+    }
+
+    setupDragAndDrop() {
+        const chatContainer = document.querySelector('.chat-container');
+        if (!chatContainer) return;
+
+        let dragCounter = 0;
+
+        chatContainer.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            this.showDragOverlay();
+        });
+
+        chatContainer.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter === 0) {
+                this.hideDragOverlay();
+            }
+        });
+
+        chatContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+
+        chatContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            this.hideDragOverlay();
+
+            const files = Array.from(e.dataTransfer.files);
+            files.forEach(file => this.addUploadedFile(file));
+        });
+    }
+
+    showDragOverlay() {
+        let overlay = document.getElementById('dragOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'dragOverlay';
+            overlay.className = 'drag-overlay';
+            overlay.innerHTML = `
+                <div class="drag-content">
+                    <div class="drag-icon">📁</div>
+                    <h3>Drop files here</h3>
+                    <p>Supports images, PDFs, text files, and CSV</p>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+    }
+
+    hideDragOverlay() {
+        const overlay = document.getElementById('dragOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
 }
 
-//-- Section 19: FIXED App Initialization with DOM Ready Protection - 9/26/25
-// CRITICAL FIX: Only initialize when DOM is ready and only once
+// UPDATED: Initialize with DOM ready protection
 let syntaxChat = null;
 
 function initializeSyntaxChat() {
@@ -445,20 +870,18 @@ function initializeSyntaxChat() {
         console.log('🛡️ SyntaxChat already initialized, skipping');
         return;
     }
-    
+
     console.log('🚀 Initializing SyntaxChat');
     syntaxChat = new SyntaxPrimeChat();
 }
 
-// Wait for DOM to be ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeSyntaxChat);
 } else {
-    // DOM is already ready
     initializeSyntaxChat();
 }
 
-// Add notification animations to document
+// Add notification animations
 const style = document.createElement('style');
 style.textContent = `
     @keyframes slideInRight {
