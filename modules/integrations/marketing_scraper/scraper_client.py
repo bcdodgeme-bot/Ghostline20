@@ -245,6 +245,10 @@ class MarketingScraperClient:
         }
         
         return structure
+        
+    except Exception as e:
+        print(f"🔍 SCRAPER DEBUG: Error in _analyze_page_structure: {e}")
+        raise
     
     def _extract_headings(self, soup: BeautifulSoup) -> List[Dict]:
         """Extract heading structure"""
