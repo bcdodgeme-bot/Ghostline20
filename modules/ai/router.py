@@ -1,8 +1,9 @@
 # modules/ai/router.py
 """
-AI Brain Main Router for Syntax Prime V2 - COMPLETE WORKING VERSION
-Handles /ai/chat with basic functionality, no complex integrations yet
-Date: 9/26/25 - Fixed syntax errors, working version
+AI Brain Support Router for Syntax Prime V2 - NO CHAT ENDPOINT
+Handles support endpoints only: personalities, stats, feedback, conversations
+Chat processing handled by chat.py to avoid duplication
+Date: 9/26/25 - Removed /ai/chat endpoint to stop duplication
 """
 
 import asyncio
@@ -14,12 +15,13 @@ import time
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 # Import our AI brain components
-from .openrouter_client import get_openrouter_client
-from .conversation_manager import get_memory_manager
+from .openrouter_client import get_openrouter_client, cleanup_openrouter_client
+from .inception_client import get_inception_client, cleanup_inception_client
+from .conversation_manager import get_memory_manager, cleanup_memory_managers
 from .knowledge_query import get_knowledge_engine
 from .personality_engine import get_personality_engine
 from .feedback_processor import get_feedback_processor
@@ -27,22 +29,6 @@ from .feedback_processor import get_feedback_processor
 logger = logging.getLogger(__name__)
 
 #-- Request/Response Models
-class ChatRequest(BaseModel):
-    message: str = Field(..., description="User message")
-    personality_id: Optional[str] = Field(default='syntaxprime', description="Personality to use")
-    thread_id: Optional[str] = Field(None, description="Conversation thread ID")
-    include_knowledge: Optional[bool] = Field(default=True, description="Include knowledge base search")
-    context: Optional[Dict] = Field(default=None, description="Optional context data")
-
-class ChatResponse(BaseModel):
-    message_id: str
-    thread_id: str
-    response: str
-    personality_used: str
-    response_time_ms: int
-    knowledge_sources: List[Dict] = []
-    timestamp: datetime
-
 class FeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Message ID to rate")
     feedback_type: str = Field(..., description="good, bad, or personality")
@@ -59,180 +45,11 @@ class FeedbackResponse(BaseModel):
 router = APIRouter(prefix="/ai", tags=["ai"])
 DEFAULT_USER_ID = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
-async def get_current_user_id() -> str:
-    """Get current user ID - placeholder for now"""
-    return DEFAULT_USER_ID
+#-- Support Endpoints Only (NO /ai/chat - that's handled by chat.py)
 
-def get_current_datetime_context() -> dict:
-    """Get current datetime context"""
-    import pytz
-    now = datetime.now()
-    
-    try:
-        user_timezone = pytz.timezone('America/New_York')
-        now_user_tz = now.astimezone(user_timezone)
-    except:
-        now_user_tz = now
-    
-    return {
-        "current_date": now_user_tz.strftime("%Y-%m-%d"),
-        "current_time_24h": now_user_tz.strftime("%H:%M"),
-        "current_time_12h": now_user_tz.strftime("%I:%M %p"),
-        "day_of_week": now_user_tz.strftime("%A"),
-        "month_name": now_user_tz.strftime("%B"),
-        "full_datetime": now_user_tz.strftime("%A, %B %d, %Y at %H:%M"),
-        "timezone": str(now_user_tz.tzinfo),
-        "iso_timestamp": now_user_tz.isoformat(),
-        "unix_timestamp": int(now_user_tz.timestamp())
-    }
-
-#-- Main Chat Endpoint
-@router.post("/chat", response_model=ChatResponse)
-async def chat_with_ai(
-    request: ChatRequest,
-    files: List[UploadFile] = File(default=[]),
-    user_id: str = Depends(get_current_user_id)
-):
-    """
-    Main chat endpoint - basic version without complex integrations
-    """
-    start_time = datetime.now()
-    logger.info(f"🚀 DEBUG: process_chat_message called with message: '{request.message}'")
-    
-    try:
-        # Get current date/time context
-        datetime_context = get_current_datetime_context()
-        logger.info(f"🕐 Current datetime context: {datetime_context['full_datetime']}")
-        
-        # Get AI components
-        memory_manager = get_memory_manager(user_id)
-        knowledge_engine = get_knowledge_engine()
-        personality_engine = get_personality_engine()
-        
-        # Handle conversation thread
-        thread_id = request.thread_id
-        if not thread_id:
-            thread_id = await memory_manager.create_conversation_thread(
-                platform="web_interface",
-                title=None
-            )
-        
-        # Store user message
-        user_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="user",
-            content=request.message,
-            content_type="text"
-        )
-        
-        # Get conversation context
-        conversation_history, context_info = await memory_manager.get_context_for_ai(
-            thread_id=thread_id,
-            max_tokens=200000
-        )
-        
-        # Get knowledge sources if enabled
-        knowledge_sources = []
-        if request.include_knowledge:
-            knowledge_sources = await knowledge_engine.search_knowledge(
-                query=request.message,
-                max_results=5
-            )
-        
-        # Build AI messages
-        ai_messages = []
-        
-        # Get personality prompt
-        personality_prompt = personality_engine.get_personality_prompt(request.personality_id)
-        
-        # Add critical datetime context for AI
-        enhanced_personality_prompt = f"""{personality_prompt}
-
-CRITICAL CURRENT CONTEXT - USE THIS INFORMATION:
-📅 Current Date: {datetime_context['current_date']} ({datetime_context['day_of_week']})
-🕐 Current Time: {datetime_context['current_time_24h']} (24-hour) / {datetime_context['current_time_12h']} (12-hour)
-🌍 Full Context: {datetime_context['full_datetime']}
-🕰️ Timezone: {datetime_context['timezone']}
-
-IMPORTANT: Always use 24-hour time format (like {datetime_context['current_time_24h']}) when giving time in your responses.
-
-User Context: The user is asking questions on {datetime_context['full_datetime']}.
-When discussing time or dates, use the current information provided above."""
-
-        ai_messages.append({
-            "role": "system",
-            "content": enhanced_personality_prompt
-        })
-        
-        # Add knowledge context if available
-        if knowledge_sources:
-            knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
-            for source in knowledge_sources:
-                knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
-            ai_messages.append({
-                "role": "system",
-                "content": f"RELEVANT KNOWLEDGE:\n{knowledge_context}"
-            })
-        
-        # Add conversation history
-        ai_messages.extend(conversation_history)
-        
-        # Add current user message
-        ai_messages.append({
-            "role": "user",
-            "content": request.message
-        })
-        
-        # Get AI response
-        openrouter_client = await get_openrouter_client()
-        ai_response = await openrouter_client.get_completion(
-            messages=ai_messages,
-            model="anthropic/claude-3.5-sonnet:beta",
-            max_tokens=4000,
-            temperature=0.7
-        )
-        
-        # Process through personality engine
-        final_response = personality_engine.process_ai_response(
-            response=ai_response,
-            personality_id=request.personality_id,
-            conversation_context=conversation_history
-        )
-        
-        # Store AI response
-        knowledge_source_ids = [source.get('id', '') for source in knowledge_sources]
-        response_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="assistant",
-            content=final_response,
-            model_used="anthropic/claude-3.5-sonnet:beta",
-            knowledge_sources_used=knowledge_source_ids
-        )
-        
-        # Calculate response time
-        end_time = datetime.now()
-        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
-        
-        logger.info(f"✅ Chat response generated in {response_time_ms}ms with current datetime: {datetime_context['full_datetime']}")
-        
-        return ChatResponse(
-            message_id=response_message_id,
-            thread_id=thread_id,
-            response=final_response,
-            personality_used=request.personality_id,
-            response_time_ms=response_time_ms,
-            knowledge_sources=knowledge_sources,
-            timestamp=end_time
-        )
-        
-    except Exception as e:
-        logger.error(f"Chat processing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
-
-#-- Other AI Endpoints
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(feedback_request: FeedbackRequest):
-    """Submit feedback for AI learning"""
+    """Submit feedback for AI learning (👍👎😄)"""
     user_id = DEFAULT_USER_ID
     feedback_processor = get_feedback_processor()
     
@@ -417,7 +234,7 @@ async def get_ai_stats():
                 "memory_active": True,
                 "knowledge_engine_active": True,
                 "learning_active": feedback_summary.get('learning_active', False),
-                "chat_processing": "basic_version",
+                "chat_endpoint": "handled_by_chat_module",
                 "default_user_id": DEFAULT_USER_ID
             }
         }
@@ -438,33 +255,54 @@ async def test_ai_connection():
     except Exception as e:
         results['openrouter'] = {'status': 'error', 'message': str(e)}
     
+    # Test Inception Labs
+    try:
+        inception_client = await get_inception_client()
+        results['inception_labs'] = await inception_client.test_connection()
+    except Exception as e:
+        results['inception_labs'] = {'status': 'error', 'message': str(e)}
+    
     # Overall health
     primary_healthy = results.get('openrouter', {}).get('status') == 'success'
+    fallback_available = results.get('inception_labs', {}).get('status') in ['success', 'placeholder']
     
     return {
         "providers": results,
-        "system_status": "healthy" if primary_healthy else "degraded",
+        "system_status": "healthy" if primary_healthy or fallback_available else "degraded",
         "primary_provider": "openrouter",
-        "chat_processing": "basic_version",
+        "fallback_provider": "inception_labs",
+        "chat_endpoint_status": "handled_by_chat_module",
         "default_user_id": DEFAULT_USER_ID
     }
 
+#-- Cleanup and Shutdown Handlers
+@router.on_event("shutdown")
+async def shutdown_ai_brain():
+    """Cleanup AI brain components"""
+    logger.info("Shutting down AI brain support components...")
+    
+    await cleanup_openrouter_client()
+    await cleanup_inception_client()
+    await cleanup_memory_managers()
+    
+    logger.info("AI brain support shutdown complete")
+
 #-- Module Information Functions
 def get_integration_info():
-    """Get information about the AI brain integration"""
+    """Get information about the AI brain support integration"""
     return {
-        "name": "AI Brain Router - Basic Chat Processing",
+        "name": "AI Brain Support Router",
         "version": "2.0.0",
-        "description": "Basic chat processing without complex integrations",
+        "description": "Support endpoints only - chat handled by chat.py",
+        "note": "Chat processing handled by chat.py module to avoid duplication",
         "components": [
-            "OpenRouter Client",
-            "Digital Elephant Memory",
-            "Knowledge Query Engine",
             "Personality Engine",
-            "Feedback Processor"
+            "Feedback Processor",
+            "Conversation Manager",
+            "Knowledge Query Engine",
+            "AI Provider Testing"
         ],
         "endpoints": {
-            "chat": "/ai/chat",
             "feedback": "/ai/feedback",
             "personalities": "/ai/personalities",
             "conversations": "/ai/conversations",
@@ -473,20 +311,22 @@ def get_integration_info():
             "test": "/ai/test"
         },
         "features": [
-            "250K context window",
-            "500 conversation memory",
-            "21K knowledge base integration",
-            "4 personality system",
             "👍👎😄 feedback learning",
-            "Real-time datetime context"
+            "Personality system management",
+            "Conversation history access",
+            "Knowledge base search",
+            "AI provider health monitoring",
+            "Usage statistics"
         ],
         "default_user_id": DEFAULT_USER_ID
     }
 
 def check_module_health():
-    """Check AI brain module health"""
+    """Check AI brain support module health"""
     missing_vars = []
     
+    # Check required environment variables
+    import os
     if not os.getenv("OPENROUTER_API_KEY"):
         missing_vars.append("OPENROUTER_API_KEY")
     
@@ -494,7 +334,7 @@ def check_module_health():
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
-        "chat_processing": "basic_version",
+        "chat_endpoint_status": "handled_by_chat_module",
         "default_user_id": DEFAULT_USER_ID,
-        "note": "Basic version without complex integrations"
+        "note": "This module handles support endpoints only - chat in chat.py"
     }
