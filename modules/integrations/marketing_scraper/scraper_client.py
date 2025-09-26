@@ -210,6 +210,31 @@ class MarketingScraperClient:
     
     def _analyze_page_structure(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Analyze page structure for technical insights"""
+            """Analyze page structure for technical insights"""
+        print(f"🔍 SCRAPER DEBUG: Starting _analyze_page_structure")
+        
+        try:
+            print(f"🔍 SCRAPER DEBUG: Extracting headings")
+            headings = self._extract_headings(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting CTAs")
+            ctas = self._extract_ctas(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting forms")
+            forms = self._extract_forms(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting images")
+            images = self._extract_images(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting links")
+            links = self._extract_links(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting social signals")
+            social_signals = self._extract_social_signals(soup)
+            
+            print(f"🔍 SCRAPER DEBUG: Extracting technical elements")
+            technical_elements = self._extract_technical_elements(soup)
+        
         structure = {
             'headings': self._extract_headings(soup),
             'ctas': self._extract_ctas(soup), 
