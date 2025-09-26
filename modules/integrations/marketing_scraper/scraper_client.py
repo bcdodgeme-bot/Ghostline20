@@ -210,7 +210,6 @@ class MarketingScraperClient:
     
     def _analyze_page_structure(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Analyze page structure for technical insights"""
-            """Analyze page structure for technical insights"""
         print(f"🔍 SCRAPER DEBUG: Starting _analyze_page_structure")
         
         try:
