@@ -1,6 +1,7 @@
 /* =============================================================================
    Syntax Prime V2 - Modern Chat Interface Styles
    Dark theme with deep purple accents matching the grumpy cat logo
+   RESTORED: Original design + critical input area fixes
    ============================================================================= */
 
 /* === Reset & Base Styles === */
@@ -370,6 +371,8 @@ body {
     overflow-y: auto;
     padding: var(--spacing-lg);
     scroll-behavior: smooth;
+    /* FIXED: Add bottom padding to prevent input overlap */
+    padding-bottom: 120px;
 }
 
 .welcome-message {
@@ -568,11 +571,17 @@ body {
     }
 }
 
-/* === Chat Input === */
+/* === FIXED: Chat Input Container - Better Positioning === */
 .chat-input-container {
+    position: fixed !important;
+    bottom: 0;
+    left: 320px; /* Account for sidebar width */
+    right: 0;
     border-top: 1px solid var(--border-color);
     background: var(--bg-surface);
     backdrop-filter: blur(20px);
+    z-index: 100;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
 }
 
 .file-upload-area {
@@ -622,6 +631,7 @@ body {
     align-items: flex-end;
     gap: var(--spacing-md);
     padding: var(--spacing-lg);
+    min-height: 80px; /* FIXED: Ensure minimum height for visibility */
 }
 
 .input-button {
@@ -640,12 +650,18 @@ body {
     flex-shrink: 0;
 }
 
-.input-button:hover {
+.input-button:hover:not(:disabled) {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
     background: rgba(123, 97, 255, 0.1);
 }
 
+.input-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* FIXED: Input Field Container - Better Layout */
 .input-field-container {
     flex: 1;
     background: var(--bg-elevated);
@@ -653,6 +669,9 @@ body {
     border-radius: var(--radius-lg);
     transition: all var(--transition-fast);
     position: relative;
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
 }
 
 .input-field-container:focus-within {
@@ -660,6 +679,7 @@ body {
     box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.1);
 }
 
+/* FIXED: Message Input with Auto-Resize */
 #messageInput {
     width: 100%;
     background: none;
@@ -670,26 +690,48 @@ body {
     line-height: 1.5;
     resize: none;
     outline: none;
-    max-height: 200px;
+    min-height: 44px;
+    max-height: 120px;
     font-family: inherit;
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
 }
 
 #messageInput::placeholder {
     color: var(--text-tertiary);
 }
 
+/* FIXED: Textarea Scrollbar Styling */
+#messageInput::-webkit-scrollbar {
+    width: 4px;
+}
+
+#messageInput::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#messageInput::-webkit-scrollbar-thumb {
+    background: var(--accent-primary);
+    border-radius: 2px;
+}
+
 .input-footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--spacing-sm) var(--spacing-lg);
+    padding: var(--spacing-xs) var(--spacing-lg);
     border-top: 1px solid var(--border-color);
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    min-height: 32px;
+    flex-shrink: 0;
 }
 
 .char-count {
     font-size: 0.8rem;
     color: var(--text-tertiary);
+    font-weight: 500;
 }
 
 .input-actions {
@@ -705,6 +747,11 @@ body {
     padding: var(--spacing-xs);
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .input-action:hover {
@@ -712,31 +759,55 @@ body {
     background: rgba(123, 97, 255, 0.1);
 }
 
+/* FIXED: Proper Send Button Styling */
 .send-button {
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-    border: none;
-    color: white;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+    border: none !important;
+    color: white !important;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: all var(--transition-fast);
-    width: 48px;
-    height: 48px;
+    width: 48px !important;
+    height: 48px !important;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(123, 97, 255, 0.3);
 }
 
 .send-button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-glow);
+    transform: translateY(-2px) !important;
+    box-shadow: var(--shadow-glow) !important;
+}
+
+.send-button:active:not(:disabled) {
+    transform: translateY(-1px) !important;
 }
 
 .send-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
+    opacity: 0.4 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* === Send Button Loading State === */
+.send-button.loading::before {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 2px solid transparent;
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 /* === Modals === */
@@ -944,7 +1015,7 @@ body {
     line-height: 1.5;
 }
 
-/* === Responsive Design === */
+/* === FIXED: Responsive Design - Input positioning === */
 @media (max-width: 768px) {
     .sidebar {
         position: fixed;
@@ -962,6 +1033,11 @@ body {
     
     .chat-container {
         width: 100%;
+    }
+    
+    /* FIXED: Mobile input positioning */
+    .chat-input-container {
+        left: 0 !important;
     }
     
     .header-center {
@@ -1001,6 +1077,7 @@ body {
     
     .chat-messages {
         padding: var(--spacing-md);
+        padding-bottom: 140px; /* More padding on mobile */
     }
     
     .message-bubble {
