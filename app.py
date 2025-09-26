@@ -41,7 +41,7 @@ from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
 
 #-- Section 4: Chat Module Imports - 9/23/25
-# from modules.ai.chat import router as chat_router
+from modules.ai.chat import router as chat_router
 from modules.ai.chat import get_integration_info as chat_integration_info, check_module_health as chat_module_health
 
 #-- Section 5: Authentication Module Imports - 9/23/25
