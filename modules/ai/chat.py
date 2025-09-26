@@ -9,6 +9,7 @@ import uuid
 import json
 import asyncio
 from datetime import datetime
+import pytz
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
@@ -108,6 +109,32 @@ def get_upload_dir():
     return UPLOAD_DIR if _upload_dir_created else None
 
 #-- Section 5: Helper Functions - 9/25/25
+def get_current_datetime_context() -> dict:
+    """
+    Get comprehensive current date/time context for AI personalities
+    Returns properly formatted date/time info in multiple formats
+    """
+    now = datetime.now()
+    
+    # Get user's timezone (defaulting to EST if not available)
+    try:
+        user_timezone = pytz.timezone('America/New_York')  # Default to Eastern
+        now_user_tz = now.astimezone(user_timezone)
+    except:
+        now_user_tz = now
+    
+    return {
+        "current_date": now_user_tz.strftime("%Y-%m-%d"),  # 2025-09-26
+        "current_time_24h": now_user_tz.strftime("%H:%M"),  # 15:19
+        "current_time_12h": now_user_tz.strftime("%I:%M %p"),  # 3:19 PM
+        "day_of_week": now_user_tz.strftime("%A"),  # Friday
+        "month_name": now_user_tz.strftime("%B"),  # September
+        "full_datetime": now_user_tz.strftime("%A, %B %d, %Y at %H:%M"),  # Friday, September 26, 2025 at 15:19
+        "timezone": str(now_user_tz.tzinfo),
+        "iso_timestamp": now_user_tz.isoformat(),
+        "unix_timestamp": int(now_user_tz.timestamp())
+    }
+
 async def get_current_user_id() -> str:
     """Get current user ID - placeholder for now"""
     return "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
@@ -954,6 +981,9 @@ async def chat_with_ai(
     logger.info(f"🔍 DEBUG: chat_with_ai called with message: '{request.message}'")
     
     try:
+        # Get current date/time context - NEW 9/26/25
+        datetime_context = get_current_datetime_context()
+        logger.info(f"🕐 Current datetime context: {datetime_context['full_datetime']}")
         # Process uploaded files
         processed_files = []
         if files and files[0].filename:
@@ -1200,7 +1230,21 @@ Please respond appropriately about being unable to access weather information.
         
         # Get personality prompt
         personality_prompt = personality_engine.get_personality_prompt(request.personality_id)
-        system_parts.append(personality_prompt)
+        # Add critical datetime context for AI
+        enhanced_personality_prompt = f"""{personality_prompt}
+
+        CRITICAL CURRENT CONTEXT - USE THIS INFORMATION:
+        📅 Current Date: {datetime_context['current_date']} ({datetime_context['day_of_week']})
+        🕐 Current Time: {datetime_context['current_time_24h']} (24-hour) / {datetime_context['current_time_12h']} (12-hour)
+        🌍 Full Context: {datetime_context['full_datetime']}
+        🕰️ Timezone: {datetime_context['timezone']}
+
+        IMPORTANT: Always use 24-hour time format (like {datetime_context['current_time_24h']}) when giving time in your responses.
+
+        User Context: The user is asking questions on {datetime_context['full_datetime']}.
+        When discussing time or dates, use the current information provided above."""
+
+        system_parts.append(enhanced_personality_prompt)
         
         # Add RSS marketing context if available
         if rss_context:
@@ -1261,7 +1305,7 @@ Please respond appropriately about being unable to access weather information.
         end_time = datetime.now()
         response_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        logger.info(f"✅ Chat response generated in {response_time_ms}ms")
+        logger.info(f"✅ Chat response generated in {response_time_ms}ms with current datetime: {datetime_context['full_datetime']}")
         
         return ChatResponse(
             message_id=response_message_id,
