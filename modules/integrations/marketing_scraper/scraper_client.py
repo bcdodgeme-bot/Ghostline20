@@ -121,7 +121,7 @@ class MarketingScraperClient:
                 if response.status != 200:
                     raise Exception(f"HTTP {response.status}: {response.reason}")
                 
-                content_type = response.headers.get('content-type', '')
+                content_type = response.headers.get('content-type') or ''
                 if 'text/html' not in content_type.lower():
                     raise Exception(f"Invalid content type: {content_type}")
                 
@@ -313,7 +313,7 @@ class MarketingScraperClient:
         external_links = []
         
         for link in links:
-            href = link['href']
+            href = link.get('href') or ''
             if href.startswith(('http://', 'https://')) and not href.startswith(soup.base_url if hasattr(soup, 'base_url') else ''):
                 external_links.append(href)
         
@@ -332,7 +332,7 @@ class MarketingScraperClient:
         ]
         
         for link in soup.find_all('a', href=True):
-            href = link['href'].lower()
+            href = (link.get('href') or '').lower()
             for domain in social_domains:
                 if domain in href:
                     platform = domain.split('.')[0]
