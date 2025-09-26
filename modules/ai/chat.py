@@ -1,9 +1,10 @@
 # modules/ai/chat.py
-# AI Chat Router for Syntax Prime V2 - COMPLETE REWRITE WITH RSS LEARNING + MARKETING SCRAPER + PRAYER TIMES
-# Clean, sectioned chat endpoint with file upload, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times integration
-# Date: 9/26/25
+# AI Chat Integration Helper Functions for Syntax Prime V2
+# Provides integration functions for router.py - NO ENDPOINTS HERE
+# Clean helper module with all integration logic for weather, prayer times, scraper, etc.
+# Date: 9/26/25 - Converted to helper module only
 
-#-- Section 1: Core Imports - 9/25/25
+#-- Section 1: Core Imports - 9/26/25
 import os
 import uuid
 import json
@@ -12,10 +13,6 @@ from datetime import datetime
 import pytz
 from typing import Dict, List, Any, Optional
 from pathlib import Path
-
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ValidationError
 import logging
 import httpx
 
@@ -29,57 +26,6 @@ import numpy as np
 from io import BytesIO
 import base64
 
-#-- Section 2: Internal Module Imports - 9/25/25
-from modules.core.database import db_manager
-from modules.ai.personality_engine import get_personality_engine
-from modules.ai.openrouter_client import get_openrouter_client
-from modules.ai.conversation_manager import get_memory_manager
-from modules.ai.knowledge_query import get_knowledge_engine
-
-#-- Section 2a: Bluesky Integration Import - 9/24/25
-from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
-from modules.integrations.bluesky.engagement_analyzer import get_engagement_analyzer
-from modules.integrations.bluesky.approval_system import get_approval_system
-from modules.integrations.bluesky.notification_manager import get_notification_manager
-
-#-- NEW Section 2b: Marketing Scraper Integration Import - 9/25/25
-from modules.integrations.marketing_scraper.scraper_client import MarketingScraperClient
-from modules.integrations.marketing_scraper.content_analyzer import ContentAnalyzer
-from modules.integrations.marketing_scraper.database_manager import ScrapedContentDatabase
-
-#-- NEW Section 2c: Prayer Times Integration Import - 9/26/25
-from modules.integrations.prayer_times.database_manager import get_prayer_database_manager, get_next_prayer, get_todays_prayers
-
-
-#-- Section 3: Request/Response Models - 9/25/25
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-    timestamp: Optional[datetime] = None
-
-class ChatRequest(BaseModel):
-    message: str
-    personality_id: Optional[str] = 'syntaxprime'
-    thread_id: Optional[str] = None
-    include_knowledge: Optional[bool] = True
-    stream: Optional[bool] = False
-
-class BookmarkRequest(BaseModel):
-    message_id: str
-    bookmark_name: str
-    thread_id: str
-
-class ChatResponse(BaseModel):
-    message_id: str
-    thread_id: str
-    response: str
-    personality_used: str
-    response_time_ms: int
-    knowledge_sources: List[Dict] = []
-    timestamp: datetime
-
-#-- Section 4: Router Setup - 9/25/25
-router = APIRouter(prefix="/ai", tags=["AI Chat"])
 logger = logging.getLogger(__name__)
 
 # File upload configuration
@@ -108,7 +54,7 @@ def get_upload_dir():
         _upload_dir_created = ensure_upload_dir()
     return UPLOAD_DIR if _upload_dir_created else None
 
-#-- Section 5: Helper Functions - 9/25/25
+#-- Section 2: DateTime Helper Functions - 9/26/25
 def get_current_datetime_context() -> dict:
     """
     Get comprehensive current date/time context for AI personalities
@@ -135,9 +81,16 @@ def get_current_datetime_context() -> dict:
         "unix_timestamp": int(now_user_tz.timestamp())
     }
 
-async def get_current_user_id() -> str:
-    """Get current user ID - placeholder for now"""
-    return "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+#-- Section 3: Weather Integration Functions - 9/26/25
+def detect_weather_request(message: str) -> bool:
+    """Detect weather-related requests"""
+    weather_keywords = [
+        "weather", "temperature", "forecast", "rain", "snow", "sunny",
+        "cloudy", "storm", "wind", "humidity", "barometric pressure",
+        "headache weather", "pressure change", "uv index"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in weather_keywords)
 
 async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
     """Get current weather data for the user"""
@@ -184,17 +137,7 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
         logger.error(f"Weather API error: {e}")
         return {"error": str(e)}
 
-def detect_weather_request(message: str) -> bool:
-    """Detect weather-related requests"""
-    weather_keywords = [
-        "weather", "temperature", "forecast", "rain", "snow", "sunny",
-        "cloudy", "storm", "wind", "humidity", "barometric pressure",
-        "headache weather", "pressure change", "uv index"
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in weather_keywords)
-
-#-- Section 5a: Bluesky Integration Functions - 9/24/25
+#-- Section 4: Bluesky Integration Functions - 9/26/25
 def detect_bluesky_command(message: str) -> bool:
     """Detect Bluesky management commands"""
     bluesky_keywords = [
@@ -207,6 +150,11 @@ def detect_bluesky_command(message: str) -> bool:
 async def process_bluesky_command(message: str, user_id: str) -> str:
     """Process Bluesky-related commands"""
     try:
+        from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
+        from ..integrations.bluesky.engagement_analyzer import get_engagement_analyzer
+        from ..integrations.bluesky.approval_system import get_approval_system
+        from ..integrations.bluesky.notification_manager import get_notification_manager
+        
         message_lower = message.lower()
         
         if 'scan' in message_lower:
@@ -267,6 +215,7 @@ No engagement opportunities found at this time.
             return "\n".join(response_parts)
         
         else:
+            account_statuses = get_bluesky_multi_client().get_all_account_status()
             return f"""🔵 **Bluesky Social Media Intelligence**
 
 📱 **Configured Accounts:** {len(account_statuses)}/5
@@ -287,6 +236,10 @@ Ready to find your next great engagement opportunity?"""
 async def trigger_background_scan(user_id: str):
     """Trigger a background scan of all Bluesky accounts"""
     try:
+        from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
+        from ..integrations.bluesky.engagement_analyzer import get_engagement_analyzer
+        from ..integrations.bluesky.approval_system import get_approval_system
+        
         multi_client = get_bluesky_multi_client()
         engagement_analyzer = get_engagement_analyzer()
         approval_system = get_approval_system()
@@ -317,7 +270,7 @@ async def trigger_background_scan(user_id: str):
     except Exception as e:
         logger.error(f"Background scan failed: {e}")
 
-#-- Section 5b: RSS Learning Command Processing - 9/25/25
+#-- Section 5: RSS Learning Functions - 9/26/25
 def detect_rss_command(message: str) -> bool:
     """Detect if user is asking for RSS/marketing insights"""
     rss_keywords = [
@@ -347,7 +300,7 @@ def detect_writing_assistance_request(message: str) -> tuple[bool, str]:
 async def get_rss_marketing_context(message: str, content_type: str = None) -> str:
     """Get marketing context from RSS learning system for AI writing assistance"""
     try:
-        from modules.integrations.rss_learning.marketing_insights import MarketingInsightsExtractor
+        from ..integrations.rss_learning.marketing_insights import MarketingInsightsExtractor
         
         insights_extractor = MarketingInsightsExtractor()
         
@@ -444,7 +397,7 @@ async def get_rss_marketing_context(message: str, content_type: str = None) -> s
         logger.error(f"RSS marketing context generation failed: {e}")
         return "RSS_CONTEXT_ERROR: Unable to retrieve current marketing insights. Proceed with general knowledge."
 
-#-- NEW Section 5c: Marketing Scraper Command Processing - 9/25/25
+#-- Section 6: Marketing Scraper Functions - 9/26/25
 def detect_scraper_command(message: str) -> bool:
     """Detect marketing scraper commands"""
     scraper_keywords = [
@@ -478,6 +431,10 @@ def extract_url_from_message(message: str) -> str:
 async def process_scraper_command(message: str, user_id: str) -> str:
     """Process marketing scraper commands"""
     try:
+        from ..integrations.marketing_scraper.scraper_client import MarketingScraperClient
+        from ..integrations.marketing_scraper.content_analyzer import ContentAnalyzer
+        from ..integrations.marketing_scraper.database_manager import ScrapedContentDatabase
+        
         message_lower = message.lower()
         
         if 'scrape history' in message_lower:
@@ -501,7 +458,7 @@ No scraping history found. Start analyzing competitors with:
                 
                 response_parts.append(f"**{i}. {domain}**")
                 response_parts.append(f"   📅 Scraped: {scraped_at}")
-                response_parts.append(f"   📝 Words: {word_count}")
+                response_parts.append(f"   📄 Words: {word_count}")
                 response_parts.append("")
             
             response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
@@ -510,7 +467,6 @@ No scraping history found. Start analyzing competitors with:
         elif 'scrape insights' in message_lower:
             # Get competitive insights from all scraped content
             db = ScrapedContentDatabase()
-            analyzer = ContentAnalyzer()
             
             # Search for recent content using empty topic to get all
             recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
@@ -646,7 +602,7 @@ Please try again or contact support if the issue persists."""
         logger.error(f"Scraper command processing failed: {e}")
         return f"❌ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
 
-#-- NEW Section 5d: Prayer Times Command Processing - 9/26/25
+#-- Section 7: Prayer Times Functions - 9/26/25
 def detect_prayer_command(message: str) -> bool:
     """Detect prayer-related requests"""
     prayer_keywords = [
@@ -673,6 +629,8 @@ def detect_prayer_question_type(message: str) -> str:
 async def process_prayer_command(message: str, user_id: str) -> str:
     """Process prayer-related commands using the cached database system"""
     try:
+        from ..integrations.prayer_times.database_manager import get_next_prayer, get_todays_prayers
+        
         question_type = detect_prayer_question_type(message)
         
         if question_type == "next_prayer":
@@ -800,9 +758,11 @@ An error occurred while retrieving prayer information: {str(e)}
 
 Please try again or contact support if the issue persists."""
 
-#-- Section 5e: File Processing Functions - 9/25/25
-async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
+#-- Section 8: File Processing Functions - 9/26/25
+async def process_uploaded_files(files) -> List[Dict]:
     """Process uploaded files and return file information"""
+    from fastapi import UploadFile
+    
     processed_files = []
     
     for file in files:
@@ -811,17 +771,11 @@ async def process_uploaded_files(files: List[UploadFile]) -> List[Dict]:
             
         file_ext = Path(file.filename).suffix.lower()
         if file_ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type {file_ext} not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-            )
+            raise Exception(f"File type {file_ext} not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}")
         
         content = await file.read()
         if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File {file.filename} too large. Max size: 10MB"
-            )
+            raise Exception(f"File {file.filename} too large. Max size: 10MB")
         
         file_id = str(uuid.uuid4())
         file_path = UPLOAD_DIR / f"{file_id}_{file.filename}"
@@ -967,408 +921,40 @@ async def analyze_csv_file(file_path: Path) -> Dict:
             'extracted_text': ''
         }
 
-#-- Section 6: Main Chat Endpoints - updated 9/26/25 with Prayer Times Integration
-@router.post("/chat", response_model=ChatResponse)
-async def chat_with_ai(
-    request: ChatRequest,
-    files: List[UploadFile] = File(default=[]),
-    user_id: str = Depends(get_current_user_id)
-):
-    """
-    Main chat endpoint with complete integration: files, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times
-    """
-    start_time = datetime.now()
-    logger.info(f"🔍 DEBUG: chat_with_ai called with message: '{request.message}'")
-    
-    try:
-        # Get current date/time context - NEW 9/26/25
-        datetime_context = get_current_datetime_context()
-        logger.info(f"🕐 Current datetime context: {datetime_context['full_datetime']}")
-        # Process uploaded files
-        processed_files = []
-        if files and files[0].filename:
-            processed_files = await process_uploaded_files(files)
-            logger.info(f"Processed {len(processed_files)} uploaded files")
-        
-        # Check for Marketing Scraper commands FIRST - 9/25/25
-        scraper_detected = detect_scraper_command(request.message)
-        logger.info(f"🔍 Scraper detection result: {scraper_detected} for message: '{request.message}'")
-
-        if scraper_detected:
-            logger.info(f"🔍 Marketing scraper command detected: {request.message}")
-            
-            try:
-                scraper_response = await process_scraper_command(request.message, user_id)
-                logger.info(f"🔍 Scraper response generated: {scraper_response[:100]}...")
-            except Exception as e:
-                logger.error(f"🔍 Scraper processing failed with exception: {e}")
-                # Fall through to regular AI if scraper fails
-                pass
-            
-            memory_manager = get_memory_manager(user_id)
-            
-            if request.thread_id:
-                thread_id = request.thread_id
-            else:
-                thread_id = await memory_manager.create_conversation_thread(
-                    platform="web_interface",
-                    title="Marketing Scraper Analysis"
-                )
-            
-            user_message_id = str(uuid.uuid4())
-            await memory_manager.add_message(
-                thread_id=thread_id,
-                role="user",
-                content=request.message
-            )
-            
-            response_message_id = str(uuid.uuid4())
-            await memory_manager.add_message(
-                thread_id=thread_id,
-                role="assistant",
-                content=scraper_response
-            )
-            
-            end_time = datetime.now()
-            response_time_ms = int((end_time - start_time).total_seconds() * 1000)
-            
-            return ChatResponse(
-                message_id=response_message_id,
-                thread_id=thread_id,
-                response=scraper_response,
-                personality_used="syntaxprime",
-                response_time_ms=response_time_ms,
-                timestamp=end_time
-            )
-        
-        # Check for Prayer Times commands - NEW 9/26/25
-        prayer_detected = detect_prayer_command(request.message)
-        logger.info(f"🕌 Prayer detection result: {prayer_detected} for message: '{request.message}'")
-
-        if prayer_detected:
-            logger.info(f"🕌 Prayer command detected: {request.message}")
-            
-            try:
-                prayer_response = await process_prayer_command(request.message, user_id)
-                logger.info(f"🕌 Prayer response generated: {prayer_response[:100]}...")
-                
-                memory_manager = get_memory_manager(user_id)
-                
-                if request.thread_id:
-                    thread_id = request.thread_id
-                else:
-                    thread_id = await memory_manager.create_conversation_thread(
-                        platform="web_interface",
-                        title="Prayer Times Query"
-                    )
-                
-                user_message_id = str(uuid.uuid4())
-                await memory_manager.add_message(
-                    thread_id=thread_id,
-                    role="user",
-                    content=request.message
-                )
-                
-                response_message_id = str(uuid.uuid4())
-                await memory_manager.add_message(
-                    thread_id=thread_id,
-                    role="assistant",
-                    content=prayer_response
-                )
-                
-                end_time = datetime.now()
-                response_time_ms = int((end_time - start_time).total_seconds() * 1000)
-                
-                return ChatResponse(
-                    message_id=response_message_id,
-                    thread_id=thread_id,
-                    response=prayer_response,
-                    personality_used="syntaxprime",
-                    response_time_ms=response_time_ms,
-                    timestamp=end_time
-                )
-                
-            except Exception as e:
-                logger.error(f"🕌 Prayer processing failed with exception: {e}")
-                # Fall through to regular AI if prayer system fails
-        
-        # Check for Bluesky commands - 9/24/25
-        if detect_bluesky_command(request.message):
-            logger.info(f"🔵 Bluesky command detected: {request.message}")
-            
-            bluesky_response = await process_bluesky_command(request.message, user_id)
-            
-            memory_manager = get_memory_manager(user_id)
-            
-            if request.thread_id:
-                thread_id = request.thread_id
-            else:
-                thread_id = await memory_manager.create_conversation_thread(
-                    platform="web_interface",
-                    title="Bluesky Social Media Management"
-                )
-            
-            user_message_id = str(uuid.uuid4())
-            await memory_manager.add_message(
-                thread_id=thread_id,
-                role="user",
-                content=request.message
-            )
-            
-            response_message_id = str(uuid.uuid4())
-            await memory_manager.add_message(
-                thread_id=thread_id,
-                role="assistant",
-                content=bluesky_response
-            )
-            
-            end_time = datetime.now()
-            response_time_ms = int((end_time - start_time).total_seconds() * 1000)
-            
-            return ChatResponse(
-                message_id=response_message_id,
-                thread_id=thread_id,
-                response=bluesky_response,
-                personality_used="syntaxprime",
-                response_time_ms=response_time_ms,
-                timestamp=end_time
-            )
-        
-        # Continue with regular AI chat processing...
-        memory_manager = get_memory_manager(user_id)
-        knowledge_engine = get_knowledge_engine()
-        personality_engine = get_personality_engine()
-        
-        # Handle conversation thread
-        thread_id = request.thread_id
-        if not thread_id:
-            thread_id = await memory_manager.create_conversation_thread(
-                platform="web_interface",
-                title=None
-            )
-        
-        # Build message content with files if present
-        message_content = request.message
-        if processed_files:
-            file_descriptions = []
-            for file_info in processed_files:
-                desc = f"🔎 {file_info['filename']} ({file_info['analysis']['type']}): {file_info['analysis']['description']}"
-                file_descriptions.append(desc)
-                
-                if file_info['analysis']['extracted_text']:
-                    message_content += f"\n\n--- Content from {file_info['filename']} ---\n"
-                    message_content += file_info['analysis']['extracted_text'][:1000]  # Limit content
-            
-            message_content = f"{request.message}\n\nFiles uploaded:\n" + "\n".join(file_descriptions) + "\n\n" + message_content
-        
-        # Store user message
-        user_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="user",
-            content=message_content,
-            content_type="text_with_files" if processed_files else "text"
-        )
-        
-        # Get conversation context
-        conversation_history, context_info = await memory_manager.get_context_for_ai(
-            thread_id=thread_id,
-            max_tokens=200000
-        )
-        
-        # Check for RSS/marketing insights requests
-        rss_context = None
-        if detect_rss_command(request.message) or detect_writing_assistance_request(request.message)[0]:
-            logger.info(f"📰 RSS/Marketing request detected: {request.message}")
-            rss_context = await get_rss_marketing_context(request.message)
-            
-            if rss_context and not rss_context.startswith("RSS_CONTEXT_ERROR"):
-                logger.info("📊 RSS marketing context added successfully")
-            else:
-                logger.warning("⚠️ RSS marketing context failed to load")
-        
-        # Check for weather requests
-        weather_context = None
-        if detect_weather_request(request.message):
-            logger.info(f"🌦️ Weather request detected for user {user_id}")
-            weather_data = await get_weather_for_user(user_id)
-            
-            if weather_data and weather_data.get("success"):
-                weather_info = weather_data["data"]
-                weather_context = f"""
-CURRENT WEATHER DATA:
-Location: {weather_info.get('location', 'Current location')}
-Temperature: {weather_info.get('temperature_f', 'N/A')}°F
-Humidity: {weather_info.get('humidity', 'N/A')}%
-Wind Speed: {weather_info.get('wind_speed', 'N/A')} mph
-Barometric Pressure: {weather_info.get('pressure', 'N/A')} mbar
-UV Index: {weather_info.get('uv_index', 'N/A')}
-Visibility: {weather_info.get('visibility', 'N/A')} miles
-
-Please respond naturally about the weather using this current data.
-"""
-                logger.info("🌤️ Weather context added to AI conversation")
-            elif weather_data and "error" in weather_data:
-                weather_context = f"""
-WEATHER REQUEST DETECTED: Unfortunately, I'm having trouble accessing current weather data: {weather_data['error']}
-Please respond appropriately about being unable to access weather information.
-"""
-                logger.warning(f"Weather API error: {weather_data['error']}")
-        
-        # Get knowledge sources if enabled
-        knowledge_sources = []
-        if request.include_knowledge:
-            knowledge_sources = await knowledge_engine.search_knowledge(
-                query=request.message,
-                max_results=5
-            )
-        
-        # Build AI messages
-        ai_messages = []
-        
-        # Add system message with personality and context
-        system_parts = []
-        
-        # Get personality prompt
-        personality_prompt = personality_engine.get_personality_prompt(request.personality_id)
-        # Add critical datetime context for AI
-        enhanced_personality_prompt = f"""{personality_prompt}
-
-        CRITICAL CURRENT CONTEXT - USE THIS INFORMATION:
-        📅 Current Date: {datetime_context['current_date']} ({datetime_context['day_of_week']})
-        🕐 Current Time: {datetime_context['current_time_24h']} (24-hour) / {datetime_context['current_time_12h']} (12-hour)
-        🌍 Full Context: {datetime_context['full_datetime']}
-        🕰️ Timezone: {datetime_context['timezone']}
-
-        IMPORTANT: Always use 24-hour time format (like {datetime_context['current_time_24h']}) when giving time in your responses.
-
-        User Context: The user is asking questions on {datetime_context['full_datetime']}.
-        When discussing time or dates, use the current information provided above."""
-
-        system_parts.append(enhanced_personality_prompt)
-        
-        # Add RSS marketing context if available
-        if rss_context:
-            system_parts.append(rss_context)
-        
-        # Add weather context if available
-        if weather_context:
-            system_parts.append(weather_context)
-        
-        # Add knowledge context if available
-        if knowledge_sources:
-            knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
-            for source in knowledge_sources:
-                knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
-            system_parts.append(knowledge_context)
-        
-        ai_messages.append({
-            "role": "system",
-            "content": "\n\n".join(system_parts)
-        })
-        
-        # Add conversation history
-        ai_messages.extend(conversation_history)
-        
-        # Add current user message
-        ai_messages.append({
-            "role": "user",
-            "content": message_content
-        })
-        
-        # Get AI response
-        openrouter_client = await get_openrouter_client()
-        ai_response = await openrouter_client.get_completion(
-            messages=ai_messages,
-            model="anthropic/claude-3.5-sonnet:beta",
-            max_tokens=4000,
-            temperature=0.7
-        )
-        
-        # Process through personality engine
-        final_response = personality_engine.process_ai_response(
-            response=ai_response,
-            personality_id=request.personality_id,
-            conversation_context=conversation_history
-        )
-        
-        # Store AI response
-        knowledge_source_ids = [source.get('id', '') for source in knowledge_sources]
-        response_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="assistant",
-            content=final_response,
-            model_used="anthropic/claude-3.5-sonnet:beta",
-            knowledge_sources_used=knowledge_source_ids
-        )
-        
-        # Calculate response time
-        end_time = datetime.now()
-        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
-        
-        logger.info(f"✅ Chat response generated in {response_time_ms}ms with current datetime: {datetime_context['full_datetime']}")
-        
-        return ChatResponse(
-            message_id=response_message_id,
-            thread_id=thread_id,
-            response=final_response,
-            personality_used=request.personality_id,
-            response_time_ms=response_time_ms,
-            knowledge_sources=knowledge_sources,
-            timestamp=end_time
-        )
-        
-    except Exception as e:
-        logger.error(f"Chat processing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
-
-#-- Section 7: Integration Info and Health Check Functions - updated 9/26/25 with Prayer Times
+#-- Section 9: Module Information Functions - 9/26/25
 def get_integration_info():
-    """Get information about the chat integration"""
+    """Get information about the chat integration helper module"""
     return {
-        "name": "AI Chat System",
+        "name": "AI Chat Integration Helper",
         "version": "2.0.0",
-        "description": "Advanced chat system with file processing, weather, Bluesky, RSS Learning, Marketing Scraper, and Prayer Times integration",
-        "endpoints": [
-            "/ai/chat",
-            "/ai/chat/stream",
-            "/ai/bookmarks",
-            "/ai/conversations",
-            "/ai/personalities",
-            "/ai/stats"
-        ],
+        "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, and file processing",
+        "note": "This module provides helper functions only - endpoints are handled by router.py",
         "features": [
-            "Multi-personality chat",
-            "File upload support",
-            "Bookmark system",
-            "Knowledge integration",
-            "Streaming responses",
-            "Conversation management",
-            "Weather integration",
-            "Bluesky social media commands",
-            "RSS learning integration for writing assistance",
+            "Weather integration with Tomorrow.io API",
+            "Prayer times with AlAdhan API integration",
             "Marketing scraper for competitive analysis",
-            "Prayer times integration for Islamic practice"  # NEW
+            "RSS learning integration for marketing insights",
+            "Bluesky social media command processing",
+            "File upload processing (images, PDFs, CSVs, text)",
+            "Real-time datetime context generation"
         ],
-        "file_upload_support": True,
-        "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
-        "supported_file_types": list(ALLOWED_EXTENSIONS),
-        "weather_integration": True,
-        "bluesky_integration": True,
-        "rss_learning_integration": True,
-        "marketing_scraper_integration": True,
-        "prayer_times_integration": True  # NEW
+        "integrations_provided": [
+            "weather_detection_and_processing",
+            "prayer_times_detection_and_processing",
+            "marketing_scraper_detection_and_processing",
+            "rss_learning_context_generation",
+            "bluesky_command_processing",
+            "file_upload_and_analysis"
+        ]
     }
 
 def check_module_health() -> Dict[str, Any]:
-    """Check the health of the AI chat module"""
+    """Check the health of the AI chat helper module"""
     missing_vars = []
     warnings = []
     
     if not UPLOAD_DIR.exists():
         warnings.append("Upload directory not found")
-    
-    if not os.getenv("OPENROUTER_API_KEY"):
-        missing_vars.append("OPENROUTER_API_KEY")
     
     if not os.getenv("TOMORROW_IO_API_KEY"):
         warnings.append("Weather integration not configured (TOMORROW_IO_API_KEY missing)")
@@ -1395,7 +981,7 @@ def check_module_health() -> Dict[str, Any]:
     if not scraper_configured:
         warnings.append("Marketing Scraper integration not configured (DATABASE_URL missing)")
     
-    # NEW: Check prayer times configuration
+    # Check prayer times configuration
     prayer_configured = bool(os.getenv("DATABASE_URL"))  # Uses same DB as others
     
     if not prayer_configured:
@@ -1411,5 +997,7 @@ def check_module_health() -> Dict[str, Any]:
         "bluesky_integration_available": bluesky_configured,
         "rss_learning_integration_available": rss_configured,
         "marketing_scraper_integration_available": scraper_configured,
-        "prayer_times_integration_available": prayer_configured  # NEW
+        "prayer_times_integration_available": prayer_configured,
+        "file_processing_available": True,
+        "note": "This is a helper module - endpoints are handled by router.py"
     }

@@ -609,7 +609,7 @@ app.include_router(ai_router)
 # Need to patch the dependency in chat router to use our session-based auth
 import modules.ai.chat as chat_module
 chat_module.get_current_user_id = get_current_user_id
-app.include_router(chat_router)
+# app.include_router(chat_router)
 
 # Include Weather integration router - added 9/24/25
 app.include_router(weather_router)
