@@ -217,8 +217,8 @@ All systems operational and ready to assist!"""
             logger.info("🧠 Processing regular AI chat request")
             
             # Get conversation history
-            conversation_history = await memory_manager.get_conversation_context(
-                thread_id, max_messages=20
+            conversation_history, context_info = await memory_manager.get_context_for_ai(
+                thread_id, max_tokens=20000
             )
             
             # Search knowledge base if requested
@@ -274,11 +274,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
             }]
             
             # Add conversation history
-            for msg in conversation_history[-10:]:  # Last 10 messages
-                ai_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+            ai_messages.extend(conversation_history)
             
             # Add current message
             ai_messages.append({
@@ -335,7 +331,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
             ],
             conversation_context={
                 'thread_id': thread_id,
-                'message_count': len(conversation_history) + 1 if 'conversation_history' in locals() else 1,
+                'message_count': context_info.get('total_messages', 0) + 1,
                 'has_knowledge': len(knowledge_sources) > 0,
                 'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->health->ai'
             }
