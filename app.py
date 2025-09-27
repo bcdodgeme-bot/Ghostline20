@@ -40,8 +40,8 @@ from modules.integrations.prayer_times import get_integration_info as prayer_tim
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
 
-#-- Section 4: Chat Module Imports - 9/23/25
-from modules.ai.chat import router as chat_router
+#-- Section 4: FIXED Chat Module Imports - 9/26/25
+# FIXED: Import helper functions from chat.py, but not router (router handles endpoints)
 from modules.ai.chat import get_integration_info as chat_integration_info, check_module_health as chat_module_health
 
 #-- Section 5: Authentication Module Imports - 9/23/25
@@ -294,7 +294,7 @@ async def startup_event():
         if rss_health['healthy']:
             print("📰 RSS Learning integration loaded successfully")
             source_count = rss_health.get('total_sources', 8)
-            print(f"   🌍 {source_count} RSS sources configured")
+            print(f"   🌐 {source_count} RSS sources configured")
             print("   🧠 AI-powered content analysis active")
             print("   📈 Weekly background processing enabled")
             print("   🎯 Marketing insights for AI brain integration")
@@ -327,6 +327,21 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Marketing Scraper integration health check failed: {e}")
     
+    # Check Prayer Times integration health - NEW 9/26/25
+    try:
+        prayer_health = prayer_times_module_health()
+        if prayer_health['healthy']:
+            print("🕌 Prayer Times integration loaded successfully")
+            print("   📅 Daily prayer schedule calculation")
+            print("   🌙 Islamic calendar integration")
+            print("   💬 Chat commands: prayer times, how long till prayer")
+            print("   🕰️ Real-time prayer countdown")
+        else:
+            print("⚠️  Prayer Times integration loaded with warnings")
+            print(f"   Missing vars: {prayer_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️  Prayer Times integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -340,6 +355,7 @@ async def startup_event():
     print("   🔵 Bluesky API: http://localhost:8000/bluesky")
     print("   📰 RSS Learning: http://localhost:8000/integrations/rss")
     print("   🔍 Marketing Scraper: http://localhost:8000/integrations/marketing-scraper")  # NEW
+    print("   🕌 Prayer Times: http://localhost:8000/integrations/prayer-times")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -348,8 +364,7 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-#-- Section 11: API Status and Health Endpoints - updated 9/25/25 with Marketing Scraper
-#-- Section 11: API Status and Health Endpoints - updated 9/24/25 with Bluesky, 9/25/25 with RSS Learning, 9/26/25 with Prayer Times
+#-- Section 11: API Status and Health Endpoints - updated 9/26/25 with Prayer Times
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
@@ -373,12 +388,12 @@ async def api_status():
             "🌦️ Health-focused weather monitoring with Tomorrow.io",
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
             "📰 RSS Learning system with AI-powered marketing insights",
-            # "🔍 AI-powered marketing scraper for competitive analysis",  # COMMENTED OUT - module doesn't exist yet
+            "🔍 AI-powered marketing scraper for competitive analysis",
             "🕌 Islamic prayer times with intelligent scheduling",  # NEW 9/26/25
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "prayer-times", "authentication"],  # ADDED prayer-times
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "authentication"],  # UPDATED
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -406,9 +421,9 @@ async def api_status():
             "rss_insights": "/integrations/rss/insights",
             "rss_trends": "/integrations/rss/trends",
             "rss_writing_inspiration": "/integrations/rss/writing-inspiration",
-            # "marketing_scraper_health": "/integrations/marketing-scraper/health",  # COMMENTED OUT
-            # "marketing_scraper_stats": "/integrations/marketing-scraper/stats",  # COMMENTED OUT
-            # "marketing_scraper_history": "/integrations/marketing-scraper/history",  # COMMENTED OUT
+            "marketing_scraper_health": "/integrations/marketing-scraper/health",
+            "marketing_scraper_stats": "/integrations/marketing-scraper/stats",
+            "marketing_scraper_history": "/integrations/marketing-scraper/history",
             "prayer_times_status": "/integrations/prayer-times/status",  # NEW 9/26/25
             "prayer_times_health": "/integrations/prayer-times/health",  # NEW 9/26/25
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
@@ -438,6 +453,13 @@ async def api_status():
             "categories": ["seo", "content_marketing", "social_media", "analytics"],
             "api_configured": rss_learning_module_health()['healthy']
         },
+        "marketing_scraper_system": {
+            "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
+            "commands": ["scrape [URL]", "scrape history", "scrape insights"],
+            "storage": "postgresql_scraped_content_table",
+            "ai_integration": "syntaxprime_personality",
+            "api_configured": marketing_scraper_module_health()['healthy']
+        },
         "prayer_times_system": {  # NEW 9/26/25
             "features": ["daily_prayer_scheduling", "islamic_calendar_integration", "chat_commands", "aladhan_api"],
             "commands": ["How long till [prayer]?", "What are prayer times today?", "Islamic date"],
@@ -446,13 +468,6 @@ async def api_status():
             "cache_system": "midnight_refresh",
             "api_configured": True  # AlAdhan API is free, no key needed
         }
-        # "marketing_scraper_system": {  # COMMENTED OUT - module doesn't exist yet
-        #     "features": ["website_content_extraction", "ai_competitive_analysis", "permanent_insight_storage", "chat_integration"],
-        #     "commands": ["scrape [URL]", "scrape history", "scrape insights"],
-        #     "storage": "postgresql_scraped_content_table",
-        #     "ai_integration": "syntaxprime_personality",
-        #     "api_configured": marketing_scraper_module_health()['healthy']
-        # }
     }
 
 @app.get("/integrations")
@@ -508,46 +523,29 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
+    # Marketing Scraper integration
+    try:
+        integrations['marketing_scraper'] = {
+            'info': marketing_scraper_integration_info(),
+            'health': marketing_scraper_module_health()
+        }
+    except Exception as e:
+        integrations['marketing_scraper'] = {
+            'info': {'module': 'marketing_scraper', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
     # Prayer Times integration - NEW 9/26/25
     try:
-        # Since we don't have a full router yet, create basic health info
         integrations['prayer_times'] = {
-            'info': {
-                'module': 'prayer_times',
-                'version': '1.0.0',
-                'description': 'Islamic prayer times with intelligent scheduling',
-                'features': [
-                    'Daily prayer time calculation',
-                    'Islamic calendar integration',
-                    'Chat command interface',
-                    'AlAdhan API integration',
-                    'Database caching system'
-                ]
-            },
-            'health': {
-                'healthy': bool(os.getenv("DATABASE_URL")),
-                'database_available': bool(os.getenv("DATABASE_URL")),
-                'aladhan_api_available': True,  # Free API, no key needed
-                'cache_system_ready': True
-            }
+            'info': prayer_times_integration_info(),
+            'health': prayer_times_module_health()
         }
     except Exception as e:
         integrations['prayer_times'] = {
             'info': {'module': 'prayer_times', 'status': 'failed'},
             'health': {'healthy': False, 'error': str(e)}
         }
-    
-    # Marketing Scraper integration - COMMENTED OUT until module is created
-    # try:
-    #     integrations['marketing_scraper'] = {
-    #         'info': marketing_scraper_integration_info(),
-    #         'health': marketing_scraper_module_health()
-    #     }
-    # except Exception as e:
-    #     integrations['marketing_scraper'] = {
-    #         'info': {'module': 'marketing_scraper', 'status': 'failed'},
-    #         'health': {'healthy': False, 'error': str(e)}
-    #     }
     
     # AI Brain integration
     try:
@@ -598,18 +596,15 @@ async def integrations_info():
         'timestamp': datetime.now().isoformat()
     }
 
-#-- Section 12: Integration Module Routers - updated 9/25/25 with Marketing Scraper
+#-- Section 12: Integration Module Routers - updated 9/26/25 with Prayer Times
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
-# Include AI Brain router
-#app.include_router(ai_router)
+# Include AI Brain router (this includes the chat endpoints now)
+app.include_router(ai_router)
 
-# Include Chat router with file upload support
-# Need to patch the dependency in chat router to use our session-based auth
-import modules.ai.chat as chat_module
-chat_module.get_current_user_id = get_current_user_id
-app.include_router(chat_router)
+# REMOVED: Chat router inclusion (it's now handled by ai_router)
+# The chat.py file is now a helper module, not a router
 
 # Include Weather integration router - added 9/24/25
 app.include_router(weather_router)
@@ -620,10 +615,10 @@ app.include_router(bluesky_router)
 # Include RSS Learning integration router - added 9/25/25
 app.include_router(rss_learning_router)
 
-# NEW: Include Marketing Scraper integration router - added 9/25/25
+# Include Marketing Scraper integration router - added 9/25/25
 app.include_router(marketing_scraper_router)
 
-# NEW: Include Prayer Times integration router - added 9/26/25
+# Include Prayer Times integration router - added 9/26/25
 app.include_router(prayer_times_router)
 
 #-- Section 13: Development Server and Periodic Tasks - 9/23/25
