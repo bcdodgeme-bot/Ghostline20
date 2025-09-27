@@ -425,9 +425,10 @@ class PrayerDatabaseManager:
         
         # All prayers passed for today - next prayer is tomorrow's Fajr
         # Try to get tomorrow's times
+        # All prayers passed for today - next prayer is tomorrow's Fajr
         tomorrow = today + timedelta(days=1)
-        tomorrow_prayer_data = await self.get_todays_prayer_times()  # This will fetch tomorrow if needed
-        
+        tomorrow_prayer_data = await self.fetch_and_cache_prayer_times(tomorrow)
+
         if tomorrow_prayer_data:
             tomorrow_fajr = tomorrow_prayer_data["prayer_times"]["fajr"]
             now_dt = datetime.combine(today, now)

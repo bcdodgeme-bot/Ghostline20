@@ -16,6 +16,8 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 import logging
 import httpx
+import os
+database_url = os.getenv('DATABASE_URL')
 
 # File processing imports
 from PIL import Image, ImageOps
@@ -1039,7 +1041,7 @@ Help improve trend opportunity detection with feedback:
 async def check_for_trend_opportunities(user_id: str) -> Optional[str]:
     """Check for proactive trend opportunities and return notification message"""
     try:
-        detector = OpportunityDetector()
+        detector = OpportunityDetector(database_url)
         
         # Get current trending opportunities
         opportunities = await detector.detect_opportunities(
