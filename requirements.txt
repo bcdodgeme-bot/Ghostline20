@@ -69,3 +69,4 @@ charset-normalizer>=3.3.0
 # URL and HTTP utilities (likely already installed)
 urllib3>=2.0.0
 
+pytrends>=3.0.0
