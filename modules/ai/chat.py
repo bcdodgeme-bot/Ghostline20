@@ -217,7 +217,7 @@ No engagement opportunities found at this time.
                 response_parts.append(f"   Last scan: {last_scan}")
                 response_parts.append("")
             
-            response_parts.append(f"ðŸ"Š **Summary:** {configured_count}/5 accounts configured and ready")
+            response_parts.append(f"**Summary:** {configured_count}/5 accounts configured and ready")
             return "\n".join(response_parts)
         
         else:
