@@ -23,7 +23,7 @@ import os
 # Import our custom modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from keyword_expander import KeywordExpander
+from .keyword_expander import KeywordExpander
 from trends_client import GoogleTrendsClient
 from database_manager import TrendsDatabase
 
