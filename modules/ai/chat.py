@@ -197,7 +197,7 @@ No engagement opportunities found at this time.
         
         elif 'accounts' in message_lower or 'status' in message_lower:
             multi_client = get_bluesky_multi_client()
-            account_statuses = multi_client.get_all_account_status()
+            account_statuses = multi_client.get_all_accounts_status()
             configured_count = len([s for s in account_statuses.values() if s.get('configured', False)])
             
             response_parts = ["🔵 **Bluesky Account Status**\n"]
