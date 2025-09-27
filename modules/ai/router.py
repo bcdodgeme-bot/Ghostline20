@@ -96,7 +96,7 @@ async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str
                 detect_bluesky_command, process_bluesky_command,
                 detect_rss_command, get_rss_marketing_context,
                 detect_scraper_command, process_scraper_command,
-                detect_google_trends_command, process_google_trends_command
+                detect_trends_command, process_trends_command
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -324,10 +324,10 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"📍 **Location Detection Error**\n\nUnable to process location request: {str(e)}"
         
         # 6. 📈 Google Trends command detection (SIXTH) - NEW
-        elif detect_google_trends_command(message_content):
+        elif detect_trends_command(message_content)[0]:  # [0] gets the boolean from the tuple
             logger.info("📈 DEBUG: Google Trends command detected - processing...")
             try:
-                special_response = await process_google_trends_command(message_content, user_id)
+                special_response = await process_trends_command(message_content, user_id)
                 logger.info("✅ DEBUG: Google Trends response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Google Trends processing failed: {e}")
