@@ -98,14 +98,10 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
         datetime_context = get_current_datetime_context()
         
         # Store user message
-        user_message_id = str(uuid.uuid4())
-        await memory_manager.store_message(
+        user_message_id = await memory_manager.add_message(
             thread_id=thread_id,
-            message_id=user_message_id,
-            user_id=user_id,
             role="user",
-            content=chat_request.message,
-            metadata={"personality_requested": chat_request.personality_id}
+            content=chat_request.message
         )
         
         # Build message content
@@ -274,23 +270,16 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 final_response = "I'm sorry, I encountered an error processing your message. Please try again."
                 model_used = "error"
         
-        # Store AI response
-        ai_message_id = str(uuid.uuid4())
         response_time_ms = int((time.time() - start_time) * 1000)
         
-        await memory_manager.store_message(
+        # Store AI response
+        ai_message_id = await memory_manager.add_message(
             thread_id=thread_id,
-            message_id=ai_message_id,
-            user_id=user_id,
             role="assistant",
             content=final_response,
-            metadata={
-                "personality_used": chat_request.personality_id,
-                "model_used": model_used,
-                "response_time_ms": response_time_ms,
-                "knowledge_sources_count": len(knowledge_sources),
-                "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai"
-            }
+            model_used=model_used,
+            response_time_ms=response_time_ms,
+            knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
         )
         
         # Build response
@@ -332,17 +321,10 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
         
         try:
             memory_manager = get_memory_manager(user_id)
-            await memory_manager.store_message(
+            await memory_manager.add_message(
                 thread_id=thread_id,
-                message_id=error_message_id,
-                user_id=user_id,
                 role="assistant",
-                content=error_message,
-                metadata={
-                    "error": True,
-                    "error_type": type(e).__name__,
-                    "response_time_ms": response_time_ms
-                }
+                content=error_message
             )
         except:
             pass  # Don't fail if we can't store the error
