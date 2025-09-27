@@ -206,7 +206,7 @@ No engagement opportunities found at this time.
             account_statuses = multi_client.get_all_accounts_status()
             configured_count = len([s for s in account_statuses.values() if s.get('configured', False)])
             
-            response_parts = ["ðŸ"µ **Bluesky Account Status**\n"]
+            response_parts = ["**Bluesky Account Status**\n"]
             
             for account_id, status in account_statuses.items():
                 emoji = "âœ…" if status.get('authenticated', False) else "âŒ"
