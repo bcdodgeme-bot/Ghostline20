@@ -34,7 +34,8 @@ class RSSDatabase:
         
         try:
             rows = await self.db.fetch_all(query)
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            return self.make_json_serializable(result)
         except Exception as e:
             logger.error(f"Failed to get sources to fetch: {e}")
             return []
@@ -232,7 +233,8 @@ class RSSDatabase:
         
         try:
             rows = await self.db.fetch_all(query, *params)
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            return self.make_json_serializable(result)
         except Exception as e:
             logger.error(f"Failed to get marketing insights: {e}")
             return []
@@ -265,7 +267,8 @@ class RSSDatabase:
         
         try:
             rows = await self.db.fetch_all(query, *params)
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            return self.make_json_serializable(result)
         except Exception as e:
             logger.error(f"Failed to search content by keywords: {e}")
             return []
@@ -289,7 +292,8 @@ class RSSDatabase:
         
         try:
             rows = await self.db.fetch_all(query % (days, limit))
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            return self.make_json_serializable(result)
         except Exception as e:
             logger.error(f"Failed to get trending topics: {e}")
             return []
@@ -325,7 +329,8 @@ class RSSDatabase:
         
         try:
             rows = await self.db.fetch_all(query, *params)
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            return self.make_json_serializable(result)
         except Exception as e:
             logger.error(f"Failed to get content for writing assistance: {e}")
             return []
@@ -362,4 +367,28 @@ class RSSDatabase:
             logger.error(f"Failed to get RSS statistics: {e}")
             stats = {key: 0 for key in queries.keys()}
         
-        return stats
+        return self.make_json_serializable(stats)
+
+    def make_json_serializable(self, obj):
+        """
+        Convert ALL non-JSON-serializable objects to JSON-safe types.
+        Handles: Decimal, UUID, datetime, date, time objects.
+        """
+        from uuid import UUID
+        from datetime import datetime, date, time
+        from decimal import Decimal
+        
+        if isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, UUID):
+            return str(obj)
+        elif isinstance(obj, (datetime, date, time)):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self.make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.make_json_serializable(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self.make_json_serializable(item) for item in obj)
+        else:
+            return obj

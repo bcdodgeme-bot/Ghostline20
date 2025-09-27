@@ -2,8 +2,9 @@
 """
 AI Brain Router for Syntax Prime V2 - DEBUGGED VERSION
 Handles all AI endpoints including chat with full integration support
-Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Health → Chat/AI
+Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Health → Chat/AI
 Date: 9/27/25 - Added extensive debugging and fixed critical bugs
+Date: 9/27/25 - Added prayer notifications, location detection, and Google Trends integration
 """
 
 import asyncio
@@ -15,7 +16,7 @@ import json
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 
 # Import our AI brain components
@@ -69,17 +70,17 @@ async def get_current_user_id() -> str:
 
 #-- Main Chat Endpoint (THE CORE FUNCTIONALITY WITH EXTENSIVE DEBUG)
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_current_user_id)):
+async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str = Depends(get_current_user_id)):
     """
     Main chat endpoint - processes message through complete AI brain
-    Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Health → Chat/AI
+    Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Health → Chat/AI
     """
     start_time = time.time()
     thread_id = chat_request.thread_id or str(uuid.uuid4())
     
     # 🚨 CRITICAL DEBUG: Log everything
     logger.info(f"🚀 CHAT START: Processing message '{chat_request.message[:50]}...'")
-    logger.info(f"📝 DEBUG: user_id={user_id}, personality={chat_request.personality_id}")
+    logger.info(f"🔍 DEBUG: user_id={user_id}, personality={chat_request.personality_id}")
     logger.info(f"🧵 DEBUG: thread_id={thread_id}")
     
     try:
@@ -90,9 +91,12 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
                 get_current_datetime_context,
                 detect_weather_request, get_weather_for_user,
                 detect_prayer_command, process_prayer_command,
+                detect_prayer_notification_command, process_prayer_notification_command,
+                detect_location_command, process_location_command,
                 detect_bluesky_command, process_bluesky_command,
                 detect_rss_command, get_rss_marketing_context,
-                detect_scraper_command, process_scraper_command
+                detect_scraper_command, process_scraper_command,
+                detect_google_trends_command, process_google_trends_command
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -176,7 +180,7 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
         
         # Build message content
         message_content = chat_request.message
-        logger.info(f"📝 DEBUG: Processing message content: '{message_content[:100]}...'")
+        logger.info(f"🔍 DEBUG: Processing message content: '{message_content[:100]}...'")
         
         # INTEGRATION ORDER: Check for special commands in the specified order
         special_response = None
@@ -239,9 +243,9 @@ Weather data powered by Tomorrow.io"""
                         
                         special_response = f"""🔵 **Bluesky System Health**
 
-        📱 **Accounts:** {working_count}/{total_count} connected
-        🤖 **AI Assistant:** All personalities loaded
-        ⚙️ **Status:** {'Healthy' if working_count > 0 else 'Needs Attention'}"""
+📱 **Accounts:** {working_count}/{total_count} connected
+🤖 **AI Assistant:** All personalities loaded
+⚙️ **Status:** {'Healthy' if working_count > 0 else 'Needs Attention'}"""
                         
                     except Exception as e:
                         special_response = f"❌ **Health Check Failed:** {str(e)}"
@@ -250,12 +254,12 @@ Weather data powered by Tomorrow.io"""
                     account_statuses = multi_client.get_all_accounts_status()
                     special_response = f"""🔵 **Bluesky Social Media Intelligence**
 
-        📱 **Configured Accounts:** {len(account_statuses)}/5
-        🤖 **Features:** Keyword intelligence, engagement suggestions, approval workflow
+📱 **Configured Accounts:** {len(account_statuses)}/5
+🤖 **Features:** Keyword intelligence, engagement suggestions, approval workflow
 
-        **Available Commands:**
-        - `bluesky health` - System health check
-        - `bluesky accounts` - Check account status"""
+**Available Commands:**
+- `bluesky health` - System health check
+- `bluesky accounts` - Check account status"""
                 
                 logger.info("✅ DEBUG: Bluesky response generated successfully")
             except Exception as e:
@@ -283,17 +287,53 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Scraper processing failed: {e}")
                 special_response = f"🔍 **Scraper Processing Error**\n\nError: {str(e)}"
         
-        # 5. 🕌 Prayer Times command detection (FIFTH)
+        # 5. 🕌 Prayer Times command detection (FIFTH) - with IP location
         elif detect_prayer_command(message_content):
-            logger.info("🕌 DEBUG: Prayer times command detected - processing...")
+            logger.info("🕌 DEBUG: Prayer times command detected - processing with IP location...")
             try:
-                special_response = await process_prayer_command(message_content, user_id)
+                # Get client IP address for location detection
+                client_ip = request.client.host if hasattr(request, 'client') and request.client else None
+                logger.info(f"🌍 DEBUG: Using IP address for location: {client_ip}")
+                
+                special_response = await process_prayer_command(message_content, user_id, client_ip)
                 logger.info("✅ DEBUG: Prayer times response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer times processing failed: {e}")
                 special_response = f"🕌 **Prayer Times Processing Error**\n\nError: {str(e)}"
         
-        # 6. 🏥 Health Check command detection (SIXTH)
+        # 5.1 🔔 Prayer Notification Management (FIFTH-A) - with IP location
+        elif detect_prayer_notification_command(message_content):
+            logger.info("🔔 DEBUG: Prayer notification command detected")
+            try:
+                client_ip = request.client.host if hasattr(request, 'client') and request.client else None
+                special_response = await process_prayer_notification_command(message_content, user_id, client_ip)
+                logger.info("✅ DEBUG: Prayer notification command response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Prayer notification command processing failed: {e}")
+                special_response = f"🔔 **Prayer Notification Error**\n\nUnable to process notification request: {str(e)}"
+        
+        # 5.2 📍 Location Detection Commands (FIFTH-B) - NEW
+        elif detect_location_command(message_content):
+            logger.info("📍 DEBUG: Location command detected")
+            try:
+                client_ip = request.client.host if hasattr(request, 'client') and request.client else None
+                special_response = await process_location_command(message_content, user_id, client_ip)
+                logger.info("✅ DEBUG: Location command response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Location command processing failed: {e}")
+                special_response = f"📍 **Location Detection Error**\n\nUnable to process location request: {str(e)}"
+        
+        # 6. 📈 Google Trends command detection (SIXTH) - NEW
+        elif detect_google_trends_command(message_content):
+            logger.info("📈 DEBUG: Google Trends command detected - processing...")
+            try:
+                special_response = await process_google_trends_command(message_content, user_id)
+                logger.info("✅ DEBUG: Google Trends response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Google Trends processing failed: {e}")
+                special_response = f"📈 **Google Trends Processing Error**\n\nError: {str(e)}"
+        
+        # 7. 🏥 Health Check command detection (SEVENTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:
@@ -317,7 +357,7 @@ All systems operational and ready to assist!"""
                 logger.error(f"❌ DEBUG: Health check processing failed: {e}")
                 special_response = f"🏥 **Health Check Error**\n\nUnable to retrieve system health: {str(e)}"
         
-        # 7. 🧠 Chat/AI function (SEVENTH - DEFAULT AI PROCESSING)
+        # 8. 🧠 Chat/AI function (EIGHTH - DEFAULT AI PROCESSING)
         if special_response:
             # Use the special response from one of the integrations
             logger.info(f"✅ DEBUG: Using special integration response (length: {len(special_response)} chars)")
@@ -349,7 +389,7 @@ All systems operational and ready to assist!"""
                         logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
                         knowledge_sources = []
                 else:
-                    logger.info("⏭️ DEBUG: Skipping knowledge search (disabled)")
+                    logger.info("⭐ DEBUG: Skipping knowledge search (disabled)")
                     knowledge_sources = []
                 
                 # Get RSS marketing context for writing assistance (integration #3)
@@ -385,7 +425,7 @@ Current time: {datetime_context.get('current_time_12h', 'Unknown')} ({datetime_c
 User Context: The user is asking questions on {datetime_context['full_datetime']}.
 When discussing time or dates, use the current information provided above.
 
-Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, and Health monitoring are available via chat commands."""
+Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, Google Trends, and Health monitoring are available via chat commands."""
                 ]
                 
                 # Add RSS context if available
@@ -497,7 +537,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     'thread_id': thread_id,
                     'message_count': context_info.get('total_messages', 0) + 1,
                     'has_knowledge': len(knowledge_sources) > 0,
-                    'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->health->ai'
+                    'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->google_trends->health->ai'
                 }
             )
             
@@ -727,7 +767,7 @@ async def get_ai_stats():
             },
             "personality_stats": personality_stats,
             "feedback_stats": feedback_summary,
-            "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
+            "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
             "system_health": {
                 "memory_active": True,
                 "knowledge_engine_active": True,
@@ -769,7 +809,7 @@ async def test_ai_connection():
         "system_status": "healthy" if primary_healthy or fallback_available else "degraded",
         "primary_provider": "openrouter",
         "fallback_provider": "inception_labs",
-        "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
+        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
         "default_user_id": DEFAULT_USER_ID
     }
 
@@ -790,9 +830,9 @@ def get_integration_info():
     """Get information about the AI brain router integration"""
     return {
         "name": "AI Brain Router with Full Integration Support + DEBUG",
-        "version": "2.0.1",
+        "version": "2.1.0",
         "description": "Complete AI chat with ordered integration processing and extensive debugging",
-        "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 🏥 Health → 🧠 Chat/AI",
+        "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 📈 Google Trends → 🏥 Health → 🧠 Chat/AI",
         "components": [
             "Main Chat Endpoint (/ai/chat)",
             "Personality Engine",
@@ -804,7 +844,9 @@ def get_integration_info():
             "Bluesky Social Media Management",
             "RSS Learning System",
             "Marketing Scraper",
-            "Prayer Times",
+            "Prayer Times with Notifications",
+            "Location Detection",
+            "Google Trends Analysis",
             "Health Monitoring"
         ],
         "endpoints": {
@@ -824,7 +866,9 @@ def get_integration_info():
             "🔵 Bluesky social management",
             "📰 RSS learning insights",
             "🔍 Marketing competitive analysis",
-            "🕌 Islamic prayer times",
+            "🕌 Islamic prayer times with notifications",
+            "📍 IP-based location detection",
+            "📈 Google Trends analysis",
             "🏥 System health monitoring",
             "🧠 Advanced AI chat processing",
             "🔧 Extensive debug logging"
@@ -853,7 +897,7 @@ def check_module_health():
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
         "chat_endpoint_active": True,
-        "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
+        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
         "debug_features_active": True,
         "default_user_id": DEFAULT_USER_ID,
         "note": "Complete AI router with all integrations properly ordered and extensive debugging"

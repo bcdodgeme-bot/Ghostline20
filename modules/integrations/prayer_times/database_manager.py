@@ -55,12 +55,12 @@ class PrayerDatabaseManager:
         except Exception as e:
             logger.error(f"Failed to initialize prayer database manager: {e}")
     
-    async def get_todays_prayer_times(self, location_name: str = "Merrifield, Virginia") -> Optional[Dict[str, Any]]:
+    async def get_todays_prayer_times(self, ip_address: str = None) -> Optional[Dict[str, Any]]:
         """
-        Get today's cached prayer times, fetch if not available
+        Get today's cached prayer times with automatic IP-based location detection
         
         Args:
-            location_name: Human-readable location name
+            ip_address: User's IP address for location detection (None = auto-detect)
             
         Returns:
             Dict with prayer times and metadata, or None if failed
@@ -71,31 +71,42 @@ class PrayerDatabaseManager:
         
         today = date.today()
         
+        # Get location from IP address
+        try:
+            from .location_detector import get_prayer_location
+            location_name, latitude, longitude = await get_prayer_location(self.user_id, ip_address)
+            logger.info(f"🌍 Using location from IP: {location_name} ({latitude}, {longitude})")
+        except Exception as e:
+            logger.warning(f"IP location detection failed, using fallback: {e}")
+            location_name = "Merrifield, Virginia"
+            latitude, longitude = 38.8606, -77.2287
+        
         # Try to get from cache first
         cached_times = await self._get_cached_prayer_times(today, location_name)
         
         if cached_times:
-            logger.info(f"✅ Using cached prayer times for {today}")
+            logger.info(f"✅ Using cached prayer times for {today} at {location_name}")
             return cached_times
-        
-        # Not cached - fetch fresh data
-        logger.info(f"🔄 No cached prayer times for {today}, fetching from AlAdhan API...")
-        return await self.fetch_and_cache_prayer_times(today, location_name)
+    
+    # Not cached - fetch fresh data with detected location
+    logger.info(f"🔄 No cached prayer times for {today} at {location_name}, fetching from AlAdhan API...")
+    return await self.fetch_and_cache_prayer_times(today, location_name, latitude, longitude)
     
     async def fetch_and_cache_prayer_times(self,
-                                         target_date: date = None,
-                                         location_name: str = "Merrifield, Virginia",
-                                         latitude: float = None,
-                                         longitude: float = None) -> Optional[Dict[str, Any]]:
+                                     target_date: date = None,
+                                     location_name: str = None,
+                                     latitude: float = None,
+                                     longitude: float = None,
+                                     ip_address: str = None) -> Optional[Dict[str, Any]]:
         """
-        Fetch prayer times from AlAdhan API and cache in database
-        This is the midnight refresh function!
+        Fetch prayer times from AlAdhan API and cache in database with IP location detection
         
         Args:
             target_date: Date to fetch times for (defaults to today)
-            location_name: Human-readable location name
-            latitude: Override latitude (defaults to Virginia)
-            longitude: Override longitude (defaults to Virginia)
+            location_name: Human-readable location name (auto-detected if None)
+            latitude: Override latitude (auto-detected if None)
+            longitude: Override longitude (auto-detected if None)
+            ip_address: IP address for location detection
             
         Returns:
             Dict with prayer times and metadata
@@ -108,7 +119,29 @@ class PrayerDatabaseManager:
                 return None
         
         target_date = target_date or date.today()
+        
+        # Auto-detect location if not provided
+        if not location_name or not latitude or not longitude:
+            try:
+                from .location_detector import get_prayer_location
+                detected_location, detected_lat, detected_lng = await get_prayer_location(self.user_id, ip_address)
+                
+                location_name = location_name or detected_location
+                latitude = latitude or detected_lat
+                longitude = longitude or detected_lng
+                
+                logger.info(f"🌍 Auto-detected location: {location_name} ({latitude}, {longitude})")
+                
+            except Exception as e:
+                logger.warning(f"Location auto-detection failed, using fallback: {e}")
+                location_name = location_name or "Merrifield, Virginia"
+                latitude = latitude or 38.8606
+                longitude = longitude or -77.2287
+        
         date_str = target_date.strftime("%d-%m-%Y")
+    
+    # The rest of the function stays exactly the same...
+    # (keep everything after this point unchanged)
         
         # Use default Virginia coordinates if not specified
         lat = latitude or 38.8606

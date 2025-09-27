@@ -1,0 +1,30 @@
+2025-09-27 13:38:11,226 - INFO - Creating expanded keywords table...
+2025-09-27 13:38:11,291 - INFO - Found 0 expanded keywords in database
+2025-09-27 13:38:11,308 - INFO - Starting monitoring for tvsignals
+2025-09-27 13:38:11,520 - ERROR - Failed to monitor tvsignals: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:39:16,143 - INFO - No expanded keywords found, running expansion...
+2025-09-27 13:39:16,376 - INFO - Loaded 1242 keywords for amcf
+2025-09-27 13:39:16,418 - INFO - Loaded 884 keywords for bcdodge
+2025-09-27 13:39:16,456 - INFO - Loaded 402 keywords for damnitcarl
+2025-09-27 13:39:16,484 - INFO - Loaded 312 keywords for mealsnfeelz
+2025-09-27 13:39:16,549 - INFO - Loaded 1451 keywords for roseandangel
+2025-09-27 13:39:16,593 - INFO - Loaded 295 keywords for tvsignals
+2025-09-27 13:57:39,949 - INFO - Starting monitoring for amcf
+2025-09-27 13:57:40,395 - ERROR - Failed to monitor amcf: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:57:40,395 - INFO - Starting monitoring for bcdodge
+2025-09-27 13:57:40,618 - ERROR - Failed to monitor bcdodge: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:57:40,618 - INFO - Starting monitoring for damnitcarl
+2025-09-27 13:57:40,876 - ERROR - Failed to monitor damnitcarl: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:57:40,876 - INFO - Starting monitoring for mealsnfeelz
+2025-09-27 13:57:41,108 - ERROR - Failed to monitor mealsnfeelz: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:57:41,109 - INFO - Starting monitoring for roseandangel
+2025-09-27 13:57:41,324 - ERROR - Failed to monitor roseandangel: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 13:57:41,325 - INFO - Starting monitoring for tvsignals
+2025-09-27 13:57:41,534 - ERROR - Failed to monitor tvsignals: for SELECT DISTINCT, ORDER BY expressions must appear in select list
+2025-09-27 14:02:20,093 - INFO - Found 51474 expanded keywords in database
+2025-09-27 14:02:20,122 - INFO - Starting monitoring for tvsignals
+2025-09-27 14:02:20,315 - INFO - Using 10 expanded keywords for tvsignals
+2025-09-27 14:02:20,489 - INFO - Google Trends client initialized successfully
+2025-09-27 14:02:20,489 - INFO - Fetching trends for: stream tv to watch, watch tv to watch, tv-to-watch, tv to watch online, streaming tv to watch
+2025-09-27 14:02:28,456 - INFO - Fetching trends for: tv to watch streaming, top tv to watch, tv to watch near me, tv to watch tv, best tv to watch
+2025-09-27 14:02:35,648 - INFO - Completed tvsignals: 10 trends, 0 alerts

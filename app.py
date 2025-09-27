@@ -1,3 +1,15 @@
+#===============================================================================
+# SYNTAX PRIME V2 - MAIN APPLICATION FILE (app.py)
+# Personal AI Assistant with Advanced Chat, File Processing, Authentication
+# Created: 9/23/25 | Last Updated: 9/27/25
+#
+# This is the core FastAPI application that orchestrates all integrations:
+# - Authentication & Session Management
+# - AI Brain & Multi-Personality Chat System
+# - Weather, Bluesky, RSS, Marketing Scraper, Prayer Times, Google Trends
+# - Web Interface & API Endpoints
+#===============================================================================
+
 #-- Section 1: Core Imports - 9/23/25
 import os
 import logging
@@ -35,6 +47,10 @@ from modules.integrations.marketing_scraper import get_integration_info as marke
 #-- NEW Section 2e: Prayer Times Integration - added 9/26/25
 from modules.integrations.prayer_times import router as prayer_times_router
 from modules.integrations.prayer_times import get_integration_info as prayer_times_integration_info, check_module_health as prayer_times_module_health
+
+#-- NEW Section 2f: Google Trends Integration - added 9/27/25
+from modules.integrations.google_trends.router import router as trends_router
+from modules.integrations.google_trends.integration_info import check_module_health as trends_module_health, get_system_statistics as trends_system_statistics
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -221,7 +237,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     
     return user['id']
 
-#-- Section 10: Application Lifecycle Events - updated 9/25/25 with Marketing Scraper
+#-- Section 10: Application Lifecycle Events - updated 9/27/25 with Google Trends
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -252,7 +268,7 @@ async def startup_event():
         chat_health = chat_module_health()
         if chat_health['healthy']:
             print("💬 Chat system loaded successfully")
-            print(f"   📁 File upload support: {chat_health.get('file_upload_support', True)}")
+            print(f"   📎 File upload support: {chat_health.get('file_upload_support', True)}")
             print(f"   📏 Max file size: {chat_health.get('max_file_size', '10MB')}")
         else:
             print("⚠️  Chat system loaded with warnings")
@@ -308,7 +324,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  RSS Learning integration health check failed: {e}")
     
-    # NEW: Check Marketing Scraper integration health - added 9/25/25
+    # Check Marketing Scraper integration health
     try:
         scraper_health = marketing_scraper_module_health()
         if scraper_health['healthy']:
@@ -327,7 +343,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Marketing Scraper integration health check failed: {e}")
     
-    # Check Prayer Times integration health - NEW 9/26/25
+    # Check Prayer Times integration health
     try:
         prayer_health = prayer_times_module_health()
         if prayer_health['healthy']:
@@ -342,6 +358,21 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Prayer Times integration health check failed: {e}")
     
+    # Check Google Trends integration health - NEW 9/27/25
+    try:
+        trends_health = trends_module_health()
+        if trends_health['healthy']:
+            print("📈 Google Trends integration loaded successfully")
+            print("   🔍 Trending keyword analysis enabled")
+            print("   📊 Real-time search trend monitoring")
+            print("   💬 Chat commands: trends [keyword], trending topics")
+            print("   🎯 Market research and content planning insights")
+        else:
+            print("⚠️  Google Trends integration loaded with warnings")
+            print(f"   Missing vars: {trends_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️  Google Trends integration health check failed: {e}")
+    
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
     print("🔐 Authentication system initialized")
@@ -354,8 +385,9 @@ async def startup_event():
     print("   🌦️ Weather API: http://localhost:8000/integrations/weather")
     print("   🔵 Bluesky API: http://localhost:8000/bluesky")
     print("   📰 RSS Learning: http://localhost:8000/integrations/rss")
-    print("   🔍 Marketing Scraper: http://localhost:8000/integrations/marketing-scraper")  # NEW
-    print("   🕌 Prayer Times: http://localhost:8000/integrations/prayer-times")  # NEW
+    print("   🔍 Marketing Scraper: http://localhost:8000/integrations/marketing-scraper")
+    print("   🕌 Prayer Times: http://localhost:8000/integrations/prayer-times")
+    print("   📈 Google Trends: http://localhost:8000/api/trends")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -364,11 +396,23 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-#-- Section 11: API Status and Health Endpoints - updated 9/26/25 with Prayer Times
+#-- Section 11: API Status and Health Endpoints - updated 9/27/25 with Google Trends
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
     return await get_health_status()
+
+# NEW: Google Trends health check endpoint - added 9/27/25
+@app.get("/api/health/trends")
+async def trends_health():
+    """Google Trends integration health check"""
+    return await trends_module_health()
+
+# NEW: Google Trends statistics endpoint - added 9/27/25
+@app.get("/api/statistics/trends")
+async def trends_statistics():
+    """Google Trends system statistics"""
+    return await trends_system_statistics()
 
 @app.get("/api/status")
 async def api_status():
@@ -389,11 +433,12 @@ async def api_status():
             "🔵 Multi-account Bluesky social media assistant (5 accounts)",
             "📰 RSS Learning system with AI-powered marketing insights",
             "🔍 AI-powered marketing scraper for competitive analysis",
-            "🕌 Islamic prayer times with intelligent scheduling",  # NEW 9/26/25
+            "🕌 Islamic prayer times with intelligent scheduling",
+            "📈 Google Trends analysis for market research",  # NEW 9/27/25
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "authentication"],  # UPDATED
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "google-trends", "authentication"],  # UPDATED
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -424,8 +469,11 @@ async def api_status():
             "marketing_scraper_health": "/integrations/marketing-scraper/health",
             "marketing_scraper_stats": "/integrations/marketing-scraper/stats",
             "marketing_scraper_history": "/integrations/marketing-scraper/history",
-            "prayer_times_status": "/integrations/prayer-times/status",  # NEW 9/26/25
-            "prayer_times_health": "/integrations/prayer-times/health",  # NEW 9/26/25
+            "prayer_times_status": "/integrations/prayer-times/status",
+            "prayer_times_health": "/integrations/prayer-times/health",
+            "google_trends_main": "/api/trends",  # NEW 9/27/25
+            "google_trends_health": "/api/health/trends",  # NEW 9/27/25
+            "google_trends_stats": "/api/statistics/trends",  # NEW 9/27/25
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -460,13 +508,20 @@ async def api_status():
             "ai_integration": "syntaxprime_personality",
             "api_configured": marketing_scraper_module_health()['healthy']
         },
-        "prayer_times_system": {  # NEW 9/26/25
+        "prayer_times_system": {
             "features": ["daily_prayer_scheduling", "islamic_calendar_integration", "chat_commands", "aladhan_api"],
             "commands": ["How long till [prayer]?", "What are prayer times today?", "Islamic date"],
             "calculation_method": "ISNA",
             "location": "Merrifield, Virginia",
             "cache_system": "midnight_refresh",
             "api_configured": True  # AlAdhan API is free, no key needed
+        },
+        "google_trends_system": {  # NEW 9/27/25
+            "features": ["trending_keyword_analysis", "real_time_search_monitoring", "market_research_insights", "content_planning"],
+            "commands": ["trends [keyword]", "trending topics", "search volume"],
+            "data_sources": "google_trends_api",
+            "analysis_types": ["regional", "temporal", "related_queries", "rising_searches"],
+            "api_configured": trends_module_health()['healthy']
         }
     }
 
@@ -535,7 +590,7 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
-    # Prayer Times integration - NEW 9/26/25
+    # Prayer Times integration
     try:
         integrations['prayer_times'] = {
             'info': prayer_times_integration_info(),
@@ -544,6 +599,27 @@ async def integrations_info():
     except Exception as e:
         integrations['prayer_times'] = {
             'info': {'module': 'prayer_times', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Google Trends integration - NEW 9/27/25
+    try:
+        integrations['google_trends'] = {
+            'info': {
+                "name": "Google Trends Integration",
+                "version": "1.0.0",
+                "features": [
+                    "trending keyword analysis",
+                    "real-time search monitoring",
+                    "market research insights",
+                    "content planning assistance"
+                ]
+            },
+            'health': trends_module_health()
+        }
+    except Exception as e:
+        integrations['google_trends'] = {
+            'info': {'module': 'google_trends', 'status': 'failed'},
             'health': {'healthy': False, 'error': str(e)}
         }
     
@@ -596,7 +672,7 @@ async def integrations_info():
         'timestamp': datetime.now().isoformat()
     }
 
-#-- Section 12: Integration Module Routers - updated 9/26/25 with Prayer Times
+#-- Section 12: Integration Module Routers - updated 9/27/25 with Google Trends
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -621,11 +697,14 @@ app.include_router(marketing_scraper_router)
 # Include Prayer Times integration router - added 9/26/25
 app.include_router(prayer_times_router)
 
-#-- Section 13: Development Server and Periodic Tasks - 9/23/25
-# Periodic cleanup of expired sessions (every hour)
+# Include Google Trends integration router - added 9/27/25
+app.include_router(trends_router, prefix="/api/trends", tags=["Google Trends"])
+
+#-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
+# Periodic cleanup of expired sessions (every hour) + Prayer notification service
 @app.on_event("startup")
 async def setup_periodic_tasks():
-    """Set up periodic maintenance tasks"""
+    """Set up periodic maintenance tasks and background services"""
     import asyncio
     
     async def session_cleanup():
@@ -635,6 +714,15 @@ async def setup_periodic_tasks():
     
     # Start the cleanup task in the background
     asyncio.create_task(session_cleanup())
+    
+    # Start prayer notification service - added 9/27/25
+    try:
+        from modules.integrations.prayer_times.notification_manager import start_prayer_notifications
+        await start_prayer_notifications()
+        print("🕌 Prayer notification service started successfully")
+    except Exception as e:
+        print(f"⚠️  Failed to start prayer notification service: {e}")
+        # Continue without prayer notifications rather than crash the app
 
 if __name__ == "__main__":
     import uvicorn

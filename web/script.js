@@ -1,7 +1,7 @@
 //=============================================================================
-// Syntax Prime V2 - Chat Interface JavaScript (MERGED WORKING VERSION)
-// Combines fixes from both versions with proper anti-duplication
-// Date: 9/26/25 - Working sidebar + submit protection
+// Syntax Prime V2 - Chat Interface JavaScript (MERGED WORKING VERSION + GOOGLE TRENDS)
+// Combines fixes from both versions with proper anti-duplication + Google Trends Training
+// Date: 9/27/25 - Working sidebar + submit protection + Google Trends Integration
 //=============================================================================
 
 class SyntaxPrimeChat {
@@ -20,6 +20,17 @@ class SyntaxPrimeChat {
         this.submitCooldown = 1000;
         this.messageDuplicationWindow = 5000;
 
+        // Google Trends Training System
+        this.trendsEnabled = false;
+        this.pendingOpportunities = [];
+        this.trainingStats = {
+            total_feedback: 0,
+            good_matches: 0,
+            bad_matches: 0,
+            accuracy: 0
+        };
+        this.trendsPollingInterval = null;
+
         this.init();
     }
 
@@ -30,6 +41,7 @@ class SyntaxPrimeChat {
         this.loadConversations();
         this.setupDragAndDrop();
         this.autoResizeTextarea();
+        this.initializeTrendsSystem();
 
         // Focus message input
         document.getElementById('messageInput').focus();
@@ -53,7 +65,7 @@ class SyntaxPrimeChat {
         // Remove any existing listeners first
         const elements = [
             'sidebarToggle', 'newChatBtn', 'settingsBtn', 'logoutBtn',
-            'personalitySelect', 'messageInput', 'sendButton', 'fileButton', 'fileInput', 'rememberBtn'
+            'personalitySelect', 'messageInput', 'sendButton', 'fileButton', 'fileInput', 'rememberBtn', 'trendsBtn'
         ];
         
         elements.forEach(id => {
@@ -134,6 +146,13 @@ class SyntaxPrimeChat {
         if (rememberBtn && !rememberBtn._syntaxListenersAttached) {
             rememberBtn.addEventListener('click', this.showBookmarkModal.bind(this));
             rememberBtn._syntaxListenersAttached = true;
+        }
+
+        // Google Trends Training Button
+        const trendsBtn = document.getElementById('trendsBtn');
+        if (trendsBtn && !trendsBtn._syntaxListenersAttached) {
+            trendsBtn.addEventListener('click', this.showTrendsOpportunities.bind(this));
+            trendsBtn._syntaxListenersAttached = true;
         }
 
         // Modal handlers
@@ -220,6 +239,404 @@ class SyntaxPrimeChat {
         });
     }
 
+    // === Message detection for trends keywords ===
+    detectTrendsKeywords(message) {
+        const trendsKeywords = [
+            "trends", "google trends", "opportunities", "trending",
+            "trend analysis", "search trends", "opportunity detection"
+        ];
+        
+        const messageLower = message.toLowerCase();
+        return trendsKeywords.some(keyword => messageLower.includes(keyword));
+    }
+
+    // === Google Trends Training System ===
+    async initializeTrendsSystem() {
+        try {
+            console.log('🔍 Initializing Google Trends system...');
+            
+            // Check if trends system is available
+            const healthCheck = await this.apiCall('/api/health/trends', 'GET');
+            
+            if (healthCheck && healthCheck.status === 'healthy') {
+                this.trendsEnabled = true;
+                console.log('✅ Google Trends system available');
+                
+                // Load initial training stats
+                await this.loadTrainingStats();
+                
+                // Set up periodic polling for new opportunities (every 30 seconds)
+                this.setupTrendsPolling();
+            } else {
+                console.log('⚠️ Google Trends system not available');
+            }
+        } catch (error) {
+            console.log('⚠️ Google Trends system not available:', error.message);
+            this.trendsEnabled = false;
+        }
+    }
+
+    setupTrendsPolling() {
+        if (this.trendsPollingInterval) {
+            clearInterval(this.trendsPollingInterval);
+        }
+        
+        this.trendsPollingInterval = setInterval(async () => {
+            try {
+                await this.checkForNewOpportunities();
+            } catch (error) {
+                console.error('Trends polling error:', error);
+            }
+        }, 30000); // Check every 30 seconds
+    }
+
+    async checkForNewOpportunities() {
+        if (!this.trendsEnabled) return;
+        
+        try {
+            const opportunities = await this.apiCall('/api/trends/opportunities', 'GET');
+            
+            if (opportunities && opportunities.length > 0) {
+                const newOpportunities = opportunities.filter(opp =>
+                    !this.pendingOpportunities.some(pending => pending.id === opp.id)
+                );
+                
+                if (newOpportunities.length > 0) {
+                    console.log(`🔔 ${newOpportunities.length} new trend opportunities found`);
+                    
+                    // Add to pending list
+                    this.pendingOpportunities.push(...newOpportunities);
+                    
+                    // Show browser notification
+                    this.showBrowserNotification(
+                        'New Trend Opportunities',
+                        `${newOpportunities.length} new training opportunities available`
+                    );
+                    
+                    // Show in-app toast
+                    this.showToast(
+                        `🔔 ${newOpportunities.length} new trend opportunities available`,
+                        'info'
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Error checking for new opportunities:', error);
+        }
+    }
+
+    async loadTrainingStats() {
+        try {
+            const stats = await this.apiCall('/api/trends/status', 'GET');
+            if (stats) {
+                this.trainingStats = {
+                    total_feedback: stats.total_feedback || 0,
+                    good_matches: stats.good_matches || 0,
+                    bad_matches: stats.bad_matches || 0,
+                    accuracy: stats.accuracy || 0
+                };
+                console.log('📊 Training stats loaded:', this.trainingStats);
+            }
+        } catch (error) {
+            console.error('Error loading training stats:', error);
+        }
+    }
+
+    async showTrendsOpportunities() {
+        if (!this.trendsEnabled) {
+            this.showToast('❌ Google Trends system not available', 'error');
+            return;
+        }
+
+        try {
+            console.log('🔍 Loading trend opportunities...');
+            
+            // Fetch latest opportunities
+            const opportunities = await this.apiCall('/api/trends/opportunities', 'GET');
+            
+            if (!opportunities || opportunities.length === 0) {
+                this.addTrendsMessage('No trend opportunities available for training at the moment.', 'info');
+                return;
+            }
+
+            // Display opportunities as special chat messages
+            this.addTrendsMessage(
+                `Found ${opportunities.length} trend opportunities for training:`,
+                'header'
+            );
+
+            // Show each opportunity as a card
+            opportunities.forEach(opportunity => {
+                this.addTrendsOpportunityCard(opportunity);
+            });
+
+            // Update pending opportunities
+            this.pendingOpportunities = opportunities;
+
+        } catch (error) {
+            console.error('Error loading trends opportunities:', error);
+            this.addTrendsMessage('❌ Error loading trend opportunities. Please try again.', 'error');
+        }
+    }
+
+    addTrendsMessage(content, type = 'info') {
+        const messagesContainer = document.getElementById('chatMessages');
+        const welcomeMessage = messagesContainer.querySelector('.welcome-message');
+
+        // Remove welcome message on first interaction
+        if (welcomeMessage) {
+            welcomeMessage.remove();
+        }
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message assistant trends-${type}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.innerHTML = '📊';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble trends-bubble';
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.innerHTML = content;
+
+        bubble.appendChild(textDiv);
+        contentDiv.appendChild(bubble);
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(contentDiv);
+
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    addTrendsOpportunityCard(opportunity) {
+        const messagesContainer = document.getElementById('chatMessages');
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant trends-opportunity';
+        messageDiv.dataset.opportunityId = opportunity.id;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.innerHTML = this.getUrgencyIcon(opportunity.urgency_level);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble opportunity-card';
+
+        // Opportunity details
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'opportunity-header';
+        headerDiv.innerHTML = `
+            <div class="opportunity-keyword">${opportunity.keyword}</div>
+            <div class="opportunity-meta">
+                <span class="business-area">${opportunity.business_area}</span>
+                <span class="urgency-level ${opportunity.urgency_level}">${opportunity.urgency_level}</span>
+            </div>
+        `;
+
+        const detailsDiv = document.createElement('div');
+        detailsDiv.className = 'opportunity-details';
+        detailsDiv.innerHTML = `
+            <div class="opportunity-stats">
+                <span>📈 Trend Score: ${opportunity.trend_score}</span>
+                <span>⏰ Time Left: ${opportunity.time_left}</span>
+            </div>
+            <div class="opportunity-description">
+                <strong>${opportunity.opportunity_type}</strong> opportunity detected for keyword analysis
+            </div>
+        `;
+
+        // Training buttons
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'opportunity-actions';
+
+        const goodBtn = document.createElement('button');
+        goodBtn.className = 'training-btn good-match';
+        goodBtn.innerHTML = '✅ Good Match';
+        goodBtn.addEventListener('click', () => this.submitTrainingFeedback(opportunity.id, 'good_match'));
+
+        const badBtn = document.createElement('button');
+        badBtn.className = 'training-btn bad-match';
+        badBtn.innerHTML = '❌ Bad Match';
+        badBtn.addEventListener('click', () => this.submitTrainingFeedback(opportunity.id, 'bad_match'));
+
+        actionsDiv.appendChild(goodBtn);
+        actionsDiv.appendChild(badBtn);
+
+        bubble.appendChild(headerDiv);
+        bubble.appendChild(detailsDiv);
+        bubble.appendChild(actionsDiv);
+
+        contentDiv.appendChild(bubble);
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(contentDiv);
+
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    getUrgencyIcon(urgency) {
+        const icons = {
+            'critical': '🚨',
+            'high': '🔥',
+            'medium': '⚡',
+            'low': '💡'
+        };
+        return icons[urgency] || '📊';
+    }
+
+    async submitTrainingFeedback(opportunityId, feedbackType) {
+        try {
+            console.log(`📤 Submitting ${feedbackType} feedback for opportunity ${opportunityId}`);
+
+            // Find the opportunity card
+            const opportunityCard = document.querySelector(`[data-opportunity-id="${opportunityId}"]`);
+            if (!opportunityCard) return;
+
+            // Disable buttons during submission
+            const buttons = opportunityCard.querySelectorAll('.training-btn');
+            buttons.forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+            });
+
+            // Submit feedback to API
+            const response = await this.apiCall('/api/trends/feedback', 'POST', {
+                opportunity_id: opportunityId,
+                feedback_type: feedbackType,
+                timestamp: new Date().toISOString()
+            });
+
+            if (response && response.success) {
+                // Show success feedback
+                this.showTrainingSuccess(opportunityCard, feedbackType);
+                
+                // Update training stats
+                await this.loadTrainingStats();
+                
+                // Remove from pending opportunities
+                this.pendingOpportunities = this.pendingOpportunities.filter(
+                    opp => opp.id !== opportunityId
+                );
+
+                // Show success toast
+                this.showToast(
+                    `✅ ${feedbackType === 'good_match' ? 'Good' : 'Bad'} match feedback recorded`,
+                    'success'
+                );
+
+                // Remove the opportunity card after 2 seconds
+                setTimeout(() => {
+                    opportunityCard.style.transition = 'opacity 0.5s ease-out';
+                    opportunityCard.style.opacity = '0';
+                    setTimeout(() => {
+                        if (opportunityCard.parentNode) {
+                            opportunityCard.parentNode.removeChild(opportunityCard);
+                        }
+                    }, 500);
+                }, 2000);
+
+            } else {
+                throw new Error(response?.error || 'Failed to submit feedback');
+            }
+
+        } catch (error) {
+            console.error('Error submitting training feedback:', error);
+            
+            // Re-enable buttons
+            const opportunityCard = document.querySelector(`[data-opportunity-id="${opportunityId}"]`);
+            if (opportunityCard) {
+                const buttons = opportunityCard.querySelectorAll('.training-btn');
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                });
+            }
+
+            this.showToast('❌ Error submitting feedback. Please try again.', 'error');
+        }
+    }
+
+    showTrainingSuccess(opportunityCard, feedbackType) {
+        const actionsDiv = opportunityCard.querySelector('.opportunity-actions');
+        if (actionsDiv) {
+            actionsDiv.innerHTML = `
+                <div class="feedback-success">
+                    <span class="success-icon">${feedbackType === 'good_match' ? '✅' : '❌'}</span>
+                    <span class="success-text">Feedback recorded!</span>
+                </div>
+            `;
+        }
+    }
+
+    // === Notification Systems ===
+    showBrowserNotification(title, body) {
+        if ('Notification' in window) {
+            if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: body,
+                    icon: 'static/syntax-buffering.png',
+                    tag: 'syntax-trends',
+                    requireInteraction: false
+                });
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        new Notification(title, {
+                            body: body,
+                            icon: 'static/syntax-buffering.png',
+                            tag: 'syntax-trends'
+                        });
+                    }
+                });
+            }
+        }
+    }
+
+    showToast(message, type = 'info') {
+        // Remove any existing toasts
+        const existingToast = document.querySelector('.syntax-toast');
+        if (existingToast) {
+            existingToast.remove();
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `syntax-toast toast-${type}`;
+        toast.innerHTML = `
+            <div class="toast-content">
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="this.parentNode.parentNode.remove()">×</button>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Animate in
+        setTimeout(() => {
+            toast.classList.add('toast-show');
+        }, 100);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.classList.remove('toast-show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 300);
+            }
+        }, 5000);
+    }
+
     // ENHANCED: API call from working version with better error handling
     async apiCall(endpoint, method = 'GET', data = null) {
         try {
@@ -290,14 +707,14 @@ class SyntaxPrimeChat {
         }
     }
 
-    // ENHANCED: Send message with detailed duplication tracking
+    // ENHANCED: Send message with detailed duplication tracking and trends detection
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
         const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         console.log(`🚀 sendMessage() called - ID: ${messageId}`);
-        console.log(`📝 Message content: "${message}"`);
+        console.log(`🔍 Message content: "${message}"`);
 
         if (!message && this.uploadedFiles.length === 0) {
             console.log('❌ Empty message, returning early');
@@ -308,6 +725,14 @@ class SyntaxPrimeChat {
         if (this.isSubmitting) {
             console.log(`⛔️ DUPLICATE BLOCKED: Already submitting (ID: ${messageId})`);
             return;
+        }
+
+        // Check for trends keywords and auto-load opportunities
+        if (this.detectTrendsKeywords(message) && this.trendsEnabled) {
+            console.log('🔍 Trends keywords detected, loading opportunities...');
+            setTimeout(() => {
+                this.showTrendsOpportunities();
+            }, 1000);
         }
 
         console.log(`🔒 Setting isSubmitting = true (ID: ${messageId})`);
@@ -659,7 +1084,7 @@ class SyntaxPrimeChat {
                         <span>4 Unique Personalities</span>
                     </div>
                     <div class="feature-item">
-                        <span class="feature-icon">🔖</span>
+                        <span class="feature-icon">📖</span>
                         <span>Smart Bookmarks</span>
                     </div>
                 </div>
@@ -709,6 +1134,11 @@ class SyntaxPrimeChat {
     }
 
     logout() {
+        // Clean up trends polling
+        if (this.trendsPollingInterval) {
+            clearInterval(this.trendsPollingInterval);
+        }
+        
         sessionStorage.removeItem('syntaxprime_auth');
         window.location.href = 'login.html';
     }
@@ -900,7 +1330,7 @@ if (document.readyState === 'loading') {
     initializeSyntaxChat();
 }
 
-// Add notification animations
+// Add notification animations and Google Trends styling
 const style = document.createElement('style');
 style.textContent = `
 @keyframes slideInRight {
@@ -910,6 +1340,237 @@ style.textContent = `
 @keyframes slideOutRight {
     from { transform: translateX(0); opacity: 1; }
     to { transform: translateX(100%); opacity: 0; }
+}
+
+/* Google Trends Training Styles */
+.trends-opportunity {
+    border-left: 4px solid #4CAF50;
+}
+
+.trends-header {
+    border-left: 4px solid #2196F3;
+}
+
+.trends-info {
+    border-left: 4px solid #FF9800;
+}
+
+.trends-error {
+    border-left: 4px solid #f44336;
+}
+
+.trends-bubble {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.opportunity-card {
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    color: #333;
+}
+
+.opportunity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.opportunity-keyword {
+    font-size: 18px;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.opportunity-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.business-area {
+    background: #3498db;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.urgency-level {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.urgency-level.critical {
+    background: #e74c3c;
+    color: white;
+}
+
+.urgency-level.high {
+    background: #f39c12;
+    color: white;
+}
+
+.urgency-level.medium {
+    background: #f1c40f;
+    color: #333;
+}
+
+.urgency-level.low {
+    background: #95a5a6;
+    color: white;
+}
+
+.opportunity-details {
+    margin-bottom: 16px;
+}
+
+.opportunity-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #666;
+}
+
+.opportunity-description {
+    color: #555;
+    line-height: 1.4;
+}
+
+.opportunity-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.training-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.training-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.training-btn:disabled {
+    cursor: not-allowed;
+}
+
+.good-match {
+    background: #27ae60;
+    color: white;
+}
+
+.good-match:hover:not(:disabled) {
+    background: #219a52;
+}
+
+.bad-match {
+    background: #e74c3c;
+    color: white;
+}
+
+.bad-match:hover:not(:disabled) {
+    background: #c0392b;
+}
+
+.feedback-success {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 8px;
+    color: #155724;
+}
+
+.success-icon {
+    font-size: 18px;
+}
+
+.success-text {
+    font-weight: 500;
+}
+
+/* Toast Notifications */
+.syntax-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    max-width: 400px;
+    transform: translateX(100%);
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.syntax-toast.toast-show {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.toast-content {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    background: white;
+    border-left: 4px solid #ccc;
+}
+
+.toast-info .toast-content {
+    border-left-color: #2196F3;
+}
+
+.toast-success .toast-content {
+    border-left-color: #4CAF50;
+}
+
+.toast-error .toast-content {
+    border-left-color: #f44336;
+}
+
+.toast-warning .toast-content {
+    border-left-color: #FF9800;
+}
+
+.toast-message {
+    flex: 1;
+    margin-right: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    line-height: 1;
+}
+
+.toast-close:hover {
+    color: #333;
 }
 `;
 document.head.appendChild(style);

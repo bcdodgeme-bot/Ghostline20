@@ -3,6 +3,7 @@
 # Provides integration functions for router.py - NO ENDPOINTS HERE
 # Clean helper module with all integration logic for weather, prayer times, scraper, etc.
 # Date: 9/26/25 - Converted to helper module only
+# Date: 9/27/25 - Added Google Trends integration and Prayer Notifications
 
 #-- Section 1: Core Imports - 9/26/25
 import os
@@ -25,6 +26,11 @@ import cv2
 import numpy as np
 from io import BytesIO
 import base64
+
+# Google Trends integration imports - 9/27/25
+from ..integrations.google_trends.opportunity_detector import OpportunityDetector
+from ..integrations.google_trends.opportunity_training import OpportunityTraining
+from ..integrations.google_trends.integration_info import check_module_health
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +165,12 @@ async def process_bluesky_command(message: str, user_id: str) -> str:
         
         if 'scan' in message_lower:
             await trigger_background_scan(user_id)
-            return """🔵 **Bluesky Account Scan Initiated**
+            return """ðŸ"µ **Bluesky Account Scan Initiated**
 
-✅ Scanning all configured accounts for engagement opportunities...
-🔍 Analyzing posts from the last 24 hours
-🤖 AI-powered engagement suggestions incoming
-📝 Draft posts will be generated for approval
+âœ… Scanning all configured accounts for engagement opportunities...
+ðŸ" Analyzing posts from the last 24 hours
+ðŸ¤– AI-powered engagement suggestions incoming
+ðŸ" Draft posts will be generated for approval
 
 Results will be available in a few moments. Use `bluesky opportunities` to view suggestions."""
         
@@ -173,22 +179,22 @@ Results will be available in a few moments. Use `bluesky opportunities` to view 
             pending_items = await approval_system.get_pending_approvals(limit=5)
             
             if not pending_items:
-                return """🔵 **No Current Opportunities**
+                return """ðŸ"µ **No Current Opportunities**
 
 No engagement opportunities found at this time.
-• Use `bluesky scan` to search for new opportunities
-• Check back in a few hours for automatic updates"""
+â€¢ Use `bluesky scan` to search for new opportunities
+â€¢ Check back in a few hours for automatic updates"""
             
-            response_parts = ["🔵 **Current Bluesky Engagement Opportunities**\n"]
+            response_parts = ["ðŸ"µ **Current Bluesky Engagement Opportunities**\n"]
             
             for i, item in enumerate(pending_items, 1):
                 account_info = item.get('account_info', {})
                 opportunity = item.get('opportunity_analysis', {})
                 
                 response_parts.append(f"""**{i}. {account_info.get('username', 'Unknown Account')}**
-📊 Engagement Score: {opportunity.get('engagement_potential', 0):.0%}
-💡 Why: {opportunity.get('opportunity_reason', 'High engagement potential')}
-⏰ Post Time: {opportunity.get('post_time', 'Recently')}
+ðŸ"Š Engagement Score: {opportunity.get('engagement_potential', 0):.0%}
+ðŸ'¡ Why: {opportunity.get('opportunity_reason', 'High engagement potential')}
+â° Post Time: {opportunity.get('post_time', 'Recently')}
 
 """)
             
@@ -200,10 +206,10 @@ No engagement opportunities found at this time.
             account_statuses = multi_client.get_all_accounts_status()
             configured_count = len([s for s in account_statuses.values() if s.get('configured', False)])
             
-            response_parts = ["🔵 **Bluesky Account Status**\n"]
+            response_parts = ["ðŸ"µ **Bluesky Account Status**\n"]
             
             for account_id, status in account_statuses.items():
-                emoji = "✅" if status.get('authenticated', False) else "❌"
+                emoji = "âœ…" if status.get('authenticated', False) else "âŒ"
                 username = status.get('username', f'Account {account_id}')
                 last_scan = status.get('last_scan', 'Never')
                 
@@ -211,27 +217,27 @@ No engagement opportunities found at this time.
                 response_parts.append(f"   Last scan: {last_scan}")
                 response_parts.append("")
             
-            response_parts.append(f"📊 **Summary:** {configured_count}/5 accounts configured and ready")
+            response_parts.append(f"ðŸ"Š **Summary:** {configured_count}/5 accounts configured and ready")
             return "\n".join(response_parts)
         
         else:
             account_statuses = get_bluesky_multi_client().get_all_account_status()
-            return f"""🔵 **Bluesky Social Media Intelligence**
+            return f"""ðŸ"µ **Bluesky Social Media Intelligence**
 
-📱 **Configured Accounts:** {len(account_statuses)}/5
-🤖 **Features:** Keyword intelligence, engagement suggestions, approval workflow
-⏰ **Auto-Scan:** Every 3.5 hours across all accounts
+ðŸ"± **Configured Accounts:** {len(account_statuses)}/5
+ðŸ¤– **Features:** Keyword intelligence, engagement suggestions, approval workflow
+â° **Auto-Scan:** Every 3.5 hours across all accounts
 
 **Available Commands:**
-• `bluesky scan` - Force scan all accounts  
-• `bluesky opportunities` - View engagement suggestions
-• `bluesky accounts` - Check account status
+â€¢ `bluesky scan` - Force scan all accounts  
+â€¢ `bluesky opportunities` - View engagement suggestions
+â€¢ `bluesky accounts` - Check account status
 
 Ready to find your next great engagement opportunity?"""
     
     except Exception as e:
         logger.error(f"Bluesky command processing failed: {e}")
-        return f"❌ **Bluesky Command Error:** {str(e)}\n\nTry `bluesky health` to check system status."
+        return f"âŒ **Bluesky Command Error:** {str(e)}\n\nTry `bluesky health` to check system status."
 
 async def trigger_background_scan(user_id: str):
     """Trigger a background scan of all Bluesky accounts"""
@@ -331,21 +337,21 @@ async def get_rss_marketing_context(message: str, content_type: str = None) -> s
             if inspiration.get('content_ideas'):
                 context_parts.extend([
                     f"CONTENT IDEAS FOR {final_content_type.upper()}:",
-                    *[f"• {idea}" for idea in inspiration['content_ideas'][:3]],
+                    *[f"â€¢ {idea}" for idea in inspiration['content_ideas'][:3]],
                     ""
                 ])
             
             if inspiration.get('key_messages'):
                 context_parts.extend([
                     "KEY MESSAGES TO CONSIDER:",
-                    *[f"• {msg}" for msg in inspiration['key_messages'][:3]],
+                    *[f"â€¢ {msg}" for msg in inspiration['key_messages'][:3]],
                     ""
                 ])
             
             if trends.get('actionable_insights'):
                 context_parts.extend([
                     "ACTIONABLE MARKETING INSIGHTS:",
-                    *[f"• {insight}" for insight in trends['actionable_insights'][:3]],
+                    *[f"â€¢ {insight}" for insight in trends['actionable_insights'][:3]],
                     ""
                 ])
             
@@ -359,7 +365,7 @@ async def get_rss_marketing_context(message: str, content_type: str = None) -> s
             if inspiration.get('call_to_action_ideas'):
                 context_parts.extend([
                     "CALL-TO-ACTION IDEAS:",
-                    *[f"• {cta}" for cta in inspiration['call_to_action_ideas'][:2]],
+                    *[f"â€¢ {cta}" for cta in inspiration['call_to_action_ideas'][:2]],
                     ""
                 ])
             
@@ -443,13 +449,13 @@ async def process_scraper_command(message: str, user_id: str) -> str:
             history = await db.get_user_scrape_history(user_id=user_id, limit=10)
             
             if not history:
-                return """🔍 **Marketing Scraper History**
+                return """ðŸ" **Marketing Scraper History**
 
 No scraping history found. Start analyzing competitors with:
-• `scrape https://example.com` - Analyze any website
-• `scrape insights` - Get analysis from previous scrapes"""
+â€¢ `scrape https://example.com` - Analyze any website
+â€¢ `scrape insights` - Get analysis from previous scrapes"""
             
-            response_parts = ["🔍 **Recent Scraping History**\n"]
+            response_parts = ["ðŸ" **Recent Scraping History**\n"]
             
             for i, item in enumerate(history, 1):
                 domain = item.get('domain', 'Unknown')
@@ -457,11 +463,11 @@ No scraping history found. Start analyzing competitors with:
                 word_count = item.get('word_count', 0)
                 
                 response_parts.append(f"**{i}. {domain}**")
-                response_parts.append(f"   📅 Scraped: {scraped_at}")
-                response_parts.append(f"   📄 Words: {word_count}")
+                response_parts.append(f"   ðŸ"… Scraped: {scraped_at}")
+                response_parts.append(f"   ðŸ"„ Words: {word_count}")
                 response_parts.append("")
             
-            response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
+            response_parts.append("ðŸ'¡ Use `scrape insights` to get AI analysis of all scraped content.")
             return "\n".join(response_parts)
         
         elif 'scrape insights' in message_lower:
@@ -472,18 +478,18 @@ No scraping history found. Start analyzing competitors with:
             recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
             
             if not recent_content:
-                return """🔍 **Marketing Scraper Insights**
+                return """ðŸ" **Marketing Scraper Insights**
 
 No scraped content available for analysis. 
 
 Start building your competitive intelligence with:
-• `scrape https://competitor.com` - Analyze competitor sites
-• `scrape https://industry-blog.com` - Analyze industry content"""
+â€¢ `scrape https://competitor.com` - Analyze competitor sites
+â€¢ `scrape https://industry-blog.com` - Analyze industry content"""
             
             # Generate competitive insights summary
             response_parts = [
-                "🧠 **Competitive Intelligence Report**",
-                f"📊 Based on {len(recent_content)} recently analyzed websites",
+                "ðŸ§  **Competitive Intelligence Report**",
+                f"ðŸ"Š Based on {len(recent_content)} recently analyzed websites",
                 ""
             ]
             
@@ -492,12 +498,12 @@ Start building your competitive intelligence with:
                 insights = content.get('key_insights', {})
                 response_parts.append(f"**{i}. {content['domain']}**")
                 if insights.get('value_proposition'):
-                    response_parts.append(f"   🎯 Value Prop: {insights['value_proposition'][:100]}...")
+                    response_parts.append(f"   ðŸŽ¯ Value Prop: {insights['value_proposition'][:100]}...")
                 if insights.get('content_strategy'):
-                    response_parts.append(f"   📝 Strategy: {insights['content_strategy'][:100]}...")
+                    response_parts.append(f"   ðŸ" Strategy: {insights['content_strategy'][:100]}...")
                 response_parts.append("")
             
-            response_parts.append("🔍 Use `scrape https://newsite.com` to add more competitive intelligence!")
+            response_parts.append("ðŸ" Use `scrape https://newsite.com` to add more competitive intelligence!")
             return "\n".join(response_parts)
         
         else:
@@ -505,19 +511,19 @@ Start building your competitive intelligence with:
             url = extract_url_from_message(message)
             
             if not url:
-                return """🔍 **Marketing Scraper Commands**
+                return """ðŸ" **Marketing Scraper Commands**
 
 **Usage:**
-• `scrape https://example.com` - Analyze any website for marketing insights
-• `scrape history` - View your scraping history  
-• `scrape insights` - Get competitive intelligence report
+â€¢ `scrape https://example.com` - Analyze any website for marketing insights
+â€¢ `scrape history` - View your scraping history  
+â€¢ `scrape insights` - Get competitive intelligence report
 
 **Examples:**
-• `scrape https://hubspot.com/blog` - Analyze HubSpot's content strategy
-• `scrape https://competitor.com` - Competitive analysis
-• `scrape https://industry-news.com` - Industry trend analysis
+â€¢ `scrape https://hubspot.com/blog` - Analyze HubSpot's content strategy
+â€¢ `scrape https://competitor.com` - Competitive analysis
+â€¢ `scrape https://industry-news.com` - Industry trend analysis
 
-Ready to analyze your competition? 🕵️"""
+Ready to analyze your competition? ðŸ•µï¸"""
             
             # Perform the scrape
             scraper = MarketingScraperClient()
@@ -529,7 +535,7 @@ Ready to analyze your competition? 🕵️"""
                 scraped_data = await scraper.scrape_website(url)
                 
                 if not scraped_data.get('scrape_status') == 'completed':
-                    return f"""❌ **Scraping Failed**
+                    return f"""âŒ **Scraping Failed**
                     
 Unable to analyze {url}
 Error: {scraped_data.get('error_message', 'Unknown error')}
@@ -551,8 +557,8 @@ Please verify the URL is accessible and try again."""
                 word_count = scraped_data.get('word_count', 0)
                 
                 response_parts = [
-                    f"✅ **Successfully Analyzed: {domain}**",
-                    f"📄 Content extracted: {word_count:,} words",
+                    f"âœ… **Successfully Analyzed: {domain}**",
+                    f"ðŸ"„ Content extracted: {word_count:,} words",
                     ""
                 ]
                 
@@ -560,8 +566,8 @@ Please verify the URL is accessible and try again."""
                     insights = analysis.get('competitive_insights', {})
                     if insights.get('value_proposition'):
                         response_parts.extend([
-                            "**🎯 Value Proposition:**",
-                            f"• {insights['value_proposition'][:200]}...",
+                            "**ðŸŽ¯ Value Proposition:**",
+                            f"â€¢ {insights['value_proposition'][:200]}...",
                             ""
                         ])
                 
@@ -569,8 +575,8 @@ Please verify the URL is accessible and try again."""
                     marketing = analysis.get('marketing_angles', {})
                     if marketing.get('content_strategy'):
                         response_parts.extend([
-                            "**📝 Content Strategy:**",
-                            f"• {marketing['content_strategy'][:200]}...",
+                            "**ðŸ" Content Strategy:**",
+                            f"â€¢ {marketing['content_strategy'][:200]}...",
                             ""
                         ])
                 
@@ -578,21 +584,21 @@ Please verify the URL is accessible and try again."""
                     cta = analysis.get('cta_analysis', {})
                     if cta.get('cta_placement_strategy'):
                         response_parts.extend([
-                            "**🔥 CTA Strategy:**",
-                            f"• {cta['cta_placement_strategy'][:200]}...",
+                            "**ðŸ"¥ CTA Strategy:**",
+                            f"â€¢ {cta['cta_placement_strategy'][:200]}...",
                             ""
                         ])
                 
                 response_parts.extend([
-                    f"💾 **Stored for Analysis** - Use `scrape insights` for competitive intelligence",
-                    f"📈 **View History** - Use `scrape history` to see all analyzed sites"
+                    f"ðŸ'¾ **Stored for Analysis** - Use `scrape insights` for competitive intelligence",
+                    f"ðŸ"ˆ **View History** - Use `scrape history` to see all analyzed sites"
                 ])
                 
                 return "\n".join(response_parts)
                 
             except Exception as e:
                 logger.error(f"Scraper processing failed: {e}")
-                return f"""❌ **Analysis Failed**
+                return f"""âŒ **Analysis Failed**
                 
 Error analyzing {url}: {str(e)}
 
@@ -600,9 +606,9 @@ Please try again or contact support if the issue persists."""
     
     except Exception as e:
         logger.error(f"Scraper command processing failed: {e}")
-        return f"❌ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
+        return f"âŒ **Scraper Command Error:** {str(e)}\n\nTry `scrape https://example.com` to analyze a website."
 
-#-- Section 7: Prayer Times Functions - 9/26/25
+#-- Section 7: Prayer Times Functions - 9/26/25 (Updated 9/27/25)
 def detect_prayer_command(message: str) -> bool:
     """Detect prayer-related requests"""
     prayer_keywords = [
@@ -626,19 +632,29 @@ def detect_prayer_question_type(message: str) -> str:
     else:
         return "general_prayer"
 
-async def process_prayer_command(message: str, user_id: str) -> str:
+async def process_prayer_command(message: str, user_id: str, ip_address: str = None) -> str:
     """Process prayer-related commands using the cached database system"""
     try:
-        from ..integrations.prayer_times.database_manager import get_next_prayer, get_todays_prayers
+        from ..integrations.prayer_times.database_manager import get_prayer_database_manager
         
         question_type = detect_prayer_question_type(message)
         
+        # Get prayer manager and pass IP address for location detection
+        prayer_manager = await get_prayer_database_manager()
+        
         if question_type == "next_prayer":
             # "How long till Dhuhr?" type questions
-            next_prayer_info = await get_next_prayer()
+            prayer_data = await prayer_manager.get_todays_prayer_times(ip_address)
+            if not prayer_data:
+                return """ðŸ•Œ **Prayer Time Service Unavailable**
+                
+Unable to retrieve prayer times at the moment. Please try again in a few moments."""
+            
+            next_prayer_info = await prayer_manager.get_next_prayer_info()
+            location_name = prayer_data['location']['name']
             
             if not next_prayer_info:
-                return """🕌 **Prayer Time Service Unavailable**
+                return """ðŸ•Œ **Prayer Time Service Unavailable**
                 
 Unable to retrieve prayer times at the moment. Please try again in a few moments."""
             
@@ -649,110 +665,113 @@ Unable to retrieve prayer times at the moment. Please try again in a few moments
             
             day_text = "today" if is_today else "tomorrow"
             
-            return f"""🕌 **Next Prayer: {prayer_name}**
+            return f"""ðŸ•Œ **Next Prayer: {prayer_name}**
 
-⏰ **Time:** {prayer_time} ({day_text})
-⏳ **Time Until:** {time_until_text}
+â° **Time:** {prayer_time} ({day_text})
+â³ **Time Until:** {time_until_text}
 
-Prayer times are calculated for Merrifield, Virginia using ISNA method."""
+Prayer times are calculated for {location_name} using ISNA method."""
         
         elif question_type == "daily_schedule":
             # "What are prayer times today?" type questions
-            daily_prayers = await get_todays_prayers()
+            prayer_data = await prayer_manager.get_todays_prayer_times(ip_address)
             
-            if not daily_prayers:
-                return """🕌 **Prayer Schedule Unavailable**
+            if not prayer_data:
+                return """ðŸ•Œ **Prayer Schedule Unavailable**
                 
 Unable to retrieve today's prayer schedule. Please try again in a few moments."""
             
-            prayer_times = daily_prayers['prayer_times']
-            islamic_date = daily_prayers['islamic_date']
-            formatted_date = daily_prayers.get('formatted_date', daily_prayers['date'])
+            prayer_times = prayer_data['prayer_times']
+            islamic_date = prayer_data['islamic_date']
+            formatted_date = prayer_data.get('formatted_date', prayer_data['date'])
+            location_name = prayer_data['location']['name']
             
             response_parts = [
-                f"🕌 **Prayer Times for {formatted_date}**",
+                f"ðŸ•Œ **Prayer Times for {formatted_date}**",
                 ""
             ]
             
             # Add Islamic date if available
             if islamic_date['date'] != 'N/A':
                 response_parts.extend([
-                    f"📅 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                    f"ðŸ"… **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
                     ""
                 ])
             
             response_parts.extend([
-                "🕐 **Daily Prayer Schedule:**",
+                "ðŸ• **Daily Prayer Schedule:**",
                 f"   **Fajr:** {prayer_times['fajr']}",
                 f"   **Dhuhr:** {prayer_times['dhuhr']}",
                 f"   **Asr:** {prayer_times['asr']}",
                 f"   **Maghrib:** {prayer_times['maghrib']}",
                 f"   **Isha:** {prayer_times['isha']}",
                 "",
-                "📍 Calculated for Merrifield, Virginia using ISNA method"
+                f"ðŸ" Calculated for {location_name} using ISNA method"
             ])
             
             return "\n".join(response_parts)
         
         elif question_type == "islamic_date":
             # Islamic calendar questions
-            daily_prayers = await get_todays_prayers()
+            prayer_data = await prayer_manager.get_todays_prayer_times(ip_address)
             
-            if not daily_prayers or daily_prayers['islamic_date']['date'] == 'N/A':
-                return """📅 **Islamic Calendar Information**
+            if not prayer_data or prayer_data['islamic_date']['date'] == 'N/A':
+                return """ðŸ"… **Islamic Calendar Information**
                 
 Islamic date information is currently unavailable. Please try again later."""
             
-            islamic_date = daily_prayers['islamic_date']
-            gregorian_date = daily_prayers.get('formatted_date', daily_prayers['date'])
+            islamic_date = prayer_data['islamic_date']
+            gregorian_date = prayer_data.get('formatted_date', prayer_data['date'])
             
-            return f"""📅 **Islamic Calendar Information**
+            return f"""ðŸ"… **Islamic Calendar Information**
 
 **Today's Date:**
-🗓️ Gregorian: {gregorian_date}
-🌙 Islamic: {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}
+ðŸ—"ï¸ Gregorian: {gregorian_date}
+ðŸŒ™ Islamic: {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}
 
 Islamic dates are calculated using the AlAdhan calendar system."""
         
         else:
             # General prayer information
-            next_prayer_info = await get_next_prayer()
-            daily_prayers = await get_todays_prayers()
+            prayer_data = await prayer_manager.get_todays_prayer_times(ip_address)
+            next_prayer_info = await prayer_manager.get_next_prayer_info()
             
-            if not next_prayer_info or not daily_prayers:
-                return """🕌 **Prayer Time Information**
+            if not next_prayer_info or not prayer_data:
+                return """ðŸ•Œ **Prayer Time Information**
                 
 Prayer time service is currently unavailable. Please try again in a few moments."""
             
             next_prayer = next_prayer_info['prayer_name']
             time_until = next_prayer_info['time_until_text']
-            islamic_date = daily_prayers['islamic_date']
+            islamic_date = prayer_data['islamic_date']
+            location_name = prayer_data['location']['name']
             
             response_parts = [
-                "🕌 **Prayer Time Information**",
+                "ðŸ•Œ **Prayer Time Information**",
                 "",
-                f"⏰ **Next Prayer:** {next_prayer} in {time_until}",
+                f"â° **Next Prayer:** {next_prayer} in {time_until}",
+                f"ðŸ" **Location:** {location_name}",
                 ""
             ]
             
             if islamic_date['date'] != 'N/A':
                 response_parts.extend([
-                    f"📅 **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
+                    f"ðŸ"… **Islamic Date:** {islamic_date['date']} {islamic_date['month']} {islamic_date['year']}",
                     ""
                 ])
             
             response_parts.extend([
                 "**Available Commands:**",
-                "• 'How long till [prayer name]?' - Next prayer countdown",
-                "• 'What are prayer times today?' - Full daily schedule",
-                "• 'Islamic date' - Current Hijri calendar date"
+                "â€¢ 'How long till [prayer name]?' - Next prayer countdown",
+                "â€¢ 'What are prayer times today?' - Full daily schedule",
+                "â€¢ 'Islamic date' - Current Hijri calendar date"
             ])
             
             return "\n".join(response_parts)
     
     except Exception as e:
         logger.error(f"Prayer command processing failed: {e}")
-        return f"""🕌 **Prayer Time Service Error**
+        return f"""ðŸ•Œ **Prayer Time Service Error**
         
 An error occurred while retrieving prayer information: {str(e)}
 
@@ -921,29 +940,478 @@ async def analyze_csv_file(file_path: Path) -> Dict:
             'extracted_text': ''
         }
 
-#-- Section 9: Module Information Functions - 9/26/25
+#-- Section 10: Google Trends Integration Functions - 9/27/25
+def detect_trends_command(message: str) -> tuple[bool, str]:
+    """Detect Google Trends commands and determine command type"""
+    trends_keywords = [
+        'trends', 'trending', 'google trends', 'opportunities',
+        'good match', 'bad match', 'train trends', 'trends status',
+        'trends health', 'trend opportunities', 'trends scan'
+    ]
+    
+    message_lower = message.lower()
+    
+    # Check if it's a trends-related command
+    is_trends_command = any(keyword in message_lower for keyword in trends_keywords)
+    
+    if not is_trends_command:
+        return False, ''
+    
+    # Determine command type
+    if any(term in message_lower for term in ['good match', 'bad match']):
+        return True, 'training_feedback'
+    elif 'opportunities' in message_lower:
+        return True, 'view_opportunities'
+    elif 'scan' in message_lower:
+        return True, 'scan_trends'
+    elif 'status' in message_lower or 'health' in message_lower:
+        return True, 'status_check'
+    else:
+        return True, 'general_trends'
+
+async def process_training_feedback(message: str, user_id: str) -> str:
+    """Process Good Match/Bad Match training feedback"""
+    try:
+        training = OpportunityTraining()
+        message_lower = message.lower()
+        
+        if 'good match' in message_lower:
+            # User is providing positive feedback
+            feedback_result = await training.record_feedback(
+                user_id=user_id,
+                feedback_type='positive',
+                message_context=message
+            )
+            
+            return f"""âœ… **Training Feedback Recorded**
+
+ðŸŽ¯ **Feedback Type:** Good Match
+ðŸ"ˆ **Impact:** This helps improve trend opportunity detection
+ðŸ¤– **ML Effect:** Future similar opportunities will be prioritized
+
+**Your Training Stats:**
+â€¢ Total Feedback: {feedback_result.get('total_feedback', 0)}
+â€¢ Good Matches: {feedback_result.get('positive_feedback', 0)}
+â€¢ Bad Matches: {feedback_result.get('negative_feedback', 0)}
+
+Keep the feedback coming to improve accuracy!"""
+        
+        elif 'bad match' in message_lower:
+            # User is providing negative feedback
+            feedback_result = await training.record_feedback(
+                user_id=user_id,
+                feedback_type='negative',
+                message_context=message
+            )
+            
+            return f"""âŒ **Training Feedback Recorded**
+
+ðŸŽ¯ **Feedback Type:** Bad Match
+ðŸ"‰ **Impact:** This helps filter out irrelevant opportunities
+ðŸ¤– **ML Effect:** Future similar opportunities will be deprioritized
+
+**Your Training Stats:**
+â€¢ Total Feedback: {feedback_result.get('total_feedback', 0)}
+â€¢ Good Matches: {feedback_result.get('positive_feedback', 0)}
+â€¢ Bad Matches: {feedback_result.get('negative_feedback', 0)}
+
+Your feedback helps make the system smarter!"""
+        
+        else:
+            return """ðŸ¤– **Training Feedback System**
+
+Help improve trend opportunity detection with feedback:
+
+**Available Commands:**
+â€¢ `Good Match` - Mark current opportunity as relevant
+â€¢ `Bad Match` - Mark current opportunity as irrelevant
+â€¢ `trends opportunities` - View current opportunities to evaluate
+
+**How Training Works:**
+ðŸ"ˆ Good Match feedback increases similar opportunity scores
+ðŸ"‰ Bad Match feedback decreases similar opportunity scores
+ðŸŽ¯ More feedback = Better opportunity detection accuracy"""
+    
+    except Exception as e:
+        logger.error(f"Training feedback processing failed: {e}")
+        return f"âŒ **Training Error:** {str(e)}\n\nTry `trends status` to check system health."
+
+async def check_for_trend_opportunities(user_id: str) -> Optional[str]:
+    """Check for proactive trend opportunities and return notification message"""
+    try:
+        detector = OpportunityDetector()
+        
+        # Get current trending opportunities
+        opportunities = await detector.detect_opportunities(
+            user_id=user_id,
+            limit=3
+        )
+        
+        if not opportunities:
+            return None
+        
+        # Filter for high-confidence opportunities only
+        high_confidence_ops = [
+            op for op in opportunities
+            if op.get('confidence_score', 0) >= 0.75
+        ]
+        
+        if not high_confidence_ops:
+            return None
+        
+        # Create proactive notification
+        top_opportunity = high_confidence_ops[0]
+        
+        notification_message = f"""ðŸ"ˆ **Trending Opportunity Alert**
+
+**{top_opportunity.get('keyword', 'Unknown Trend')}** is gaining momentum!
+
+ðŸ"Š **Trend Score:** {top_opportunity.get('trend_score', 0):.1f}/10
+ðŸŽ¯ **Relevance:** {top_opportunity.get('confidence_score', 0):.0%}
+ðŸ"… **Peak Expected:** {top_opportunity.get('peak_timing', 'Soon')}
+
+**Why This Matters:**
+{top_opportunity.get('opportunity_reason', 'High engagement potential detected')}
+
+**Suggested Actions:**
+â€¢ {top_opportunity.get('suggested_action_1', 'Create content around this trend')}
+â€¢ {top_opportunity.get('suggested_action_2', 'Monitor for additional opportunities')}
+
+Use `Good Match` or `Bad Match` to train the system!"""
+        
+        return notification_message
+        
+    except Exception as e:
+        logger.error(f"Trend opportunity check failed: {e}")
+        return None
+
+async def process_trends_command(message: str, user_id: str) -> str:
+    """Process Google Trends commands"""
+    try:
+        is_trends_cmd, cmd_type = detect_trends_command(message)
+        
+        if not is_trends_cmd:
+            return ""
+        
+        if cmd_type == 'training_feedback':
+            return await process_training_feedback(message, user_id)
+        
+        elif cmd_type == 'view_opportunities':
+            detector = OpportunityDetector()
+            opportunities = await detector.detect_opportunities(user_id=user_id, limit=5)
+            
+            if not opportunities:
+                return """ðŸ"ˆ **Google Trends Opportunities**
+
+No trending opportunities found at this time.
+
+**Available Commands:**
+â€¢ `trends scan` - Force scan for new opportunities
+â€¢ `trends status` - Check system health
+â€¢ Use `Good Match`/`Bad Match` to train the system"""
+            
+            response_parts = ["ðŸ"ˆ **Current Trending Opportunities**\n"]
+            
+            for i, opp in enumerate(opportunities, 1):
+                response_parts.append(f"""**{i}. {opp.get('keyword', 'Unknown')}**
+ðŸ"Š Trend Score: {opp.get('trend_score', 0):.1f}/10
+ðŸŽ¯ Relevance: {opp.get('confidence_score', 0):.0%}
+ðŸ'¡ Why: {opp.get('opportunity_reason', 'High potential')}
+
+""")
+            
+            response_parts.append("Respond with `Good Match` or `Bad Match` to help train the system!")
+            return "\n".join(response_parts)
+        
+        elif cmd_type == 'scan_trends':
+            # Force a new scan
+            detector = OpportunityDetector()
+            scan_result = await detector.force_scan_update()
+            
+            return f"""ðŸ"„ **Trends Scan Complete**
+
+âœ… Scanned {scan_result.get('trends_analyzed', 0)} trending topics
+ðŸ"ˆ Found {scan_result.get('opportunities_detected', 0)} new opportunities
+â° Scan completed at {datetime.now().strftime('%H:%M')}
+
+Use `trends opportunities` to view the latest findings!"""
+        
+        elif cmd_type == 'status_check':
+            health_status = check_module_health()
+            
+            return f"""ðŸ"ˆ **Google Trends System Status**
+
+ðŸ"¡ **Service:** {'Running' if health_status.get('trends_healthy', False) else 'Issues Detected'}
+â° **Last Scan:** {health_status.get('last_trends_scan', 'Unknown')}
+ðŸ"Š **Opportunities Found:** {health_status.get('total_opportunities', 0)}
+ðŸ¤– **Training Data:** {health_status.get('training_samples', 0)} feedback samples
+
+**Available Commands:**
+â€¢ `trends opportunities` - View current opportunities
+â€¢ `trends scan` - Force new scan
+â€¢ `Good Match`/`Bad Match` - Provide training feedback"""
+        
+        else:
+            # General trends information
+            return """ðŸ"ˆ **Google Trends Intelligence System**
+
+ðŸ¤– **AI-Powered Opportunity Detection**
+ðŸŽ¯ **Personalized Content Suggestions**
+ðŸ"Š **Real-Time Trend Analysis**
+
+**Available Commands:**
+â€¢ `trends opportunities` - View current trending opportunities
+â€¢ `trends scan` - Force scan for new trends
+â€¢ `trends status` - Check system health
+â€¢ `Good Match` - Mark opportunity as relevant (training)
+â€¢ `Bad Match` - Mark opportunity as irrelevant (training)
+
+**How It Works:**
+1. Continuously monitors Google Trends
+2. AI analyzes relevance to your interests
+3. Presents high-potential opportunities
+4. Learns from your feedback to improve accuracy
+
+Ready to discover your next trending opportunity?"""
+    
+    except Exception as e:
+        logger.error(f"Trends command processing failed: {e}")
+        return f"âŒ **Trends System Error:** {str(e)}\n\nTry `trends status` to check system health."
+
+#-- Section 11: Prayer Notification Functions - 9/27/25
+def detect_prayer_notification_command(message: str) -> bool:
+    """Detect prayer notification management commands"""
+    notification_keywords = [
+        "prayer notifications", "prayer alerts", "prayer reminder",
+        "notification status", "notification test", "prayer service",
+        "disable prayer", "enable prayer", "prayer settings"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in notification_keywords)
+
+async def process_prayer_notification_command(message: str, user_id: str, ip_address: str = None) -> str:
+    """Process prayer notification management commands"""
+    try:
+        from ..integrations.prayer_times.notification_manager import (
+            get_prayer_notification_manager,
+            test_prayer_notification
+        )
+        
+        message_lower = message.lower()
+        notification_manager = get_prayer_notification_manager()
+        
+        if 'status' in message_lower:
+            # Get notification service status
+            status = notification_manager.get_notification_status()
+            
+            return f"""ðŸ•Œ **Prayer Notification Service Status**
+
+ðŸ"¡ **Service:** {'Running' if status['running'] else 'Stopped'}
+â° **Check Interval:** {status['check_interval_seconds']} seconds
+ðŸ"… **Advance Notice:** {status['advance_minutes']} minutes
+ðŸ"Š **Notifications Sent Today:** {status['sent_today']}
+
+**Preferences:**
+- Enabled: {'Yes' if status['preferences']['enabled'] else 'No'}
+- Advance Time: {status['preferences']['advance_minutes']} minutes
+- Personality: {'Enabled' if status['preferences']['personality_enabled'] else 'Disabled'}
+- Prayers: {', '.join(status['preferences']['prayers_to_notify']).title()}
+
+Use `prayer notifications test` to test the system."""
+        
+        elif 'test' in message_lower:
+            # Test the notification system
+            test_message = await test_prayer_notification()
+            
+            return f"""ðŸ§ª **Prayer Notification Test**
+
+Here's what a notification would look like:
+
+---
+
+{test_message}
+
+---
+
+If the service is running properly, you should receive automatic notifications 15 minutes before each prayer time."""
+        
+        else:
+            # General prayer notification info
+            return """ðŸ•Œ **Prayer Notification System**
+
+**Available Commands:**
+- `prayer notifications status` - Check service status
+- `prayer notifications test` - Test notification format
+- `prayer times` - Get today's prayer schedule
+- `next prayer` - See time until next prayer
+
+**Features:**
+âœ… Automatic 15-minute advance notifications
+âœ… AI personality integration for natural messages
+âœ… All 5 daily prayers included
+âœ… No duplicate notifications
+
+The service runs automatically in the background."""
+            
+    except Exception as e:
+        logger.error(f"Prayer notification command processing failed: {e}")
+        return f"âŒ **Prayer Notification Error:** {str(e)}\n\nTry `prayer notifications status` to check the system."
+
+def detect_location_command(message: str) -> bool:
+    """Detect location-related commands"""
+    location_keywords = [
+        "my location", "where am i", "current location", "detect location",
+        "prayer location", "location for prayers", "change location",
+        "location settings", "ip location", "auto location"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in location_keywords)
+
+async def process_location_command(message: str, user_id: str, ip_address: str = None) -> str:
+    """Process location detection and management commands"""
+    try:
+        from ..integrations.prayer_times.location_detector import (
+            get_location_detector,
+            detect_user_location
+        )
+        
+        message_lower = message.lower()
+        detector = get_location_detector()
+        
+        if any(term in message_lower for term in ['where am i', 'current location', 'my location']):
+            # Detect and show current location
+            location = await detect_user_location(ip_address)
+            
+            return f"""ðŸ" **Your Current Location**
+
+ðŸŒ **Detected from IP:** {location.get('source', 'IP Service')}
+ðŸï¸ **City:** {location['city']}
+ðŸ—ºï¸ **Region:** {location['region']}
+ðŸŒŽ **Country:** {location['country']}
+ðŸ"Š **Coordinates:** {location['latitude']:.4f}, {location['longitude']:.4f}
+ðŸ• **Timezone:** {location['timezone']}
+
+This location will be used automatically for prayer time calculations."""
+        
+        elif 'prayer location' in message_lower:
+            # Get location specifically formatted for prayers
+            from ..integrations.prayer_times.location_detector import get_prayer_location
+            location_name, lat, lng = await get_prayer_location(user_id, ip_address)
+            
+            return f"""ðŸ•Œ **Prayer Times Location**
+
+ðŸ" **Location:** {location_name}
+ðŸ"Š **Coordinates:** {lat:.4f}, {lng:.4f}
+
+Prayer times are automatically calculated for your current location based on your IP address. 
+
+**Available Commands:**
+- `prayer times` - Get today's schedule for your location
+- `next prayer` - Time until next prayer
+- `my location` - See detected location details"""
+        
+        else:
+            # General location information
+            return f"""ðŸ" **Location Detection System**
+
+Your prayer times are automatically calculated based on your IP address location.
+
+**Available Commands:**
+- `my location` - See your detected location
+- `prayer location` - View location used for prayers  
+- `location settings` - Check auto-detection settings
+- `prayer times` - Get schedule for your current location
+
+**Features:**
+âœ… Automatic IP-based location detection
+âœ… 24-hour location caching for performance
+âœ… Multiple geolocation services for accuracy
+âœ… Fallback to default location if needed"""
+            
+    except Exception as e:
+        logger.error(f"Location command processing failed: {e}")
+        return f"âŒ **Location Detection Error:** {str(e)}\n\nTry `my location` to test location detection."
+
+async def post_system_message_to_chat(message: str, message_type: str = "system_notification") -> bool:
+    """
+    Post a system-generated message to the chat interface
+    This is used by background services like prayer notifications
+    """
+    try:
+        from .conversation_manager import get_memory_manager
+        
+        # Get the default user ID and create a system thread if needed
+        DEFAULT_USER_ID = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+        
+        # Get memory manager
+        memory_manager = get_memory_manager(DEFAULT_USER_ID)
+        
+        # Create or get system notification thread
+        system_thread_id = await get_or_create_system_thread(memory_manager)
+        
+        # Add system message to conversation history
+        system_message_id = await memory_manager.add_message(
+            thread_id=system_thread_id,
+            role="assistant",  # System messages appear as assistant responses
+            content=message,
+            metadata={
+                "type": message_type,
+                "timestamp": datetime.now().isoformat(),
+                "source": "prayer_notification_service"
+            }
+        )
+        
+        logger.info(f"âœ… System message posted to chat: {system_message_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to post system message to chat: {e}")
+        return False
+
+async def get_or_create_system_thread(memory_manager) -> str:
+    """Get or create a dedicated thread for system notifications"""
+    try:
+        # Create a new thread titled "Prayer Notifications"
+        thread_id = await memory_manager.create_conversation_thread(
+            platform='system',
+            title='Prayer Notifications'
+        )
+        
+        return thread_id
+        
+    except Exception as e:
+        logger.error(f"Failed to create system thread: {e}")
+        raise
+
+#-- Section 12: Module Information Functions - 9/26/25 (Updated 9/27/25)
 def get_integration_info():
     """Get information about the chat integration helper module"""
     return {
         "name": "AI Chat Integration Helper",
-        "version": "2.0.0",
-        "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, and file processing",
+        "version": "2.1.0",
+        "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, Google Trends, and file processing",
         "note": "This module provides helper functions only - endpoints are handled by router.py",
         "features": [
             "Weather integration with Tomorrow.io API",
-            "Prayer times with AlAdhan API integration",
+            "Prayer times with AlAdhan API integration and notifications",
             "Marketing scraper for competitive analysis",
             "RSS learning integration for marketing insights",
             "Bluesky social media command processing",
+            "Google Trends opportunity detection and training",
             "File upload processing (images, PDFs, CSVs, text)",
-            "Real-time datetime context generation"
+            "Real-time datetime context generation",
+            "Location detection for prayer times",
+            "Prayer notification management"
         ],
         "integrations_provided": [
             "weather_detection_and_processing",
             "prayer_times_detection_and_processing",
+            "prayer_notification_management",
+            "location_detection_and_processing",
             "marketing_scraper_detection_and_processing",
             "rss_learning_context_generation",
             "bluesky_command_processing",
+            "google_trends_integration",
             "file_upload_and_analysis"
         ]
     }
@@ -987,6 +1455,12 @@ def check_module_health() -> Dict[str, Any]:
     if not prayer_configured:
         warnings.append("Prayer Times integration not configured (DATABASE_URL missing)")
     
+    # Check Google Trends configuration
+    trends_configured = bool(os.getenv("DATABASE_URL"))  # Uses same DB as others
+    
+    if not trends_configured:
+        warnings.append("Google Trends integration not configured (DATABASE_URL missing)")
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
@@ -998,6 +1472,9 @@ def check_module_health() -> Dict[str, Any]:
         "rss_learning_integration_available": rss_configured,
         "marketing_scraper_integration_available": scraper_configured,
         "prayer_times_integration_available": prayer_configured,
+        "google_trends_integration_available": trends_configured,
+        "prayer_notifications_available": prayer_configured,
+        "location_detection_available": True,
         "file_processing_available": True,
         "note": "This is a helper module - endpoints are handled by router.py"
     }

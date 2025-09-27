@@ -28,3 +28,13 @@ modules/integrations/rss_learning/__pycache__/router.cpython-311.pyc
 modules/integrations/prayer_times/__pycache__/__init__.cpython-311.pyc
 modules/integrations/prayer_times/__pycache__/database_manager.cpython-311.pyc
 modules/integrations/prayer_times/__pycache__/router.cpython-311.pyc
+modules/ai/__pycache__/chat.cpython-311.pyc
+modules/ai/__pycache__/conversation_manager.cpython-311.pyc
+modules/ai/__pycache__/feedback_processor.cpython-311.pyc
+modules/ai/__pycache__/inception_client.cpython-311.pyc
+modules/ai/__pycache__/knowledge_query.cpython-311.pyc
+modules/ai/__pycache__/openrouter_client.cpython-311.pyc
+modules/ai/__pycache__/personality_engine.cpython-311.pyc
+modules/ai/__pycache__/router.cpython-311.pyc
+modules/integrations/rss_learning/database_manager.py.backup.20250927_115151
+modules/ai/__pycache__/__init__.cpython-311.pyc
