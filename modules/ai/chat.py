@@ -185,7 +185,7 @@ No engagement opportunities found at this time.
 â€¢ Use `bluesky scan` to search for new opportunities
 â€¢ Check back in a few hours for automatic updates"""
             
-            response_parts = ["ðŸ"µ **Current Bluesky Engagement Opportunities**\n"]
+            response_parts = ["📊 **Current Bluesky Engagement Opportunities**\n"]
             
             for i, item in enumerate(pending_items, 1):
                 account_info = item.get('account_info', {})
