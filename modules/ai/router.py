@@ -97,6 +97,38 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
         # Get current datetime context
         datetime_context = get_current_datetime_context()
         
+        # Ensure thread exists or create it
+        if not chat_request.thread_id:
+            # Create new thread
+            thread_id = await memory_manager.create_conversation_thread(
+                platform='web',
+                title=None  # Will be auto-generated from first message
+            )
+        else:
+            # Verify existing thread exists
+            try:
+                from ..core.database import db_manager
+                thread_check = await db_manager.fetch_one(
+                    "SELECT id FROM conversation_threads WHERE id = $1 AND user_id = $2",
+                    chat_request.thread_id, user_id
+                )
+                if not thread_check:
+                    # Thread doesn't exist, create new one
+                    logger.warning(f"Thread {chat_request.thread_id} not found, creating new thread")
+                    thread_id = await memory_manager.create_conversation_thread(
+                        platform='web',
+                        title=None
+                    )
+                else:
+                    thread_id = chat_request.thread_id
+            except Exception as e:
+                logger.error(f"Error checking thread: {e}")
+                # Create new thread as fallback
+                thread_id = await memory_manager.create_conversation_thread(
+                    platform='web',
+                    title=None
+                )
+        
         # Store user message
         user_message_id = await memory_manager.add_message(
             thread_id=thread_id,
