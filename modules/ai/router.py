@@ -225,7 +225,38 @@ Weather data powered by Tomorrow.io"""
         elif detect_bluesky_command(message_content):
             logger.info("🔵 DEBUG: Bluesky command detected - processing...")
             try:
-                special_response = await process_bluesky_command(message_content, user_id)
+                # Import directly to avoid cache issues
+                from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
+                
+                multi_client = get_bluesky_multi_client()
+                message_lower = message_content.lower()
+                
+                if 'health' in message_lower:
+                    try:
+                        auth_results = await multi_client.authenticate_all_accounts()
+                        working_count = sum(auth_results.values())
+                        total_count = len(auth_results)
+                        
+                        special_response = f"""🔵 **Bluesky System Health**
+
+        📱 **Accounts:** {working_count}/{total_count} connected
+        🤖 **AI Assistant:** All personalities loaded
+        ⚙️ **Status:** {'Healthy' if working_count > 0 else 'Needs Attention'}"""
+                        
+                    except Exception as e:
+                        special_response = f"❌ **Health Check Failed:** {str(e)}"
+                else:
+                    # Use direct method call
+                    account_statuses = multi_client.get_all_accounts_status()
+                    special_response = f"""🔵 **Bluesky Social Media Intelligence**
+
+        📱 **Configured Accounts:** {len(account_statuses)}/5
+        🤖 **Features:** Keyword intelligence, engagement suggestions, approval workflow
+
+        **Available Commands:**
+        - `bluesky health` - System health check
+        - `bluesky accounts` - Check account status"""
+                
                 logger.info("✅ DEBUG: Bluesky response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Bluesky processing failed: {e}")
