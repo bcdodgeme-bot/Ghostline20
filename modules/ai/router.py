@@ -1,9 +1,9 @@
 # modules/ai/router.py
 """
-AI Brain Router for Syntax Prime V2 - COMPLETE WITH ALL INTEGRATIONS
+AI Brain Router for Syntax Prime V2 - DEBUGGED VERSION
 Handles all AI endpoints including chat with full integration support
 Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Health → Chat/AI
-Date: 9/26/25 - Complete rewrite with all integrations properly ordered
+Date: 9/27/25 - Added extensive debugging and fixed critical bugs
 """
 
 import asyncio
@@ -67,7 +67,7 @@ async def get_current_user_id() -> str:
     """Get current user ID - placeholder for now"""
     return DEFAULT_USER_ID
 
-#-- Main Chat Endpoint (THE CORE FUNCTIONALITY)
+#-- Main Chat Endpoint (THE CORE FUNCTIONALITY WITH EXTENSIVE DEBUG)
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_current_user_id)):
     """
@@ -77,78 +77,132 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
     start_time = time.time()
     thread_id = chat_request.thread_id or str(uuid.uuid4())
     
+    # 🚨 CRITICAL DEBUG: Log everything
+    logger.info(f"🚀 CHAT START: Processing message '{chat_request.message[:50]}...'")
+    logger.info(f"📝 DEBUG: user_id={user_id}, personality={chat_request.personality_id}")
+    logger.info(f"🧵 DEBUG: thread_id={thread_id}")
+    
     try:
         # Import helper functions from chat.py
-        from .chat import (
-            get_current_datetime_context,
-            detect_weather_request, get_weather_for_user,
-            detect_prayer_command, process_prayer_command,
-            detect_bluesky_command, process_bluesky_command,
-            detect_rss_command, get_rss_marketing_context,
-            detect_scraper_command, process_scraper_command
-        )
+        logger.info("📦 DEBUG: Loading helper functions from chat.py...")
+        try:
+            from .chat import (
+                get_current_datetime_context,
+                detect_weather_request, get_weather_for_user,
+                detect_prayer_command, process_prayer_command,
+                detect_bluesky_command, process_bluesky_command,
+                detect_rss_command, get_rss_marketing_context,
+                detect_scraper_command, process_scraper_command
+            )
+            logger.info("✅ DEBUG: All chat helper functions loaded successfully")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to import chat helpers: {e}")
+            raise
         
         # Get AI components
-        personality_engine = get_personality_engine()
-        memory_manager = get_memory_manager(user_id)
-        knowledge_engine = get_knowledge_engine()
-        openrouter_client = await get_openrouter_client()
+        logger.info("🧠 DEBUG: Loading AI components...")
+        try:
+            personality_engine = get_personality_engine()
+            memory_manager = get_memory_manager(user_id)
+            knowledge_engine = get_knowledge_engine()
+            openrouter_client = await get_openrouter_client()
+            logger.info("✅ DEBUG: All AI components loaded successfully")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to load AI components: {e}")
+            raise
         
         # Get current datetime context
-        datetime_context = get_current_datetime_context()
+        logger.info("📅 DEBUG: Getting datetime context...")
+        try:
+            datetime_context = get_current_datetime_context()
+            logger.info(f"✅ DEBUG: Datetime context: {datetime_context['full_datetime']}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to get datetime context: {e}")
+            datetime_context = {"full_datetime": "Unknown time"}
         
         # Ensure thread exists or create it
-        if not chat_request.thread_id:
-            # Create new thread
-            thread_id = await memory_manager.create_conversation_thread(
-                platform='web',
-                title=None  # Will be auto-generated from first message
-            )
-        else:
-            # Verify existing thread exists
-            try:
-                from ..core.database import db_manager
-                thread_check = await db_manager.fetch_one(
-                    "SELECT id FROM conversation_threads WHERE id = $1 AND user_id = $2",
-                    chat_request.thread_id, user_id
+        logger.info("🧵 DEBUG: Managing conversation thread...")
+        try:
+            if not chat_request.thread_id:
+                logger.info("🆕 DEBUG: Creating new thread...")
+                thread_id = await memory_manager.create_conversation_thread(
+                    platform='web',
+                    title=None  # Will be auto-generated from first message
                 )
-                if not thread_check:
-                    # Thread doesn't exist, create new one
-                    logger.warning(f"Thread {chat_request.thread_id} not found, creating new thread")
+                logger.info(f"✅ DEBUG: New thread created: {thread_id}")
+            else:
+                # Verify existing thread exists
+                logger.info(f"🔍 DEBUG: Verifying existing thread: {chat_request.thread_id}")
+                try:
+                    from ..core.database import db_manager
+                    thread_check = await db_manager.fetch_one(
+                        "SELECT id FROM conversation_threads WHERE id = $1 AND user_id = $2",
+                        chat_request.thread_id, user_id
+                    )
+                    if not thread_check:
+                        logger.warning(f"⚠️ DEBUG: Thread {chat_request.thread_id} not found, creating new thread")
+                        thread_id = await memory_manager.create_conversation_thread(
+                            platform='web',
+                            title=None
+                        )
+                        logger.info(f"✅ DEBUG: Fallback thread created: {thread_id}")
+                    else:
+                        thread_id = chat_request.thread_id
+                        logger.info(f"✅ DEBUG: Using existing thread: {thread_id}")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: Error checking thread: {e}")
+                    # Create new thread as fallback
                     thread_id = await memory_manager.create_conversation_thread(
                         platform='web',
                         title=None
                     )
-                else:
-                    thread_id = chat_request.thread_id
-            except Exception as e:
-                logger.error(f"Error checking thread: {e}")
-                # Create new thread as fallback
-                thread_id = await memory_manager.create_conversation_thread(
-                    platform='web',
-                    title=None
-                )
+                    logger.info(f"✅ DEBUG: Emergency fallback thread created: {thread_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Thread management failed: {e}")
+            raise
         
         # Store user message
-        user_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="user",
-            content=chat_request.message
-        )
+        logger.info("💾 DEBUG: Storing user message...")
+        try:
+            user_message_id = await memory_manager.add_message(
+                thread_id=thread_id,
+                role="user",
+                content=chat_request.message
+            )
+            logger.info(f"✅ DEBUG: User message stored: {user_message_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to store user message: {e}")
+            raise
         
         # Build message content
         message_content = chat_request.message
+        logger.info(f"📝 DEBUG: Processing message content: '{message_content[:100]}...'")
         
         # INTEGRATION ORDER: Check for special commands in the specified order
         special_response = None
+        model_used = "integration_response"
+        knowledge_sources = []
+        
+        # Initialize context_info for special responses (BUG FIX #1)
+        context_info = {
+            'total_messages': 1,
+            'estimated_tokens': 0,
+            'has_memory_context': False
+        }
+        
+        logger.info("🔍 DEBUG: Starting integration command detection...")
         
         # 1. 🌦️ Weather command detection (FIRST)
+        logger.info("🌦️ DEBUG: Checking for weather commands...")
         if detect_weather_request(message_content):
-            logger.info("🌦️ Processing weather request")
-            weather_data = await get_weather_for_user(user_id)
-            if weather_data.get('success'):
-                weather_info = weather_data['data']
-                special_response = f"""🌦️ **Current Weather**
+            logger.info("✅ DEBUG: Weather command detected - processing...")
+            try:
+                weather_data = await get_weather_for_user(user_id)
+                logger.info(f"📊 DEBUG: Weather data received: {weather_data.get('success', False)}")
+                
+                if weather_data.get('success'):
+                    weather_info = weather_data['data']
+                    special_response = f"""🌦️ **Current Weather**
 
 📍 **Location:** {weather_info.get('location', 'Unknown')}
 🌡️ **Temperature:** {weather_info.get('temperature_f', 'N/A')}°F
@@ -159,34 +213,58 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_cur
 👁️ **Visibility:** {weather_info.get('visibility', 'N/A')} miles
 
 Weather data powered by Tomorrow.io"""
-            else:
-                special_response = f"🌦️ **Weather Service Error**\n\nUnable to retrieve weather data: {weather_data.get('error', 'Unknown error')}"
+                    logger.info("✅ DEBUG: Weather response generated successfully")
+                else:
+                    special_response = f"🌦️ **Weather Service Error**\n\nUnable to retrieve weather data: {weather_data.get('error', 'Unknown error')}"
+                    logger.warning(f"⚠️ DEBUG: Weather service error: {weather_data.get('error')}")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Weather processing failed: {e}")
+                special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
         
         # 2. 🔵 Bluesky command detection (SECOND)
         elif detect_bluesky_command(message_content):
-            logger.info("🔵 Processing Bluesky command")
-            special_response = await process_bluesky_command(message_content, user_id)
+            logger.info("🔵 DEBUG: Bluesky command detected - processing...")
+            try:
+                special_response = await process_bluesky_command(message_content, user_id)
+                logger.info("✅ DEBUG: Bluesky response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Bluesky processing failed: {e}")
+                special_response = f"🔵 **Bluesky Processing Error**\n\nError: {str(e)}"
         
         # 3. 📰 RSS Learning command detection (THIRD)
         elif detect_rss_command(message_content):
-            logger.info("📰 Processing RSS Learning request")
+            logger.info("📰 DEBUG: RSS Learning command detected - processing...")
             # RSS is handled differently - it provides context rather than direct responses
             # We'll get the context and let the AI incorporate it naturally
-            pass
+            try:
+                rss_context = await get_rss_marketing_context(message_content)
+                logger.info("✅ DEBUG: RSS context retrieved, will process in AI section")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: RSS context retrieval failed: {e}")
         
         # 4. 🔍 Marketing Scraper command detection (FOURTH)
         elif detect_scraper_command(message_content):
-            logger.info("🔍 Processing marketing scraper command")
-            special_response = await process_scraper_command(message_content, user_id)
+            logger.info("🔍 DEBUG: Marketing scraper command detected - processing...")
+            try:
+                special_response = await process_scraper_command(message_content, user_id)
+                logger.info("✅ DEBUG: Scraper response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Scraper processing failed: {e}")
+                special_response = f"🔍 **Scraper Processing Error**\n\nError: {str(e)}"
         
         # 5. 🕌 Prayer Times command detection (FIFTH)
         elif detect_prayer_command(message_content):
-            logger.info("🕌 Processing prayer times request")
-            special_response = await process_prayer_command(message_content, user_id)
+            logger.info("🕌 DEBUG: Prayer times command detected - processing...")
+            try:
+                special_response = await process_prayer_command(message_content, user_id)
+                logger.info("✅ DEBUG: Prayer times response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Prayer times processing failed: {e}")
+                special_response = f"🕌 **Prayer Times Processing Error**\n\nError: {str(e)}"
         
         # 6. 🏥 Health Check command detection (SIXTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
-            logger.info("🏥 Processing health check request")
+            logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:
                 from ..core.health import get_health_status
                 health_data = await get_health_status()
@@ -203,143 +281,207 @@ Weather data powered by Tomorrow.io"""
 **Uptime:** {health_data.get('uptime', 'Unknown')}
 
 All systems operational and ready to assist!"""
+                logger.info("✅ DEBUG: Health check response generated successfully")
             except Exception as e:
+                logger.error(f"❌ DEBUG: Health check processing failed: {e}")
                 special_response = f"🏥 **Health Check Error**\n\nUnable to retrieve system health: {str(e)}"
         
         # 7. 🧠 Chat/AI function (SEVENTH - DEFAULT AI PROCESSING)
         if special_response:
             # Use the special response from one of the integrations
+            logger.info(f"✅ DEBUG: Using special integration response (length: {len(special_response)} chars)")
             final_response = special_response
-            model_used = "integration_response"
-            knowledge_sources = []
         else:
             # Regular AI processing with full integration context
-            logger.info("🧠 Processing regular AI chat request")
+            logger.info("🧠 DEBUG: Processing regular AI chat request...")
             
-            # Get conversation history
-            conversation_history, context_info = await memory_manager.get_context_for_ai(
-                thread_id, max_tokens=20000
-            )
-            
-            # Search knowledge base if requested
-            knowledge_sources = []
-            if chat_request.include_knowledge:
-                knowledge_results = await knowledge_engine.search_knowledge(
-                    query=message_content,
-                    personality_id=chat_request.personality_id,
-                    limit=5
+            try:
+                # Get conversation history
+                logger.info("📚 DEBUG: Getting conversation history...")
+                conversation_history, context_info = await memory_manager.get_context_for_ai(
+                    thread_id, max_tokens=20000
                 )
-                knowledge_sources = knowledge_results
-            
-            # Get RSS marketing context for writing assistance (integration #3)
-            rss_context = ""
-            if detect_rss_command(message_content) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
-                logger.info("📰 Adding RSS Learning context to AI response")
-                rss_context = await get_rss_marketing_context(message_content)
-            
-            # Build system prompt with personality
-            personality_prompt = personality_engine.get_personality_system_prompt(
-                chat_request.personality_id,
-                conversation_context=conversation_history
-            )
-            
-            # Create enhanced system prompt with context
-            system_parts = [
-                personality_prompt,
-                f"""Current DateTime Context: {datetime_context['full_datetime']}
-Today is {datetime_context['day_of_week']}, {datetime_context['month_name']} {datetime_context['current_date']}.
-Current time: {datetime_context['current_time_12h']} ({datetime_context['timezone']})
+                logger.info(f"✅ DEBUG: Conversation history retrieved: {context_info.get('total_messages', 0)} messages")
+                
+                # Search knowledge base if requested
+                if chat_request.include_knowledge:
+                    logger.info("🔍 DEBUG: Searching knowledge base...")
+                    try:
+                        knowledge_results = await knowledge_engine.search_knowledge(
+                            query=message_content,
+                            personality_id=chat_request.personality_id,
+                            limit=5
+                        )
+                        knowledge_sources = knowledge_results
+                        logger.info(f"✅ DEBUG: Knowledge search completed: {len(knowledge_sources)} sources found")
+                    except Exception as e:
+                        logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
+                        knowledge_sources = []
+                else:
+                    logger.info("⏭️ DEBUG: Skipping knowledge search (disabled)")
+                    knowledge_sources = []
+                
+                # Get RSS marketing context for writing assistance (integration #3)
+                rss_context = ""
+                if detect_rss_command(message_content) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
+                    logger.info("📰 DEBUG: Adding RSS Learning context to AI response...")
+                    try:
+                        rss_context = await get_rss_marketing_context(message_content)
+                        logger.info(f"✅ DEBUG: RSS context retrieved (length: {len(rss_context)} chars)")
+                    except Exception as e:
+                        logger.error(f"❌ DEBUG: RSS context failed: {e}")
+                        rss_context = ""
+                
+                # Build system prompt with personality
+                logger.info("🎭 DEBUG: Building personality system prompt...")
+                try:
+                    personality_prompt = personality_engine.get_personality_system_prompt(
+                        chat_request.personality_id,
+                        conversation_context=conversation_history
+                    )
+                    logger.info(f"✅ DEBUG: Personality prompt generated (length: {len(personality_prompt)} chars)")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: Personality prompt generation failed: {e}")
+                    personality_prompt = "You are a helpful AI assistant."
+                
+                # Create enhanced system prompt with context
+                system_parts = [
+                    personality_prompt,
+                    f"""Current DateTime Context: {datetime_context['full_datetime']}
+Today is {datetime_context.get('day_of_week', 'Unknown')}, {datetime_context.get('month_name', 'Unknown')} {datetime_context.get('current_date', 'Unknown')}.
+Current time: {datetime_context.get('current_time_12h', 'Unknown')} ({datetime_context.get('timezone', 'Unknown')})
 
 User Context: The user is asking questions on {datetime_context['full_datetime']}.
 When discussing time or dates, use the current information provided above.
 
 Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, and Health monitoring are available via chat commands."""
-            ]
-            
-            # Add RSS context if available
-            if rss_context:
-                system_parts.append(rss_context)
-            
-            # Add knowledge context
-            if knowledge_sources:
-                knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
-                for source in knowledge_sources:
-                    knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
-                system_parts.append(knowledge_context)
-            
-            # Build AI messages
-            ai_messages = [{
-                "role": "system",
-                "content": "\n\n".join(system_parts)
-            }]
-            
-            # Add conversation history
-            ai_messages.extend(conversation_history)
-            
-            # Add current message
-            ai_messages.append({
-                "role": "user",
-                "content": message_content
-            })
-            
-            # Get AI response
-            ai_response = await openrouter_client.chat_completion(
-                messages=ai_messages,
-                model="anthropic/claude-3.5-sonnet:beta",
-                max_tokens=4000,
-                temperature=0.7
-            )
-            
-            # Extract response content
-            if ai_response and 'choices' in ai_response:
-                final_response = ai_response['choices'][0]['message']['content']
-                model_used = ai_response.get('model', 'claude-3.5-sonnet')
-            else:
-                final_response = "I'm sorry, I encountered an error processing your message. Please try again."
+                ]
+                
+                # Add RSS context if available
+                if rss_context:
+                    system_parts.append(rss_context)
+                    logger.info("📰 DEBUG: RSS context added to system prompt")
+                
+                # Add knowledge context
+                if knowledge_sources:
+                    knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
+                    for source in knowledge_sources:
+                        knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
+                    system_parts.append(knowledge_context)
+                    logger.info(f"📚 DEBUG: Knowledge context added: {len(knowledge_sources)} sources")
+                
+                # Build AI messages
+                logger.info("💬 DEBUG: Building AI message array...")
+                ai_messages = [{
+                    "role": "system",
+                    "content": "\n\n".join(system_parts)
+                }]
+                
+                # Add conversation history
+                ai_messages.extend(conversation_history)
+                logger.info(f"✅ DEBUG: AI messages array built: {len(ai_messages)} total messages")
+                
+                # Add current message
+                ai_messages.append({
+                    "role": "user",
+                    "content": message_content
+                })
+                
+                # Get AI response
+                logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
+                try:
+                    ai_response = await openrouter_client.chat_completion(
+                        messages=ai_messages,
+                        model="anthropic/claude-3.5-sonnet:beta",
+                        max_tokens=4000,
+                        temperature=0.7
+                    )
+                    logger.info("✅ DEBUG: OpenRouter response received")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
+                    raise
+                
+                # Extract response content
+                if ai_response and 'choices' in ai_response:
+                    final_response = ai_response['choices'][0]['message']['content']
+                    model_used = ai_response.get('model', 'claude-3.5-sonnet')
+                    logger.info(f"✅ DEBUG: AI response extracted (length: {len(final_response)} chars)")
+                else:
+                    final_response = "I'm sorry, I encountered an error processing your message. Please try again."
+                    model_used = "error"
+                    logger.error("❌ DEBUG: Invalid AI response format")
+                    
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Regular AI processing failed: {e}")
+                final_response = f"I encountered an error during AI processing: {str(e)}"
                 model_used = "error"
+                # Set default context_info for error cases
+                context_info = {
+                    'total_messages': 1,
+                    'estimated_tokens': 0,
+                    'has_memory_context': False
+                }
         
+        # Calculate response time
         response_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
         
         # Store AI response
-        ai_message_id = await memory_manager.add_message(
-            thread_id=thread_id,
-            role="assistant",
-            content=final_response,
-            model_used=model_used,
-            response_time_ms=response_time_ms,
-            knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
-        )
+        logger.info("💾 DEBUG: Storing AI response...")
+        try:
+            ai_message_id = await memory_manager.add_message(
+                thread_id=thread_id,
+                role="assistant",
+                content=final_response,
+                model_used=model_used,
+                response_time_ms=response_time_ms,
+                knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
+            )
+            logger.info(f"✅ DEBUG: AI response stored: {ai_message_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to store AI response: {e}")
+            ai_message_id = str(uuid.uuid4())  # Fallback ID
         
         # Build response
-        logger.info(f"✅ Chat processed successfully: {response_time_ms}ms, model: {model_used}")
+        logger.info("📦 DEBUG: Building final response object...")
         
-        return ChatResponse(
-            response=final_response,
-            thread_id=thread_id,
-            message_id=ai_message_id,
-            personality_id=chat_request.personality_id,
-            model_used=model_used,
-            response_time_ms=response_time_ms,
-            knowledge_sources=[
-                {
-                    'id': source.get('id', ''),
-                    'title': source.get('title', ''),
-                    'snippet': source.get('content', '')[:200],
-                    'score': source.get('score', 0.0)
+        try:
+            chat_response = ChatResponse(
+                response=final_response,
+                thread_id=thread_id,
+                message_id=ai_message_id,
+                personality_id=chat_request.personality_id,
+                model_used=model_used,
+                response_time_ms=response_time_ms,
+                knowledge_sources=[
+                    {
+                        'id': source.get('id', ''),
+                        'title': source.get('title', ''),
+                        'snippet': source.get('content', '')[:200],
+                        'score': source.get('score', 0.0)
+                    }
+                    for source in knowledge_sources
+                ],
+                conversation_context={
+                    'thread_id': thread_id,
+                    'message_count': context_info.get('total_messages', 0) + 1,
+                    'has_knowledge': len(knowledge_sources) > 0,
+                    'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->health->ai'
                 }
-                for source in knowledge_sources
-            ],
-            conversation_context={
-                'thread_id': thread_id,
-                'message_count': context_info.get('total_messages', 0) + 1,
-                'has_knowledge': len(knowledge_sources) > 0,
-                'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->health->ai'
-            }
-        )
+            )
+            
+            logger.info(f"✅ CHAT SUCCESS: Response generated in {response_time_ms}ms")
+            logger.info(f"📊 DEBUG: Final stats - model: {model_used}, knowledge: {len(knowledge_sources)}, special: {bool(special_response)}")
+            
+            return chat_response
+            
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to build response object: {e}")
+            raise
         
     except Exception as e:
-        logger.error(f"❌ Chat processing failed: {e}")
-        logger.error(f"Exception details:", exc_info=True)
+        logger.error(f"❌ CHAT FAILED: {str(e)}")
+        logger.error(f"💥 DEBUG: Exception details:", exc_info=True)
         
         # Store error message
         error_message = f"Sorry, I encountered an error processing your message. Please try again.\n\nError details: {str(e)}"
@@ -354,8 +496,9 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 role="assistant",
                 content=error_message
             )
-        except:
-            pass  # Don't fail if we can't store the error
+            logger.info("✅ DEBUG: Error message stored successfully")
+        except Exception as store_error:
+            logger.error(f"❌ DEBUG: Failed to store error message: {store_error}")
         
         return ChatResponse(
             response=error_message,
@@ -615,9 +758,9 @@ async def shutdown_ai_brain():
 def get_integration_info():
     """Get information about the AI brain router integration"""
     return {
-        "name": "AI Brain Router with Full Integration Support",
-        "version": "2.0.0",
-        "description": "Complete AI chat with ordered integration processing",
+        "name": "AI Brain Router with Full Integration Support + DEBUG",
+        "version": "2.0.1",
+        "description": "Complete AI chat with ordered integration processing and extensive debugging",
         "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 🏥 Health → 🧠 Chat/AI",
         "components": [
             "Main Chat Endpoint (/ai/chat)",
@@ -652,7 +795,16 @@ def get_integration_info():
             "🔍 Marketing competitive analysis",
             "🕌 Islamic prayer times",
             "🏥 System health monitoring",
-            "🧠 Advanced AI chat processing"
+            "🧠 Advanced AI chat processing",
+            "🔧 Extensive debug logging"
+        ],
+        "debug_features": [
+            "Step-by-step processing logs",
+            "Integration command detection tracing",
+            "Error context preservation",
+            "Performance timing measurements",
+            "Component loading verification",
+            "Response generation tracking"
         ],
         "default_user_id": DEFAULT_USER_ID
     }
@@ -671,6 +823,7 @@ def check_module_health():
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
         "chat_endpoint_active": True,
         "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
+        "debug_features_active": True,
         "default_user_id": DEFAULT_USER_ID,
-        "note": "Complete AI router with all integrations properly ordered"
+        "note": "Complete AI router with all integrations properly ordered and extensive debugging"
     }
