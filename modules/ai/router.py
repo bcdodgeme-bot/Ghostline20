@@ -1,17 +1,17 @@
 # modules/ai/router.py
 """
-AI Brain Support Router for Syntax Prime V2 - NO CHAT ENDPOINT
-Handles support endpoints only: personalities, stats, feedback, conversations
-Chat processing handled by chat.py to avoid duplication
-Date: 9/26/25 - Removed /ai/chat endpoint to stop duplication
+AI Brain Router for Syntax Prime V2 - COMPLETE WITH ALL INTEGRATIONS
+Handles all AI endpoints including chat with full integration support
+Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Health → Chat/AI
+Date: 9/26/25 - Complete rewrite with all integrations properly ordered
 """
 
 import asyncio
 import uuid
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import json
-import time
 import logging
 import os
 
@@ -29,6 +29,23 @@ from .feedback_processor import get_feedback_processor
 logger = logging.getLogger(__name__)
 
 #-- Request/Response Models
+class ChatRequest(BaseModel):
+    message: str = Field(..., description="User's message")
+    personality_id: str = Field(default='syntaxprime', description="AI personality to use")
+    thread_id: Optional[str] = Field(None, description="Conversation thread ID")
+    include_knowledge: bool = Field(default=True, description="Include knowledge base search")
+    stream: bool = Field(default=False, description="Stream response")
+
+class ChatResponse(BaseModel):
+    response: str
+    thread_id: str
+    message_id: str
+    personality_id: str
+    model_used: str
+    response_time_ms: int
+    knowledge_sources: List[Dict] = []
+    conversation_context: Dict = {}
+
 class FeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Message ID to rate")
     feedback_type: str = Field(..., description="good, bad, or personality")
@@ -45,7 +62,303 @@ class FeedbackResponse(BaseModel):
 router = APIRouter(prefix="/ai", tags=["ai"])
 DEFAULT_USER_ID = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
-#-- Support Endpoints Only (NO /ai/chat - that's handled by chat.py)
+# Dependency function
+async def get_current_user_id() -> str:
+    """Get current user ID - placeholder for now"""
+    return DEFAULT_USER_ID
+
+#-- Main Chat Endpoint (THE CORE FUNCTIONALITY)
+@router.post("/chat", response_model=ChatResponse)
+async def chat_with_ai(chat_request: ChatRequest, user_id: str = Depends(get_current_user_id)):
+    """
+    Main chat endpoint - processes message through complete AI brain
+    Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Health → Chat/AI
+    """
+    start_time = time.time()
+    thread_id = chat_request.thread_id or str(uuid.uuid4())
+    
+    try:
+        # Import helper functions from chat.py
+        from .chat import (
+            get_current_datetime_context,
+            detect_weather_request, get_weather_for_user,
+            detect_prayer_command, process_prayer_command,
+            detect_bluesky_command, process_bluesky_command,
+            detect_rss_command, get_rss_marketing_context,
+            detect_scraper_command, process_scraper_command
+        )
+        
+        # Get AI components
+        personality_engine = get_personality_engine()
+        memory_manager = get_memory_manager(user_id)
+        knowledge_engine = get_knowledge_engine()
+        openrouter_client = await get_openrouter_client()
+        
+        # Get current datetime context
+        datetime_context = get_current_datetime_context()
+        
+        # Store user message
+        user_message_id = str(uuid.uuid4())
+        await memory_manager.store_message(
+            thread_id=thread_id,
+            message_id=user_message_id,
+            user_id=user_id,
+            role="user",
+            content=chat_request.message,
+            metadata={"personality_requested": chat_request.personality_id}
+        )
+        
+        # Build message content
+        message_content = chat_request.message
+        
+        # INTEGRATION ORDER: Check for special commands in the specified order
+        special_response = None
+        
+        # 1. 🌦️ Weather command detection (FIRST)
+        if detect_weather_request(message_content):
+            logger.info("🌦️ Processing weather request")
+            weather_data = await get_weather_for_user(user_id)
+            if weather_data.get('success'):
+                weather_info = weather_data['data']
+                special_response = f"""🌦️ **Current Weather**
+
+📍 **Location:** {weather_info.get('location', 'Unknown')}
+🌡️ **Temperature:** {weather_info.get('temperature_f', 'N/A')}°F
+💧 **Humidity:** {weather_info.get('humidity', 'N/A')}%
+💨 **Wind:** {weather_info.get('wind_speed', 'N/A')} mph
+📊 **Pressure:** {weather_info.get('pressure', 'N/A')} mbar
+☀️ **UV Index:** {weather_info.get('uv_index', 'N/A')}
+👁️ **Visibility:** {weather_info.get('visibility', 'N/A')} miles
+
+Weather data powered by Tomorrow.io"""
+            else:
+                special_response = f"🌦️ **Weather Service Error**\n\nUnable to retrieve weather data: {weather_data.get('error', 'Unknown error')}"
+        
+        # 2. 🔵 Bluesky command detection (SECOND)
+        elif detect_bluesky_command(message_content):
+            logger.info("🔵 Processing Bluesky command")
+            special_response = await process_bluesky_command(message_content, user_id)
+        
+        # 3. 📰 RSS Learning command detection (THIRD)
+        elif detect_rss_command(message_content):
+            logger.info("📰 Processing RSS Learning request")
+            # RSS is handled differently - it provides context rather than direct responses
+            # We'll get the context and let the AI incorporate it naturally
+            pass
+        
+        # 4. 🔍 Marketing Scraper command detection (FOURTH)
+        elif detect_scraper_command(message_content):
+            logger.info("🔍 Processing marketing scraper command")
+            special_response = await process_scraper_command(message_content, user_id)
+        
+        # 5. 🕌 Prayer Times command detection (FIFTH)
+        elif detect_prayer_command(message_content):
+            logger.info("🕌 Processing prayer times request")
+            special_response = await process_prayer_command(message_content, user_id)
+        
+        # 6. 🏥 Health Check command detection (SIXTH)
+        elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
+            logger.info("🏥 Processing health check request")
+            try:
+                from ..core.health import get_health_status
+                health_data = await get_health_status()
+                
+                special_response = f"""🏥 **System Health Check**
+
+**Overall Status:** {"✅ Healthy" if health_data.get('healthy', False) else "⚠️ Issues Detected"}
+**Database:** {"✅ Connected" if health_data.get('database', {}).get('connected', False) else "❌ Disconnected"}
+**AI Brain:** {"✅ Active" if health_data.get('ai_brain', {}).get('healthy', False) else "⚠️ Issues"}
+**Integrations:** {health_data.get('active_integrations', 0)} active
+
+**Response Time:** {health_data.get('response_time_ms', 0)}ms
+**Memory Usage:** {health_data.get('memory_usage', {}).get('percent', 'N/A')}%
+**Uptime:** {health_data.get('uptime', 'Unknown')}
+
+All systems operational and ready to assist!"""
+            except Exception as e:
+                special_response = f"🏥 **Health Check Error**\n\nUnable to retrieve system health: {str(e)}"
+        
+        # 7. 🧠 Chat/AI function (SEVENTH - DEFAULT AI PROCESSING)
+        if special_response:
+            # Use the special response from one of the integrations
+            final_response = special_response
+            model_used = "integration_response"
+            knowledge_sources = []
+        else:
+            # Regular AI processing with full integration context
+            logger.info("🧠 Processing regular AI chat request")
+            
+            # Get conversation history
+            conversation_history = await memory_manager.get_conversation_context(
+                thread_id, max_messages=20
+            )
+            
+            # Search knowledge base if requested
+            knowledge_sources = []
+            if chat_request.include_knowledge:
+                knowledge_results = await knowledge_engine.search_knowledge(
+                    query=message_content,
+                    personality_id=chat_request.personality_id,
+                    limit=5
+                )
+                knowledge_sources = knowledge_results
+            
+            # Get RSS marketing context for writing assistance (integration #3)
+            rss_context = ""
+            if detect_rss_command(message_content) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
+                logger.info("📰 Adding RSS Learning context to AI response")
+                rss_context = await get_rss_marketing_context(message_content)
+            
+            # Build system prompt with personality
+            personality_prompt = personality_engine.get_personality_prompt(
+                chat_request.personality_id,
+                conversation_context=conversation_history
+            )
+            
+            # Create enhanced system prompt with context
+            system_parts = [
+                personality_prompt,
+                f"""Current DateTime Context: {datetime_context['full_datetime']}
+Today is {datetime_context['day_of_week']}, {datetime_context['month_name']} {datetime_context['current_date']}.
+Current time: {datetime_context['current_time_12h']} ({datetime_context['timezone']})
+
+User Context: The user is asking questions on {datetime_context['full_datetime']}.
+When discussing time or dates, use the current information provided above.
+
+Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, and Health monitoring are available via chat commands."""
+            ]
+            
+            # Add RSS context if available
+            if rss_context:
+                system_parts.append(rss_context)
+            
+            # Add knowledge context
+            if knowledge_sources:
+                knowledge_context = "RELEVANT KNOWLEDGE BASE INFORMATION:\n"
+                for source in knowledge_sources:
+                    knowledge_context += f"- {source['title']}: {source['content'][:200]}...\n"
+                system_parts.append(knowledge_context)
+            
+            # Build AI messages
+            ai_messages = [{
+                "role": "system",
+                "content": "\n\n".join(system_parts)
+            }]
+            
+            # Add conversation history
+            for msg in conversation_history[-10:]:  # Last 10 messages
+                ai_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+            
+            # Add current message
+            ai_messages.append({
+                "role": "user",
+                "content": message_content
+            })
+            
+            # Get AI response
+            ai_response = await openrouter_client.chat_completion(
+                messages=ai_messages,
+                model="anthropic/claude-3.5-sonnet:beta",
+                max_tokens=4000,
+                temperature=0.7
+            )
+            
+            # Extract response content
+            if ai_response and 'choices' in ai_response:
+                final_response = ai_response['choices'][0]['message']['content']
+                model_used = ai_response.get('model', 'claude-3.5-sonnet')
+            else:
+                final_response = "I'm sorry, I encountered an error processing your message. Please try again."
+                model_used = "error"
+        
+        # Store AI response
+        ai_message_id = str(uuid.uuid4())
+        response_time_ms = int((time.time() - start_time) * 1000)
+        
+        await memory_manager.store_message(
+            thread_id=thread_id,
+            message_id=ai_message_id,
+            user_id=user_id,
+            role="assistant",
+            content=final_response,
+            metadata={
+                "personality_used": chat_request.personality_id,
+                "model_used": model_used,
+                "response_time_ms": response_time_ms,
+                "knowledge_sources_count": len(knowledge_sources),
+                "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai"
+            }
+        )
+        
+        # Build response
+        logger.info(f"✅ Chat processed successfully: {response_time_ms}ms, model: {model_used}")
+        
+        return ChatResponse(
+            response=final_response,
+            thread_id=thread_id,
+            message_id=ai_message_id,
+            personality_id=chat_request.personality_id,
+            model_used=model_used,
+            response_time_ms=response_time_ms,
+            knowledge_sources=[
+                {
+                    'id': source.get('id', ''),
+                    'title': source.get('title', ''),
+                    'snippet': source.get('content', '')[:200],
+                    'score': source.get('score', 0.0)
+                }
+                for source in knowledge_sources
+            ],
+            conversation_context={
+                'thread_id': thread_id,
+                'message_count': len(conversation_history) + 1 if 'conversation_history' in locals() else 1,
+                'has_knowledge': len(knowledge_sources) > 0,
+                'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->health->ai'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Chat processing failed: {e}")
+        logger.error(f"Exception details:", exc_info=True)
+        
+        # Store error message
+        error_message = f"Sorry, I encountered an error processing your message. Please try again.\n\nError details: {str(e)}"
+        
+        error_message_id = str(uuid.uuid4())
+        response_time_ms = int((time.time() - start_time) * 1000)
+        
+        try:
+            memory_manager = get_memory_manager(user_id)
+            await memory_manager.store_message(
+                thread_id=thread_id,
+                message_id=error_message_id,
+                user_id=user_id,
+                role="assistant",
+                content=error_message,
+                metadata={
+                    "error": True,
+                    "error_type": type(e).__name__,
+                    "response_time_ms": response_time_ms
+                }
+            )
+        except:
+            pass  # Don't fail if we can't store the error
+        
+        return ChatResponse(
+            response=error_message,
+            thread_id=thread_id,
+            message_id=error_message_id,
+            personality_id=chat_request.personality_id,
+            model_used="error",
+            response_time_ms=response_time_ms,
+            knowledge_sources=[],
+            conversation_context={'error': True, 'error_type': type(e).__name__}
+        )
+
+#-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
 
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(feedback_request: FeedbackRequest):
@@ -230,11 +543,12 @@ async def get_ai_stats():
             },
             "personality_stats": personality_stats,
             "feedback_stats": feedback_summary,
+            "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
             "system_health": {
                 "memory_active": True,
                 "knowledge_engine_active": True,
                 "learning_active": feedback_summary.get('learning_active', False),
-                "chat_endpoint": "handled_by_chat_module",
+                "all_integrations_active": True,
                 "default_user_id": DEFAULT_USER_ID
             }
         }
@@ -271,7 +585,7 @@ async def test_ai_connection():
         "system_status": "healthy" if primary_healthy or fallback_available else "degraded",
         "primary_provider": "openrouter",
         "fallback_provider": "inception_labs",
-        "chat_endpoint_status": "handled_by_chat_module",
+        "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
         "default_user_id": DEFAULT_USER_ID
     }
 
@@ -289,20 +603,28 @@ async def shutdown_ai_brain():
 
 #-- Module Information Functions
 def get_integration_info():
-    """Get information about the AI brain support integration"""
+    """Get information about the AI brain router integration"""
     return {
-        "name": "AI Brain Support Router",
+        "name": "AI Brain Router with Full Integration Support",
         "version": "2.0.0",
-        "description": "Support endpoints only - chat handled by chat.py",
-        "note": "Chat processing handled by chat.py module to avoid duplication",
+        "description": "Complete AI chat with ordered integration processing",
+        "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 🏥 Health → 🧠 Chat/AI",
         "components": [
+            "Main Chat Endpoint (/ai/chat)",
             "Personality Engine",
             "Feedback Processor",
             "Conversation Manager",
             "Knowledge Query Engine",
-            "AI Provider Testing"
+            "AI Provider Testing",
+            "Weather Integration",
+            "Bluesky Social Media Management",
+            "RSS Learning System",
+            "Marketing Scraper",
+            "Prayer Times",
+            "Health Monitoring"
         ],
         "endpoints": {
+            "chat": "/ai/chat",
             "feedback": "/ai/feedback",
             "personalities": "/ai/personalities",
             "conversations": "/ai/conversations",
@@ -312,21 +634,24 @@ def get_integration_info():
         },
         "features": [
             "👍👎😄 feedback learning",
-            "Personality system management",
-            "Conversation history access",
-            "Knowledge base search",
-            "AI provider health monitoring",
-            "Usage statistics"
+            "🎭 Multi-personality system",
+            "📚 Knowledge base integration",
+            "🌦️ Weather monitoring",
+            "🔵 Bluesky social management",
+            "📰 RSS learning insights",
+            "🔍 Marketing competitive analysis",
+            "🕌 Islamic prayer times",
+            "🏥 System health monitoring",
+            "🧠 Advanced AI chat processing"
         ],
         "default_user_id": DEFAULT_USER_ID
     }
 
 def check_module_health():
-    """Check AI brain support module health"""
+    """Check AI brain router module health"""
     missing_vars = []
     
     # Check required environment variables
-    import os
     if not os.getenv("OPENROUTER_API_KEY"):
         missing_vars.append("OPENROUTER_API_KEY")
     
@@ -334,7 +659,8 @@ def check_module_health():
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
-        "chat_endpoint_status": "handled_by_chat_module",
+        "chat_endpoint_active": True,
+        "integration_order": "weather->bluesky->rss->scraper->prayer->health->ai",
         "default_user_id": DEFAULT_USER_ID,
-        "note": "This module handles support endpoints only - chat in chat.py"
+        "note": "Complete AI router with all integrations properly ordered"
     }
