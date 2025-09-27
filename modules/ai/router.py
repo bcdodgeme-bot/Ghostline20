@@ -238,7 +238,7 @@ All systems operational and ready to assist!"""
                 rss_context = await get_rss_marketing_context(message_content)
             
             # Build system prompt with personality
-            personality_prompt = personality_engine.get_personality_prompt(
+            personality_prompt = personality_engine.get_personality_system_prompt(
                 chat_request.personality_id,
                 conversation_context=conversation_history
             )
