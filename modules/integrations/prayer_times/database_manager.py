@@ -88,9 +88,9 @@ class PrayerDatabaseManager:
             logger.info(f"✅ Using cached prayer times for {today} at {location_name}")
             return cached_times
     
-    # Not cached - fetch fresh data with detected location
-    logger.info(f"🔄 No cached prayer times for {today} at {location_name}, fetching from AlAdhan API...")
-    return await self.fetch_and_cache_prayer_times(today, location_name, latitude, longitude)
+        # Not cached - fetch fresh data with detected location
+        logger.info(f"🔄 No cached prayer times for {today} at {location_name}, fetching from AlAdhan API...")
+        return await self.fetch_and_cache_prayer_times(today, location_name, latitude, longitude)
     
     async def fetch_and_cache_prayer_times(self,
                                      target_date: date = None,
