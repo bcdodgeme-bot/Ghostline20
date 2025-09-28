@@ -1099,7 +1099,7 @@ async def process_trends_command(message: str, user_id: str) -> str:
             return await process_training_feedback(message, user_id)
         
         elif cmd_type == 'view_opportunities':
-            detector = OpportunityDetector()
+            detector = OpportunityDetector(database_url)
             opportunities = await detector.detect_opportunities(user_id=user_id, limit=5)
             
             if not opportunities:
@@ -1127,7 +1127,7 @@ No trending opportunities found at this time.
         
         elif cmd_type == 'scan_trends':
             # Force a new scan
-            detector = OpportunityDetector()
+            detector = OpportunityDetector(database_url)
             scan_result = await detector.force_scan_update()
             
             return f"""📝 **Trends Scan Complete**
