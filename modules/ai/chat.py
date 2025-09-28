@@ -1044,10 +1044,7 @@ async def check_for_trend_opportunities(user_id: str) -> Optional[str]:
         detector = OpportunityDetector(database_url)
         
         # Get current trending opportunities
-        opportunities = await detector.detect_opportunities(
-            user_id=user_id,
-            limit=3
-        )
+        opportunities = await detector.detect_current_opportunities(hours_lookback=24)
         
         if not opportunities:
             return None
@@ -1100,7 +1097,7 @@ async def process_trends_command(message: str, user_id: str) -> str:
         
         elif cmd_type == 'view_opportunities':
             detector = OpportunityDetector(database_url)
-            opportunities = await detector.detect_opportunities(user_id=user_id, limit=5)
+            opportunities = await detector.detect_current_opportunities(hours_lookback=24)
             
             if not opportunities:
                 return """📈 **Google Trends Opportunities**
