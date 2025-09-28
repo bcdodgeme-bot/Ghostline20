@@ -1112,10 +1112,10 @@ No trending opportunities found at this time.
             response_parts = ["📈 **Current Trending Opportunities**\n"]
             
             for i, opp in enumerate(opportunities, 1):
-                response_parts.append(f"""**{i}. {opp.get('keyword', 'Unknown')}**
-📊 Trend Score: {opp.get('trend_score', 0):.1f}/10
-💎 Relevance: {opp.get('confidence_score', 0):.0%}
-💡 Why: {opp.get('opportunity_reason', 'High potential')}
+    response_parts.append(f"""**{i}. {opp.keyword}**
+📊 Trend Score: {opp.trend_score}/10
+💎 Relevance: {opp.opportunity_score:.0%}
+💡 Why: {opp.reasoning}
 
 """)
             
