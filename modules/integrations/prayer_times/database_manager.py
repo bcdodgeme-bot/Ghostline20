@@ -12,6 +12,7 @@ from datetime import datetime, date, time, timedelta
 import json
 import sys
 import os
+import pytz
 
 # Handle imports for both direct execution and module import
 if __name__ == "__main__":
@@ -398,8 +399,10 @@ class PrayerDatabaseManager:
         if not prayer_data:
             return None
         
-        now = datetime.now().time()
-        today = date.today()
+        eastern = pytz.timezone('America/New_York')
+        now_full = datetime.now(eastern)
+        now = now_full.time()
+        today = now_full.date()
         prayer_times = prayer_data["prayer_times"]
         
         # Prayer order throughout the day
@@ -411,7 +414,7 @@ class PrayerDatabaseManager:
             
             if now < prayer_time:
                 # Calculate time until prayer
-                now_dt = datetime.combine(today, now)
+                now_dt = now_full
                 prayer_dt = datetime.combine(today, prayer_time)
                 time_until = prayer_dt - now_dt
                 

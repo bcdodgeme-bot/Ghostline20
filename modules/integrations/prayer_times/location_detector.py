@@ -173,7 +173,7 @@ class IPLocationDetector:
             lng = location['longitude']
             
             # Basic validation - check if coordinates are in valid range
-            if not (-90 <= lat <= 90) or not (-180 lng <= 180):
+            if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
                 return False
                 
             # Check if we have at least city name
