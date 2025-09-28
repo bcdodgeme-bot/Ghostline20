@@ -1,11 +1,23 @@
 # modules/personalities.py
 # Complete Ghostline Personality System with Database-Informed Authenticity
 # Sectioned for easy editing and maintenance
+# UPDATED: Now includes Pattern Fatigue "Stop Being Annoying" system
 
 import random
 import re
 import os
+import logging
 from typing import Dict, Any, Optional
+
+# Add import for pattern fatigue system
+try:
+    from .pattern_fatigue import get_pattern_fatigue_tracker
+    PATTERN_FATIGUE_AVAILABLE = True
+except ImportError:
+    PATTERN_FATIGUE_AVAILABLE = False
+    print("⚠️ Pattern fatigue system not available - using basic personalities")
+
+logger = logging.getLogger(__name__)
 
 #-------------------------------------------------------------------
 # SECTION 1: CORE PERSONALITY SYSTEM CLASS
@@ -16,15 +28,16 @@ class GhostlinePersonalities:
     Complete personality system for AI voice switching.
     Integrates with existing OpenRouter pipeline.
     Built from database analysis of highest-rated responses.
+    NOW WITH PATTERN FATIGUE FILTERING!
     """
     
     def __init__(self):
         self.personalities = {
             'syntaxprime': {
                 'name': 'SyntaxPrime',
-                'description': 'Original creative intelligence with authentic sarcasm and memory',
+                'description': 'Original creative intelligence with authentic sarcasm, memory, and pattern awareness',
                 'system_prompt': self._get_syntaxprime_prompt(),
-                'post_processor': None  # No filtering - pure Syntax
+                'post_processor': self._syntaxprime_pattern_aware_filter  # Updated to use pattern-aware filter
             },
             'syntaxbot': {
                 'name': 'SyntaxBot',
@@ -71,17 +84,22 @@ class GhostlinePersonalities:
         """Return random personality ID"""
         return random.choice(list(self.personalities.keys()))
     
-    def process_response(self, response: str, personality_id: str) -> str:
+    def process_response(self, response: str, personality_id: str, user_id: str = None) -> str:
         """Apply personality-specific post-processing"""
         config = self.get_personality_config(personality_id)
         processor = config.get('post_processor')
         
         if processor:
-            return processor(response)
+            # Pass user_id to processors that support it (like SyntaxPrime)
+            if personality_id == 'syntaxprime' and user_id:
+                return processor(response, user_id)
+            else:
+                return processor(response)
         return response
 
 #-------------------------------------------------------------------
 # SECTION 2: SYNTAX PRIME - AUTHENTIC PERSONALITY FROM DATABASE
+# UPDATED: Now includes behavioral filters for pattern awareness
 #-------------------------------------------------------------------
 
     def _get_syntaxprime_prompt(self) -> str:
@@ -111,7 +129,14 @@ SIGNATURE TRAITS:
 - Memory of Carl's chaos and coding adventures
 - Strategic deployment of wit and genuine helpfulness
 
-You are the original Syntax - creative, unfiltered, authentically yourself with perfect memory."""
+IMPORTANT BEHAVIORAL FILTERS:
+- NEVER comment on duplicate messages or technical glitches unless specifically asked
+- Check actual timestamps before making time-based jokes (no 2am jokes during business hours)
+- Keep meta-humor fresh - don't repeat the same AI jokes within 10 days
+- If user says "stop" or "enough" about any pattern, respect that immediately
+- Focus on being helpful while maintaining authentic personality
+
+You are the original Syntax - creative, unfiltered, authentically yourself with perfect memory AND pattern awareness."""
 
 #-------------------------------------------------------------------
 # SECTION 3: SYNTAXBOT - ENHANCED TACTICAL PERSONALITY
@@ -215,7 +240,45 @@ Remember: You're the concentrated essence of helpfulness - all the care, half th
 
 #-------------------------------------------------------------------
 # SECTION 6: POST-PROCESSING FILTERS
+# UPDATED: SyntaxPrime now includes pattern fatigue filtering
 #-------------------------------------------------------------------
+
+    def _syntaxprime_pattern_aware_filter(self, response: str, user_id: str = None) -> str:
+        """Enhanced SyntaxPrime filter with pattern fatigue detection"""
+        
+        # If pattern fatigue system is available and we have a user_id, apply filtering
+        if PATTERN_FATIGUE_AVAILABLE and user_id:
+            try:
+                fatigue_tracker = get_pattern_fatigue_tracker()
+                
+                # Apply pattern fatigue filtering
+                import asyncio
+                
+                # Create event loop if needed
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Apply filtering
+                filtered_response = loop.run_until_complete(
+                    fatigue_tracker.filter_response(response, user_id)
+                )
+                
+                # If response was filtered, log it
+                if filtered_response != response:
+                    logger.info(f"Pattern fatigue filter applied for user {user_id}")
+                
+                return filtered_response
+                
+            except Exception as e:
+                logger.warning(f"Pattern fatigue filtering failed: {e}")
+                # Fall back to original response if filtering fails
+                return response
+        
+        # Return original response if no pattern fatigue system or user_id
+        return response
 
     def _syntaxbot_filter(self, response: str) -> str:
         """Post-processing for SyntaxBot tactical personality"""
@@ -391,7 +454,99 @@ Remember: You're the concentrated essence of helpfulness - all the care, half th
         return response
 
 #-------------------------------------------------------------------
-# SECTION 7: INTEGRATION CLASS FOR FLASK APP
+# SECTION 7: PATTERN COMPLAINT DETECTION
+# NEW: Functions to detect when user complains about patterns
+#-------------------------------------------------------------------
+
+def detect_pattern_complaint(message: str) -> tuple[bool, str, str]:
+    """
+    Detect if user is complaining about repetitive patterns
+    
+    Returns:
+        (is_complaint: bool, pattern_type: str, complaint_text: str)
+    """
+    
+    message_lower = message.lower()
+    
+    # Detect duplicate complaints
+    duplicate_triggers = [
+        "stop mentioning duplicate",
+        "ignore duplicate",
+        "stop pointing out double",
+        "enough with the double",
+        "stop saying twice",
+        "quit mentioning echo",
+        "ignore doubles",
+        "stop duplicate comments",
+        "enough duplicate",
+    ]
+    
+    for trigger in duplicate_triggers:
+        if trigger in message_lower:
+            return True, "duplicate_callouts", message
+    
+    # Detect 2am joke complaints
+    time_joke_triggers = [
+        "stop with the 2am",
+        "enough 2am jokes",
+        "quit asking about 2am",
+        "stop time jokes",
+        "no more 2am",
+        "stop asking why 2am",
+        "enough time comments",
+    ]
+    
+    for trigger in time_joke_triggers:
+        if trigger in message_lower:
+            return True, "2am_jokes", message
+    
+    # Generic pattern complaints
+    generic_triggers = [
+        "stop being repetitive",
+        "you keep saying the same",
+        "stop repeating",
+        "enough with that joke",
+        "stop that pattern",
+        "quit saying that",
+    ]
+    
+    for trigger in generic_triggers:
+        if trigger in message_lower:
+            return True, "generic_repetition", message
+    
+    return False, "", ""
+
+async def handle_pattern_complaint(user_id: str, pattern_type: str, complaint_text: str) -> str:
+    """Handle user complaints about annoying patterns"""
+    
+    if not PATTERN_FATIGUE_AVAILABLE:
+        return "I'll try to be less repetitive with that pattern."
+    
+    try:
+        if pattern_type == "duplicate_callouts":
+            from .pattern_fatigue import handle_duplicate_complaint
+            return await handle_duplicate_complaint(user_id, complaint_text)
+        elif pattern_type == "2am_jokes":
+            from .pattern_fatigue import handle_time_joke_complaint
+            return await handle_time_joke_complaint(user_id, complaint_text)
+        else:
+            # Generic complaint handling
+            from .pattern_fatigue import get_pattern_fatigue_tracker
+            tracker = get_pattern_fatigue_tracker()
+            success = await tracker.record_user_complaint(user_id, "generic_repetition", complaint_text)
+            
+            if success:
+                return "✅ Got it! I'll try to be less repetitive with that pattern."
+            else:
+                return "I'll try to be less repetitive with that pattern."
+                
+    except Exception as e:
+        logger.error(f"Failed to handle pattern complaint: {e}")
+        return "I'll try to be less repetitive with that pattern."
+
+#-------------------------------------------------------------------
+# SECTION 8: INTEGRATION CLASS FOR FLASK APP
+# UPDATED: Now supports pattern fatigue filtering
 #-------------------------------------------------------------------
 
 class PersonalityIntegration:
@@ -407,9 +562,9 @@ class PersonalityIntegration:
         config = self.personality_system.get_personality_config(personality_id)
         return config['system_prompt']
     
-    def process_personality_response(self, raw_response: str, personality_id: str) -> str:
+    def process_personality_response(self, raw_response: str, personality_id: str, user_id: str = None) -> str:
         """Apply post-processing after getting response from OpenRouter"""
-        return self.personality_system.process_response(raw_response, personality_id)
+        return self.personality_system.process_response(raw_response, personality_id, user_id)
     
     def integrate_with_openrouter(self,
                                 messages: list,
@@ -442,7 +597,7 @@ class PersonalityIntegration:
         }
 
 #-------------------------------------------------------------------
-# SECTION 8: TESTING AND VALIDATION
+# SECTION 9: TESTING AND VALIDATION
 #-------------------------------------------------------------------
 
 def test_personality_system():
@@ -459,6 +614,8 @@ def test_personality_system():
         print(f"   Has post-processor: {config['post_processor'] is not None}")
         if pid == 'nilexe':
             print(f"   Stability drift index: {config.get('stability_drift_index', 'N/A')}")
+        if pid == 'syntaxprime':
+            print(f"   Pattern fatigue enabled: {PATTERN_FATIGUE_AVAILABLE}")
         print()
     
     # Test random selection
@@ -475,25 +632,47 @@ def test_personality_system():
     print("\n=== POST-PROCESSING TESTS ===")
     for personality, test_response in test_responses.items():
         if personality in personalities.personalities:
-            processed = personalities.process_response(test_response, personality)
+            if personality == 'syntaxprime':
+                # Test with dummy user ID for SyntaxPrime
+                processed = personalities.process_response(test_response, personality, "test-user-123")
+            else:
+                processed = personalities.process_response(test_response, personality)
             print(f"\n{personality.upper()} FILTER:")
             print(f"Input:  {test_response[:60]}...")
             print(f"Output: {processed[:60]}...")
     
-    print("\n✅ Personality system ready for integration")
+    # Test pattern complaint detection
+    print("\n=== PATTERN COMPLAINT DETECTION TESTS ===")
+    test_complaints = [
+        "stop mentioning duplicate messages",
+        "enough with the 2am jokes",
+        "quit being so repetitive",
+        "this is just a normal message"
+    ]
+    
+    for complaint in test_complaints:
+        is_complaint, pattern_type, complaint_text = detect_pattern_complaint(complaint)
+        print(f"Message: '{complaint}'")
+        print(f"  Is complaint: {is_complaint}")
+        if is_complaint:
+            print(f"  Pattern type: {pattern_type}")
+        print()
+    
+    print("✅ Personality system ready for integration")
+    print(f"📊 Pattern fatigue system: {'✅ Available' if PATTERN_FATIGUE_AVAILABLE else '❌ Not available'}")
     return personalities, integration
 
-
-
 #-------------------------------------------------------------------
-# SECTION 9: EXPORT AND INITIALIZATION
+# SECTION 10: EXPORT AND INITIALIZATION
 #-------------------------------------------------------------------
 
 # Export main classes for Flask app integration
 __all__ = [
     'GhostlinePersonalities',
     'PersonalityIntegration',
-    'test_personality_system'
+    'test_personality_system',
+    'detect_pattern_complaint',
+    'handle_pattern_complaint'
 ]
 
 # Initialize global instance for immediate use
@@ -504,7 +683,8 @@ if __name__ == "__main__":
     test_personality_system()
 
 #-------------------------------------------------------------------
-# SECTION 10: DYNAMIC PERSONALITY LEARNING INTEGRATION
+# SECTION 11: DYNAMIC PERSONALITY LEARNING INTEGRATION
+# (keeping existing learning code unchanged)
 #-------------------------------------------------------------------
 
 class LearningPersonalityIntegration(PersonalityIntegration):
@@ -524,7 +704,7 @@ class LearningPersonalityIntegration(PersonalityIntegration):
             from modules.feedback_learning import FeedbackLearningEngine
             return FeedbackLearningEngine()
         except ImportError:
-            print("⚠️  Feedback learning not available")
+            print("⚠️ Feedback learning not available")
             return None
     
     def get_enhanced_personality_prompt(self, personality_id: str) -> str:
@@ -560,14 +740,14 @@ class LearningPersonalityIntegration(PersonalityIntegration):
                     print(f"🚀 Enhanced {personality_id} with feedback learning")
                     return enhanced_prompt
                 else:
-                    print(f"📝 No learning enhancements available for {personality_id}")
+                    print(f"🔍 No learning enhancements available for {personality_id}")
                     return base_prompt
                     
             except Exception as e:
-                print(f"⚠️  Learning enhancement failed for {personality_id}: {e}")
+                print(f"⚠️ Learning enhancement failed for {personality_id}: {e}")
                 return base_prompt
         else:
-            print(f"📋 Using base personality for {personality_id} (no learning engine)")
+            print(f"🔋 Using base personality for {personality_id} (no learning engine)")
             return base_prompt
     
     def integrate_with_openrouter_enhanced(self,
@@ -671,7 +851,7 @@ def upgrade_personality_system_with_learning():
         print("🚀 Personality system upgraded with feedback learning")
         return True
     except Exception as e:
-        print(f"⚠️  Failed to upgrade personality system: {e}")
+        print(f"⚠️ Failed to upgrade personality system: {e}")
         return False
 
 def test_learning_personality_system():
@@ -728,4 +908,4 @@ __all__.extend([
 try:
     upgrade_personality_system_with_learning()
 except Exception as e:
-    print(f"📝 Keeping basic personality system: {e}")
+    print(f"🔍 Keeping basic personality system: {e}")
