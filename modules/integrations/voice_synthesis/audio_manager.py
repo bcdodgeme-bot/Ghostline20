@@ -26,7 +26,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import time
 
-from ..core.database import db_manager
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
