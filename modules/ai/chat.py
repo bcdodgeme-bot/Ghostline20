@@ -1125,7 +1125,7 @@ def detect_image_command(message: str) -> bool:
         "image create", "image generate", "generate image", "create image",
         "image blog", "image social", "image marketing", "image history",
         "image download", "make image", "draw image", "picture of",
-        "visualize this", "show me", "image style"
+        "visualize this", "show me", "image style", "mockup"
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in image_keywords)
@@ -1160,6 +1160,7 @@ def extract_image_prompt(message: str) -> tuple[str, str]:
         r'picture of (.+)',
         r'visualize (.+)',
         r'show me (.+)'
+        r'mockup (.+)'
     ]
     
     for pattern in patterns:

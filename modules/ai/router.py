@@ -494,6 +494,31 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 except Exception as e:
                     logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
                     raise
+                    
+                # PATTERN FATIGUE PROCESSING: Apply personality filtering with user awareness
+                    logger.info("🎭 DEBUG: Applying personality post-processing with pattern fatigue...")
+                    try:
+                        personality_engine = get_personality_engine()
+                        
+                        # Apply personality-specific post-processing with user_id for pattern fatigue
+                        filtered_response = personality_engine.process_personality_response(
+                            response_content,
+                            chat_request.personality_id,
+                            user_id  # This passes user_id to enable pattern fatigue filtering
+                        )
+                        
+                        # Log if response was modified by pattern fatigue
+                        if filtered_response != response_content:
+                            logger.info(f"🚫 DEBUG: Pattern fatigue filter applied - response modified")
+                            response_content = filtered_response
+                        else:
+                            logger.info("✅ DEBUG: Pattern fatigue check passed - no filtering needed")
+                            
+                    except Exception as e:
+                        logger.warning(f"⚠️ DEBUG: Pattern fatigue processing failed: {e}")
+                        # Continue with original response if filtering fails
+                        pass
+                
                 
                 # Extract response content
                 if ai_response and 'choices' in ai_response:
