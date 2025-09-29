@@ -528,6 +528,9 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                             final_response = processed_response
                         else:
                             logger.info("✅ DEBUG: Personality processing completed, no changes")
+                    except Exception as e:
+                        logger.warning(f"⚠️ DEBUG: Personality processing failed: {e}")
+                        # Continue with original response if processing fails
                             
         
         # Calculate response time
