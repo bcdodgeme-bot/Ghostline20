@@ -679,29 +679,31 @@ style.textContent = `
     color: #333;
 }
 `;
-document.head.appendChild(style);showWaveformAnimation(speakerButton) {
-        // Remove existing waveform
-        this.hideWaveformAnimation(speakerButton);
-        
-        const waveform = document.createElement('div');
-        waveform.className = 'waveform-animation';
-        waveform.innerHTML = `
-            <div class="waveform-bar"></div>
-            <div class="waveform-bar"></div>
-            <div class="waveform-bar"></div>
-            <div class="waveform-bar"></div>
-            <div class="waveform-bar"></div>
-        `;
-        
-        speakerButton.parentNode.appendChild(waveform);
-    }
+document.head.appendChild(style);
 
-    hideWaveformAnimation(speakerButton) {
-        const waveform = speakerButton.parentNode.querySelector('.waveform-animation');
-        if (waveform) {
-            waveform.remove();
-        }
+showWaveformAnimation(speakerButton) {
+    // Remove existing waveform
+    this.hideWaveformAnimation(speakerButton);
+    
+    const waveform = document.createElement('div');
+    waveform.className = 'waveform-animation';
+    waveform.innerHTML = `
+        <div class="waveform-bar"></div>
+        <div class="waveform-bar"></div>
+        <div class="waveform-bar"></div>
+        <div class="waveform-bar"></div>
+        <div class="waveform-bar"></div>
+    `;
+    
+    speakerButton.parentNode.appendChild(waveform);
+}
+
+hideWaveformAnimation(speakerButton) {
+    const waveform = speakerButton.parentNode.querySelector('.waveform-animation');
+    if (waveform) {
+        waveform.remove();
     }
+}
 
     // === Image Generation Integration - Date: 9/28/25 ===
     async initializeImageSystem() {
