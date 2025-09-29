@@ -19,6 +19,7 @@ from .knowledge_query import get_knowledge_engine
 #-- Section 4: Personality and Learning Systems - 9/23/25
 from .personality_engine import get_personality_engine
 from .feedback_processor import get_feedback_processor
+from .pattern_fatigue import get_pattern_fatigue_tracker
 
 #-- Section 5: Module Metadata - 9/23/25
 __version__ = "2.0.0"
@@ -40,7 +41,8 @@ __all__ = [
     'get_memory_manager',
     'get_knowledge_engine',
     'get_personality_engine',
-    'get_feedback_processor'
+    'get_feedback_processor',
+    'get_pattern_fatigue_tracker'
 ]
 
 #-- Section 7: Quick System Status Check - 9/23/25
