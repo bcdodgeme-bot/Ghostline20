@@ -21,7 +21,7 @@ import logging
 from typing import Dict, Any, Optional, List
 import json
 
-from ..core.database import db_manager
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
