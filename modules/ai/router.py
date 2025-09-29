@@ -513,7 +513,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     model_used = ai_response.get('model', 'claude-3.5-sonnet')
                     logger.info(f"✅ DEBUG: AI response extracted (length: {len(final_response)} chars)")
                     
-                    # Apply personality post-processing (includes pattern fatigue if available)
+# Apply personality post-processing (includes pattern fatigue if available)
                     logger.info("🎭 DEBUG: Applying personality post-processing...")
                     try:
                         personality_engine = get_personality_engine()
@@ -532,10 +532,9 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         logger.warning(f"⚠️ DEBUG: Personality processing failed: {e}")
                         # Continue with original response if processing fails
                             
-        
-        # Calculate response time
-        response_time_ms = int((time.time() - start_time) * 1000)
-        logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
+                    # Calculate response time
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
         
         # Store AI response
         logger.info("💾 DEBUG: Storing AI response...")
