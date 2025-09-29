@@ -532,13 +532,6 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         else:
                             logger.info("✅ DEBUG: Personality processing completed, no changes")
                             
-                    except Exception as e:
-                        logger.warning(f"⚠️ DEBUG: Personality processing failed: {e}")
-                        
-                else:
-                    final_response = "I'm sorry, I encountered an error processing your message. Please try again."
-                    model_used = "error"
-                    logger.error("❌ DEBUG: Invalid AI response format")
         
         # Calculate response time
         response_time_ms = int((time.time() - start_time) * 1000)
