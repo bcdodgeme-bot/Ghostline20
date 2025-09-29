@@ -35,6 +35,7 @@ from typing import Dict, Any, Optional
 from .replicate_client import ReplicateImageClient
 from .database_manager import ImageDatabase
 from .router import router
+from typing import List, Dict, Any
 
 # Import health check functions
 try:
