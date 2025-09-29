@@ -1374,6 +1374,35 @@ class SyntaxPrimeChat {
     }
 
     formatMessageContent(content) {
+        // First, check if content contains image data
+        const imageDataRegex = /<IMAGE_DATA>(.*?)<\/IMAGE_DATA>/gs;
+        const imageMatch = content.match(imageDataRegex);
+        
+        if (imageMatch) {
+            // Extract the base64 data
+            const base64Data = imageMatch[0].replace(/<IMAGE_DATA>/g, '').replace(/<\/IMAGE_DATA>/g, '').trim();
+            
+            // Remove the IMAGE_DATA tags from content
+            content = content.replace(imageDataRegex, '');
+            
+            // Format the rest of the content
+            const formattedContent = content
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+            
+            // Add the image at the end with proper styling
+            return `${formattedContent}
+                <div class="generated-image-container" style="margin-top: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <img src="data:image/png;base64,${base64Data}" 
+                         alt="Generated Image" 
+                         style="width: 100%; height: auto; display: block; max-width: 512px;" 
+                         loading="lazy" />
+                </div>`;
+        }
+        
+        // No image data, just format normally
         return content
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
