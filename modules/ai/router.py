@@ -99,7 +99,8 @@ async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str
                 detect_scraper_command, process_scraper_command,
                 detect_trends_command, process_trends_command,
                 detect_voice_command, process_voice_command,
-                detect_image_command, process_image_command
+                detect_image_command, process_image_command,
+                detect_pattern_complaint, handle_pattern_complaint
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
