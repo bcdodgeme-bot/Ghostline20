@@ -30,9 +30,6 @@ from .feedback_processor import get_feedback_processor
 
 logger = logging.getLogger(__name__)
 
-# Add to existing imports from chat:
-detect_pattern_complaint, handle_pattern_complaint, detect_pattern_fatigue_command,
-
 #-- Request/Response Models
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message")
