@@ -1,12 +1,13 @@
 #===============================================================================
 # SYNTAX PRIME V2 - MAIN APPLICATION FILE (app.py)
 # Personal AI Assistant with Advanced Chat, File Processing, Authentication
-# Created: 9/23/25 | Last Updated: 9/27/25
+# Created: 9/23/25 | Last Updated: 9/28/25
 #
 # This is the core FastAPI application that orchestrates all integrations:
 # - Authentication & Session Management
 # - AI Brain & Multi-Personality Chat System
 # - Weather, Bluesky, RSS, Marketing Scraper, Prayer Times, Google Trends
+# - Voice Synthesis & Image Generation (NEW 9/28/25)
 # - Web Interface & API Endpoints
 #===============================================================================
 
@@ -51,6 +52,14 @@ from modules.integrations.prayer_times import get_integration_info as prayer_tim
 #-- NEW Section 2f: Google Trends Integration - added 9/27/25
 from modules.integrations.google_trends.router import router as trends_router
 from modules.integrations.google_trends.integration_info import check_module_health as trends_module_health, get_system_statistics as trends_system_statistics
+
+#-- NEW Section 2g: Voice Synthesis Integration - added 9/28/25
+from modules.integrations.voice_synthesis import voice_synthesis_router
+from modules.integrations.voice_synthesis import get_integration_info as voice_integration_info, check_module_health as voice_module_health
+
+#-- NEW Section 2h: Image Generation Integration - added 9/28/25
+from modules.integrations.image_generation import router as image_generation_router
+from modules.integrations.image_generation.integration_info import get_integration_info as image_integration_info, check_module_health as image_module_health
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -237,7 +246,7 @@ async def get_current_user_id(session_token: str = Cookie(None)) -> str:
     
     return user['id']
 
-#-- Section 10: Application Lifecycle Events - updated 9/27/25 with Google Trends
+#-- Section 10: Application Lifecycle Events - updated 9/28/25 with Voice & Image
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and integrations on startup."""
@@ -252,7 +261,7 @@ async def startup_event():
     if integration_health['healthy']:
         print("✅ Slack-ClickUp integration loaded successfully")
     else:
-        print("⚠️  Slack-ClickUp integration loaded with warnings")
+        print("⚠️ Slack-ClickUp integration loaded with warnings")
         print(f"   Missing vars: {integration_health['missing_vars']}")
     
     # Check AI Brain health
@@ -260,7 +269,7 @@ async def startup_event():
     if ai_health['healthy']:
         print("🧠 AI Brain loaded successfully")
     else:
-        print("⚠️  AI Brain loaded with warnings")
+        print("⚠️ AI Brain loaded with warnings")
         print(f"   Missing vars: {ai_health['missing_vars']}")
     
     # Check Chat system health
@@ -268,13 +277,13 @@ async def startup_event():
         chat_health = chat_module_health()
         if chat_health['healthy']:
             print("💬 Chat system loaded successfully")
-            print(f"   📎 File upload support: {chat_health.get('file_upload_support', True)}")
-            print(f"   📏 Max file size: {chat_health.get('max_file_size', '10MB')}")
+            print(f"   🔎 File upload support: {chat_health.get('file_upload_support', True)}")
+            print(f"   📄 Max file size: {chat_health.get('max_file_size', '10MB')}")
         else:
-            print("⚠️  Chat system loaded with warnings")
+            print("⚠️ Chat system loaded with warnings")
             print(f"   Missing vars: {chat_health.get('missing_vars', [])}")
     except Exception as e:
-        print(f"⚠️  Chat system health check failed: {e}")
+        print(f"⚠️ Chat system health check failed: {e}")
     
     # Check Weather integration health
     try:
@@ -284,10 +293,10 @@ async def startup_event():
             print("   📊 Pressure tracking for headache prediction active")
             print("   ☀️ UV monitoring for sun sensitivity enabled")
         else:
-            print("⚠️  Weather integration loaded with warnings")
+            print("⚠️ Weather integration loaded with warnings")
             print(f"   Missing vars: {weather_health['missing_vars']}")
     except Exception as e:
-        print(f"⚠️  Weather integration health check failed: {e}")
+        print(f"⚠️ Weather integration health check failed: {e}")
     
     # Check Bluesky integration health
     try:
@@ -299,10 +308,10 @@ async def startup_event():
             print("   🤖 Multi-account AI assistant army ready")
             print("   ⏰ 3.5-hour scan intervals with approval-first workflow")
         else:
-            print("⚠️  Bluesky integration loaded with warnings")
+            print("⚠️ Bluesky integration loaded with warnings")
             print(f"   Missing vars: {bluesky_health['missing_vars']}")
     except Exception as e:
-        print(f"⚠️  Bluesky integration health check failed: {e}")
+        print(f"⚠️ Bluesky integration health check failed: {e}")
     
     # Check RSS Learning integration health
     try:
@@ -319,10 +328,10 @@ async def startup_event():
             await start_rss_service()
             print("   ⚡ RSS background processor started")
         else:
-            print("⚠️  RSS Learning integration loaded with warnings")
+            print("⚠️ RSS Learning integration loaded with warnings")
             print(f"   Missing vars: {rss_health['missing_vars']}")
     except Exception as e:
-        print(f"⚠️  RSS Learning integration health check failed: {e}")
+        print(f"⚠️ RSS Learning integration health check failed: {e}")
     
     # Check Marketing Scraper integration health
     try:
@@ -335,13 +344,13 @@ async def startup_event():
             print("   💬 Chat commands: scrape [URL], scrape history, scrape insights")
             print("   🔗 Integration with existing AI brain and memory system")
         else:
-            print("⚠️  Marketing Scraper integration loaded with warnings")
+            print("⚠️ Marketing Scraper integration loaded with warnings")
             print(f"   Missing vars: {scraper_health['missing_vars']}")
             if scraper_health.get('warnings'):
                 for warning in scraper_health['warnings']:
-                    print(f"   ⚠️  {warning}")
+                    print(f"   ⚠️ {warning}")
     except Exception as e:
-        print(f"⚠️  Marketing Scraper integration health check failed: {e}")
+        print(f"⚠️ Marketing Scraper integration health check failed: {e}")
     
     # Check Prayer Times integration health
     try:
@@ -353,12 +362,12 @@ async def startup_event():
             print("   💬 Chat commands: prayer times, how long till prayer")
             print("   🕰️ Real-time prayer countdown")
         else:
-            print("⚠️  Prayer Times integration loaded with warnings")
+            print("⚠️ Prayer Times integration loaded with warnings")
             print(f"   Missing vars: {prayer_health['missing_vars']}")
     except Exception as e:
-        print(f"⚠️  Prayer Times integration health check failed: {e}")
+        print(f"⚠️ Prayer Times integration health check failed: {e}")
     
-    # Check Google Trends integration health - NEW 9/27/25
+    # Check Google Trends integration health
     try:
         trends_health = trends_module_health()
         if trends_health['healthy']:
@@ -368,10 +377,42 @@ async def startup_event():
             print("   💬 Chat commands: trends [keyword], trending topics")
             print("   🎯 Market research and content planning insights")
         else:
-            print("⚠️  Google Trends integration loaded with warnings")
+            print("⚠️ Google Trends integration loaded with warnings")
             print(f"   Missing vars: {trends_health['missing_vars']}")
     except Exception as e:
-        print(f"⚠️  Google Trends integration health check failed: {e}")
+        print(f"⚠️ Google Trends integration health check failed: {e}")
+    
+    # Check Voice Synthesis integration health - NEW 9/28/25
+    try:
+        voice_health = voice_module_health()
+        if voice_health['healthy']:
+            print("🎤 Voice Synthesis integration loaded successfully")
+            print("   🗣️ ElevenLabs text-to-speech enabled")
+            print("   🎭 Personality-specific voice selection")
+            print("   💾 Database audio caching with compression")
+            print("   💬 Chat commands: voice synthesize [text], voice history")
+            print("   🔊 Inline audio playback ready")
+        else:
+            print("⚠️ Voice Synthesis integration loaded with warnings")
+            print(f"   Missing vars: {voice_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️ Voice Synthesis integration health check failed: {e}")
+    
+    # Check Image Generation integration health - NEW 9/28/25
+    try:
+        image_health = image_module_health()
+        if image_health['healthy']:
+            print("🎨 Image Generation integration loaded successfully")
+            print("   🖼️ Replicate AI image generation enabled")
+            print("   💡 Smart model selection for content types")
+            print("   📱 Inline base64 display ready")
+            print("   💬 Chat commands: image create [prompt], image history")
+            print("   📥 Multiple format downloads available")
+        else:
+            print("⚠️ Image Generation integration loaded with warnings")
+            print(f"   Missing vars: {image_health['missing_vars']}")
+    except Exception as e:
+        print(f"⚠️ Image Generation integration health check failed: {e}")
     
     # Clean up any expired sessions on startup
     AuthManager.cleanup_expired_sessions()
@@ -387,7 +428,9 @@ async def startup_event():
     print("   📰 RSS Learning: http://localhost:8000/integrations/rss")
     print("   🔍 Marketing Scraper: http://localhost:8000/integrations/marketing-scraper")
     print("   🕌 Prayer Times: http://localhost:8000/integrations/prayer-times")
-    print("   📈 Google Trends: http://localhost:8000/api/trends")  # NEW
+    print("   📈 Google Trends: http://localhost:8000/api/trends")
+    print("   🎤 Voice Synthesis: http://localhost:8000/api/voice")  # NEW
+    print("   🎨 Image Generation: http://localhost:8000/integrations/image-generation")  # NEW
     print("   🔗 API Docs: http://localhost:8000/docs")
     print("   🏥 Health Check: http://localhost:8000/health")
     print("   🔐 Authentication: /auth/login, /auth/logout")
@@ -396,19 +439,31 @@ async def startup_event():
     print("   python standalone_create_user.py")
     print()
 
-#-- Section 11: API Status and Health Endpoints - updated 9/27/25 with Google Trends
+#-- Section 11: API Status and Health Endpoints - updated 9/28/25 with Voice & Image
 @app.get("/health")
 async def health_check():
     """System health check endpoint - THE MISSING PIECE!"""
     return await get_health_status()
 
-# NEW: Google Trends health check endpoint - added 9/27/25
+# NEW: Voice Synthesis health check endpoint - added 9/28/25
+@app.get("/api/health/voice")
+async def voice_health():
+    """Voice Synthesis integration health check"""
+    return voice_module_health()
+
+# NEW: Image Generation health check endpoint - added 9/28/25
+@app.get("/api/health/image")
+async def image_health():
+    """Image Generation integration health check"""
+    return image_module_health()
+
+# Google Trends health check endpoint - added 9/27/25
 @app.get("/api/health/trends")
 async def trends_health():
     """Google Trends integration health check"""
     return await trends_module_health()
 
-# NEW: Google Trends statistics endpoint - added 9/27/25
+# Google Trends statistics endpoint - added 9/27/25
 @app.get("/api/statistics/trends")
 async def trends_statistics():
     """Google Trends system statistics"""
@@ -434,11 +489,13 @@ async def api_status():
             "📰 RSS Learning system with AI-powered marketing insights",
             "🔍 AI-powered marketing scraper for competitive analysis",
             "🕌 Islamic prayer times with intelligent scheduling",
-            "📈 Google Trends analysis for market research",  # NEW 9/27/25
+            "📈 Google Trends analysis for market research",
+            "🎤 Voice synthesis with ElevenLabs (4 personality voices)",  # NEW 9/28/25
+            "🎨 AI image generation with Replicate (inline display)",  # NEW 9/28/25
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "google-trends", "authentication"],  # UPDATED
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "google-trends", "voice-synthesis", "image-generation", "authentication"],  # UPDATED
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -471,9 +528,15 @@ async def api_status():
             "marketing_scraper_history": "/integrations/marketing-scraper/history",
             "prayer_times_status": "/integrations/prayer-times/status",
             "prayer_times_health": "/integrations/prayer-times/health",
-            "google_trends_main": "/api/trends",  # NEW 9/27/25
-            "google_trends_health": "/api/health/trends",  # NEW 9/27/25
-            "google_trends_stats": "/api/statistics/trends",  # NEW 9/27/25
+            "google_trends_main": "/api/trends",
+            "google_trends_health": "/api/health/trends",
+            "google_trends_stats": "/api/statistics/trends",
+            "voice_synthesize": "/api/voice/synthesize",  # NEW 9/28/25
+            "voice_audio": "/api/voice/audio",  # NEW 9/28/25
+            "voice_health": "/api/health/voice",  # NEW 9/28/25
+            "image_generate": "/integrations/image-generation/generate",  # NEW 9/28/25
+            "image_quick": "/integrations/image-generation/quick-generate",  # NEW 9/28/25
+            "image_health": "/api/health/image",  # NEW 9/28/25
             "slack_webhooks": "/integrations/slack-clickup/slack/events"
         },
         "file_processing": {
@@ -516,12 +579,29 @@ async def api_status():
             "cache_system": "midnight_refresh",
             "api_configured": True  # AlAdhan API is free, no key needed
         },
-        "google_trends_system": {  # NEW 9/27/25
+        "google_trends_system": {
             "features": ["trending_keyword_analysis", "real_time_search_monitoring", "market_research_insights", "content_planning"],
             "commands": ["trends [keyword]", "trending topics", "search volume"],
             "data_sources": "google_trends_api",
             "analysis_types": ["regional", "temporal", "related_queries", "rising_searches"],
             "api_configured": trends_module_health()['healthy']
+        },
+        "voice_synthesis_system": {  # NEW 9/28/25
+            "features": ["elevenlabs_text_to_speech", "personality_voice_mapping", "database_audio_caching", "inline_playback"],
+            "commands": ["voice synthesize [text]", "voice history", "voice personalities"],
+            "voices_configured": 4,
+            "personalities": {"syntaxprime": "Adam", "syntaxbot": "Josh", "nil_exe": "Daniel", "ggpt": "Sam"},
+            "audio_format": "MP3",
+            "caching": "database_with_compression",
+            "api_configured": voice_module_health()['healthy']
+        },
+        "image_generation_system": {  # NEW 9/28/25
+            "features": ["replicate_ai_generation", "inline_base64_display", "smart_model_selection", "multiple_format_downloads"],
+            "commands": ["image create [prompt]", "image blog [topic]", "image social [content]", "image history"],
+            "models_supported": ["Stable Diffusion XL", "SDXL Lightning", "Realistic Vision"],
+            "formats": ["PNG", "JPG", "WebP"],
+            "content_types": ["blog", "social", "marketing", "illustration"],
+            "api_configured": image_module_health()['healthy']
         }
     }
 
@@ -602,7 +682,7 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
-    # Google Trends integration - NEW 9/27/25
+    # Google Trends integration
     try:
         integrations['google_trends'] = {
             'info': {
@@ -620,6 +700,30 @@ async def integrations_info():
     except Exception as e:
         integrations['google_trends'] = {
             'info': {'module': 'google_trends', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Voice Synthesis integration - NEW 9/28/25
+    try:
+        integrations['voice_synthesis'] = {
+            'info': voice_integration_info(),
+            'health': voice_module_health()
+        }
+    except Exception as e:
+        integrations['voice_synthesis'] = {
+            'info': {'module': 'voice_synthesis', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
+    # Image Generation integration - NEW 9/28/25
+    try:
+        integrations['image_generation'] = {
+            'info': image_integration_info(),
+            'health': image_module_health()
+        }
+    except Exception as e:
+        integrations['image_generation'] = {
+            'info': {'module': 'image_generation', 'status': 'failed'},
             'health': {'healthy': False, 'error': str(e)}
         }
     
@@ -672,7 +776,7 @@ async def integrations_info():
         'timestamp': datetime.now().isoformat()
     }
 
-#-- Section 12: Integration Module Routers - updated 9/27/25 with Google Trends
+#-- Section 12: Integration Module Routers - updated 9/28/25 with Voice & Image
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -700,6 +804,12 @@ app.include_router(prayer_times_router)
 # Include Google Trends integration router - added 9/27/25
 app.include_router(trends_router, prefix="/api/trends", tags=["Google Trends"])
 
+# Include Voice Synthesis integration router - added 9/28/25
+app.include_router(voice_synthesis_router)
+
+# Include Image Generation integration router - added 9/28/25
+app.include_router(image_generation_router)
+
 #-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
 # Periodic cleanup of expired sessions (every hour) + Prayer notification service
 @app.on_event("startup")
@@ -721,7 +831,7 @@ async def setup_periodic_tasks():
         await start_prayer_notifications()
         print("🕌 Prayer notification service started successfully")
     except Exception as e:
-        print(f"⚠️  Failed to start prayer notification service: {e}")
+        print(f"⚠️ Failed to start prayer notification service: {e}")
         # Continue without prayer notifications rather than crash the app
 
 if __name__ == "__main__":

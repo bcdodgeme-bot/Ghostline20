@@ -4,6 +4,7 @@
 # Clean helper module with all integration logic for weather, prayer times, scraper, etc.
 # Date: 9/26/25 - Converted to helper module only
 # Date: 9/27/25 - Added Google Trends integration and Prayer Notifications
+# Date: 9/28/25 - Added Voice Synthesis and Image Generation detection
 
 #-- Section 1: Core Imports - 9/26/25
 import os
@@ -451,7 +452,7 @@ async def process_scraper_command(message: str, user_id: str) -> str:
             history = await db.get_user_scrape_history(user_id=user_id, limit=10)
             
             if not history:
-                return """📁 **Marketing Scraper History**
+                return """🔍 **Marketing Scraper History**
 
 No scraping history found. Start analyzing competitors with:
 • `scrape https://example.com` - Analyze any website
@@ -466,7 +467,7 @@ No scraping history found. Start analyzing competitors with:
                 
                 response_parts.append(f"**{i}. {domain}**")
                 response_parts.append(f"   📅 Scraped: {scraped_at}")
-                response_parts.append(f"   📝 Words: {word_count}")
+                response_parts.append(f"   📄 Words: {word_count}")
                 response_parts.append("")
             
             response_parts.append("💡 Use `scrape insights` to get AI analysis of all scraped content.")
@@ -480,7 +481,7 @@ No scraping history found. Start analyzing competitors with:
             recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
             
             if not recent_content:
-                return """📁 **Marketing Scraper Insights**
+                return """🔍 **Marketing Scraper Insights**
 
 No scraped content available for analysis. 
 
@@ -502,7 +503,7 @@ Start building your competitive intelligence with:
                 if insights.get('value_proposition'):
                     response_parts.append(f"   💎 Value Prop: {insights['value_proposition'][:100]}...")
                 if insights.get('content_strategy'):
-                    response_parts.append(f"   📝 Strategy: {insights['content_strategy'][:100]}...")
+                    response_parts.append(f"   📄 Strategy: {insights['content_strategy'][:100]}...")
                 response_parts.append("")
             
             response_parts.append("📈 Use `scrape https://newsite.com` to add more competitive intelligence!")
@@ -513,7 +514,7 @@ Start building your competitive intelligence with:
             url = extract_url_from_message(message)
             
             if not url:
-                return """📁 **Marketing Scraper Commands**
+                return """🔍 **Marketing Scraper Commands**
 
 **Usage:**
 • `scrape https://example.com` - Analyze any website for marketing insights
@@ -560,7 +561,7 @@ Please verify the URL is accessible and try again."""
                 
                 response_parts = [
                     f"✅ **Successfully Analyzed: {domain}**",
-                    f"📝 Content extracted: {word_count:,} words",
+                    f"📄 Content extracted: {word_count:,} words",
                     ""
                 ]
                 
@@ -577,7 +578,7 @@ Please verify the URL is accessible and try again."""
                     marketing = analysis.get('marketing_angles', {})
                     if marketing.get('content_strategy'):
                         response_parts.extend([
-                            "**📝 Content Strategy:**",
+                            "**📄 Content Strategy:**",
                             f"• {marketing['content_strategy'][:200]}...",
                             ""
                         ])
@@ -586,7 +587,7 @@ Please verify the URL is accessible and try again."""
                     cta = analysis.get('cta_analysis', {})
                     if cta.get('cta_placement_strategy'):
                         response_parts.extend([
-                            "**📥 CTA Strategy:**",
+                            "**🔥 CTA Strategy:**",
                             f"• {cta['cta_placement_strategy'][:200]}...",
                             ""
                         ])
@@ -942,7 +943,349 @@ async def analyze_csv_file(file_path: Path) -> Dict:
             'extracted_text': ''
         }
 
-#-- Section 10: Google Trends Integration Functions - 9/27/25
+#-- Section 9: Voice Synthesis Functions - 9/28/25
+def detect_voice_command(message: str) -> bool:
+    """Detect voice synthesis commands"""
+    voice_keywords = [
+        "voice synthesize", "voice generate", "say this", "speak this",
+        "voice this", "read this", "voice history", "voice personalities",
+        "text to speech", "tts", "synthesize voice", "generate audio"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in voice_keywords)
+
+def extract_text_for_voice(message: str) -> str:
+    """Extract text to synthesize from voice command"""
+    message_lower = message.lower()
+    
+    # Common patterns for voice commands
+    patterns = [
+        r'voice synthesize (.+)',
+        r'voice generate (.+)',
+        r'say this[:\s]+(.+)',
+        r'speak this[:\s]+(.+)',
+        r'voice this[:\s]+(.+)',
+        r'read this[:\s]+(.+)',
+        r'synthesize (.+)',
+        r'tts (.+)'
+    ]
+    
+    import re
+    for pattern in patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return match.group(1).strip()
+    
+    # If no pattern matches, check if message is short enough to be direct synthesis
+    if len(message.split()) <= 50:  # Reasonable voice synthesis length
+        return message
+    
+    return None
+
+async def process_voice_command(message: str, user_id: str) -> str:
+    """Process voice synthesis commands"""
+    try:
+        from ..integrations.voice_synthesis import (
+            get_voice_client,
+            get_personality_voice_manager,
+            get_audio_cache_manager
+        )
+        
+        message_lower = message.lower()
+        
+        if 'voice history' in message_lower:
+            # Get voice synthesis history
+            audio_manager = get_audio_cache_manager()
+            stats = await audio_manager.get_cache_statistics()
+            
+            recent_generations = stats.get('recent_generations_24h', 0)
+            total_files = stats.get('total_files', 0)
+            total_size_mb = stats.get('total_size_mb', 0.0)
+            
+            return f"""🎤 **Voice Synthesis History**
+
+📊 **Recent Activity:** {recent_generations} audio files generated today
+💾 **Total Generated:** {total_files} audio files
+📈 **Storage Used:** {total_size_mb:.1f} MB
+
+**Available Commands:**
+• `voice synthesize [text]` - Generate speech from text
+• `voice personalities` - View available voices
+• Click speaker buttons on AI responses for instant audio
+
+Ready to give your words a voice?"""
+        
+        elif 'voice personalities' in message_lower or 'voice list' in message_lower:
+            # Show personality voice mappings
+            personality_manager = get_personality_voice_manager()
+            mappings = await personality_manager.get_all_personality_mappings()
+            
+            response_parts = ["🎭 **Personality Voice Mappings**\n"]
+            
+            for personality_id, mapping in mappings.items():
+                primary_voice = mapping.get('primary_voice', 'Unknown')
+                style = mapping.get('voice_settings', {}).get('style', 'Standard')
+                
+                response_parts.append(f"**{personality_id.title()}:** {primary_voice}")
+                response_parts.append(f"   Style: {style.replace('_', ' ').title()}")
+                response_parts.append("")
+            
+            response_parts.append("Each personality has been carefully matched with voices chosen by SyntaxPrime for optimal expression!")
+            return "\n".join(response_parts)
+        
+        else:
+            # Extract text to synthesize
+            text_to_synthesize = extract_text_for_voice(message)
+            
+            if not text_to_synthesize:
+                return """🎤 **Voice Synthesis Commands**
+
+**Usage:**
+• `voice synthesize [your text here]` - Generate speech from text
+• `voice history` - View synthesis history
+• `voice personalities` - See available voices
+
+**Examples:**
+• `voice synthesize Hello everyone, welcome to the presentation`
+• `say this: Thanks for joining our meeting today`
+• `read this: The quarterly results show significant growth`
+
+**Features:**
+✅ Personality-specific voices (SyntaxPrime's choices)
+✅ High-quality MP3 generation
+✅ Instant inline playback
+✅ Database caching for re-use
+
+Ready to bring your words to life?"""
+            
+            # Synthesize the audio
+            voice_client = get_voice_client()
+            personality_manager = get_personality_voice_manager()
+            audio_manager = get_audio_cache_manager()
+            
+            # Get voice for current context (default to syntaxprime)
+            personality_id = 'syntaxprime'  # Could be determined from context
+            voice_id = personality_manager.get_voice_for_personality(personality_id)
+            
+            # Generate speech
+            synthesis_result = await voice_client.generate_speech(
+                text=text_to_synthesize,
+                voice_id=voice_id,
+                personality_id=personality_id
+            )
+            
+            if not synthesis_result.get('success'):
+                return f"""❌ **Voice Synthesis Failed**
+
+Unable to generate audio for: "{text_to_synthesize[:50]}..."
+
+Error: {synthesis_result.get('error', 'Unknown error')}
+
+Please try again or contact support if the issue persists."""
+            
+            # Create a message ID for caching
+            message_id = str(uuid.uuid4())
+            
+            # Cache the audio
+            cache_result = await audio_manager.cache_audio(
+                message_id=message_id,
+                audio_data=synthesis_result['audio_data'],
+                metadata={
+                    'personality_id': personality_id,
+                    'voice_id': voice_id,
+                    'text_length': len(text_to_synthesize),
+                    'generation_time_ms': synthesis_result.get('generation_time_ms'),
+                    'file_format': 'mp3'
+                }
+            )
+            
+            generation_time = synthesis_result.get('generation_time_seconds', 0)
+            file_size = len(synthesis_result['audio_data'])
+            voice_name = personality_manager._get_voice_name_from_id(voice_id)
+            
+            return f"""✅ **Voice Synthesis Complete**
+
+🎤 **Text:** "{text_to_synthesize[:100]}{'...' if len(text_to_synthesize) > 100 else ''}"
+🗣️ **Voice:** {voice_name} ({personality_id} personality)
+⏱️ **Generation Time:** {generation_time:.1f} seconds
+📁 **File Size:** {file_size:,} bytes
+
+🔊 **Audio URL:** `/api/voice/audio/{message_id}`
+
+The audio has been generated and cached for playback. Use the audio URL in your frontend to play the synthesized speech!"""
+    
+    except Exception as e:
+        logger.error(f"Voice command processing failed: {e}")
+        return f"❌ **Voice Synthesis Error:** {str(e)}\n\nTry `voice synthesize hello world` to test the system."
+
+#-- Section 10: Image Generation Functions - 9/28/25
+def detect_image_command(message: str) -> bool:
+    """Detect image generation commands"""
+    image_keywords = [
+        "image create", "image generate", "generate image", "create image",
+        "image blog", "image social", "image marketing", "image history",
+        "image download", "make image", "draw image", "picture of",
+        "visualize this", "show me", "image style"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in image_keywords)
+
+def extract_image_prompt(message: str) -> tuple[str, str]:
+    """Extract image prompt and content type from command"""
+    message_lower = message.lower()
+    
+    # Detect content type from command
+    content_type = 'general'
+    if 'blog' in message_lower:
+        content_type = 'blog'
+    elif 'social' in message_lower:
+        content_type = 'social'
+    elif 'marketing' in message_lower:
+        content_type = 'marketing'
+    elif 'illustration' in message_lower:
+        content_type = 'illustration'
+    
+    # Extract prompt text
+    import re
+    patterns = [
+        r'image create (.+)',
+        r'image generate (.+)',
+        r'generate image (.+)',
+        r'create image (.+)',
+        r'image blog (.+)',
+        r'image social (.+)',
+        r'image marketing (.+)',
+        r'make image (.+)',
+        r'draw (.+)',
+        r'picture of (.+)',
+        r'visualize (.+)',
+        r'show me (.+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return match.group(1).strip(), content_type
+    
+    # If no pattern matches but it's an image command, use whole message as prompt
+    if detect_image_command(message):
+        return message.strip(), content_type
+    
+    return None, content_type
+
+async def process_image_command(message: str, user_id: str) -> str:
+    """Process image generation commands"""
+    try:
+        from ..integrations.image_generation import (
+            generate_image_for_chat,
+            get_image_history_for_chat
+        )
+        from ..integrations.image_generation.database_manager import ImageDatabase
+        
+        message_lower = message.lower()
+        
+        if 'image history' in message_lower:
+            # Get image generation history
+            history = await get_image_history_for_chat(user_id, limit=10)
+            
+            if not history:
+                return """🎨 **Image Generation History**
+
+No images generated yet. Start creating with:
+• `image create [description]` - Generate any image
+• `image blog [topic]` - Create blog header image
+• `image social [content]` - Generate social media graphic
+
+Ready to bring your ideas to life?"""
+            
+            response_parts = ["🖼️ **Recent Generated Images**\n"]
+            
+            for i, img in enumerate(history, 1):
+                response_parts.append(f"**{i}. {img['content_type'].title()} Image**")
+                response_parts.append(f"   📝 Prompt: {img['prompt']}")
+                response_parts.append(f"   🗓️ Created: {img['created_at']}")
+                response_parts.append(f"   📥 Downloads: {img['download_count']}")
+                response_parts.append("")
+            
+            response_parts.append("💡 Use `image create [new prompt]` to generate more images!")
+            return "\n".join(response_parts)
+        
+        else:
+            # Extract prompt and generate image
+            prompt, content_type = extract_image_prompt(message)
+            
+            if not prompt:
+                return """🎨 **Image Generation Commands**
+
+**Usage:**
+• `image create [description]` - Generate image from description
+• `image blog [topic]` - Create blog featured image
+• `image social [content]` - Generate social media graphic
+• `image marketing [campaign]` - Create marketing visual
+• `image history` - View generated images
+
+**Examples:**
+• `image create a professional business meeting in a modern office`
+• `image blog content marketing trends for 2024`
+• `image social new product announcement celebration`
+• `image marketing email campaign header design`
+
+**Features:**
+✅ Inline base64 display (no external URLs)
+✅ Smart model selection for quality
+✅ Multiple download formats
+✅ Content-type optimization
+✅ Style templates available
+
+Ready to create stunning visuals?"""
+            
+            # Generate the image
+            generation_result = await generate_image_for_chat(
+                prompt=prompt,
+                content_type=content_type,
+                user_id=user_id
+            )
+            
+            if not generation_result.get('success'):
+                return f"""❌ **Image Generation Failed**
+
+Unable to create image for: "{prompt[:50]}..."
+
+Error: {generation_result.get('error', 'Unknown error')}
+
+Please try a different prompt or contact support if the issue persists."""
+            
+            # Successful generation
+            image_id = generation_result.get('image_id', 'unknown')
+            model_used = generation_result.get('model_used', 'Unknown')
+            generation_time = generation_result.get('generation_time_seconds', 0)
+            enhanced_prompt = generation_result.get('enhanced_prompt', prompt)
+            resolution = generation_result.get('resolution', '1024x1024')
+            
+            return f"""✅ **Image Generated Successfully**
+
+🎨 **Original Prompt:** "{prompt}"
+🧠 **Enhanced Prompt:** "{enhanced_prompt[:100]}{'...' if len(enhanced_prompt) > 100 else ''}"
+🤖 **Model Used:** {model_used}
+📐 **Resolution:** {resolution}
+⏱️ **Generation Time:** {generation_time:.1f} seconds
+💾 **Image ID:** {image_id}
+
+🖼️ **Base64 Image Data Available**
+The image has been generated and is ready for inline display!
+
+**Download Options:**
+📥 PNG: `/integrations/image-generation/download/{image_id}?format=png`
+📥 JPG: `/integrations/image-generation/download/{image_id}?format=jpg`
+📥 WebP: `/integrations/image-generation/download/{image_id}?format=webp`
+
+Your visual idea has been brought to life! 🌟"""
+    
+    except Exception as e:
+        logger.error(f"Image command processing failed: {e}")
+        return f"❌ **Image Generation Error:** {str(e)}\n\nTry `image create blue circle` to test the system."
+
+#-- Section 11: Google Trends Integration Functions - 9/27/25
 def detect_trends_command(message: str) -> tuple[bool, str]:
     """Detect Google Trends commands and determine command type"""
     trends_keywords = [
@@ -1127,7 +1470,7 @@ No trending opportunities found at this time.
             detector = OpportunityDetector(database_url)
             scan_result = await detector.force_scan_update()
             
-            return f"""📝 **Trends Scan Complete**
+            return f"""🔍 **Trends Scan Complete**
 
 ✅ Scanned {scan_result.get('trends_analyzed', 0)} trending topics
 📈 Found {scan_result.get('opportunities_detected', 0)} new opportunities
@@ -1177,7 +1520,7 @@ Ready to discover your next trending opportunity?"""
         logger.error(f"Trends command processing failed: {e}")
         return f"❌ **Trends System Error:** {str(e)}\n\nTry `trends status` to check system health."
 
-#-- Section 11: Prayer Notification Functions - 9/27/25
+#-- Section 12: Prayer Notification Functions - 9/27/25
 def detect_prayer_notification_command(message: str) -> bool:
     """Detect prayer notification management commands"""
     notification_keywords = [
@@ -1286,7 +1629,7 @@ async def process_location_command(message: str, user_id: str, ip_address: str =
 🌐 **Detected from IP:** {location.get('source', 'IP Service')}
 🏙️ **City:** {location['city']}
 📍 **Region:** {location['region']}
-🌏 **Country:** {location['country']}
+🌍 **Country:** {location['country']}
 📊 **Coordinates:** {location['latitude']:.4f}, {location['longitude']:.4f}
 🕐 **Timezone:** {location['timezone']}
 
@@ -1382,13 +1725,13 @@ async def get_or_create_system_thread(memory_manager) -> str:
         logger.error(f"Failed to create system thread: {e}")
         raise
 
-#-- Section 12: Module Information Functions - 9/26/25 (Updated 9/27/25)
+#-- Section 13: Module Information Functions - 9/26/25 (Updated 9/28/25)
 def get_integration_info():
     """Get information about the chat integration helper module"""
     return {
         "name": "AI Chat Integration Helper",
-        "version": "2.1.0",
-        "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, Google Trends, and file processing",
+        "version": "2.2.0",
+        "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, Google Trends, Voice Synthesis, Image Generation, and file processing",
         "note": "This module provides helper functions only - endpoints are handled by router.py",
         "features": [
             "Weather integration with Tomorrow.io API",
@@ -1397,6 +1740,8 @@ def get_integration_info():
             "RSS learning integration for marketing insights",
             "Bluesky social media command processing",
             "Google Trends opportunity detection and training",
+            "Voice synthesis with ElevenLabs integration",
+            "Image generation with Replicate AI",
             "File upload processing (images, PDFs, CSVs, text)",
             "Real-time datetime context generation",
             "Location detection for prayer times",
@@ -1411,6 +1756,8 @@ def get_integration_info():
             "rss_learning_context_generation",
             "bluesky_command_processing",
             "google_trends_integration",
+            "voice_synthesis_detection_and_processing",
+            "image_generation_detection_and_processing",
             "file_upload_and_analysis"
         ]
     }
@@ -1460,6 +1807,18 @@ def check_module_health() -> Dict[str, Any]:
     if not trends_configured:
         warnings.append("Google Trends integration not configured (DATABASE_URL missing)")
     
+    # Check Voice Synthesis configuration - NEW 9/28/25
+    voice_configured = bool(os.getenv("ELEVENLABS_API_KEY"))
+    
+    if not voice_configured:
+        warnings.append("Voice Synthesis integration not configured (ELEVENLABS_API_KEY missing)")
+    
+    # Check Image Generation configuration - NEW 9/28/25
+    image_configured = bool(os.getenv("REPLICATE_API_TOKEN"))
+    
+    if not image_configured:
+        warnings.append("Image Generation integration not configured (REPLICATE_API_TOKEN missing)")
+    
     return {
         "healthy": len(missing_vars) == 0,
         "missing_vars": missing_vars,
@@ -1472,6 +1831,8 @@ def check_module_health() -> Dict[str, Any]:
         "marketing_scraper_integration_available": scraper_configured,
         "prayer_times_integration_available": prayer_configured,
         "google_trends_integration_available": trends_configured,
+        "voice_synthesis_integration_available": voice_configured,
+        "image_generation_integration_available": image_configured,
         "prayer_notifications_available": prayer_configured,
         "location_detection_available": True,
         "file_processing_available": True,

@@ -2,6 +2,7 @@
 // Syntax Prime V2 - Chat Interface JavaScript (MERGED WORKING VERSION + GOOGLE TRENDS)
 // Combines fixes from both versions with proper anti-duplication + Google Trends Training
 // Date: 9/27/25 - Working sidebar + submit protection + Google Trends Integration
+// Date: 9/28/25 - Added Voice Synthesis & Image Generation Integration
 //=============================================================================
 
 class SyntaxPrimeChat {
@@ -31,6 +32,22 @@ class SyntaxPrimeChat {
         };
         this.trendsPollingInterval = null;
 
+        // Voice Synthesis System - Date: 9/28/25
+        this.voiceEnabled = false;
+        this.currentAudio = null;
+        this.audioCache = new Map();
+        this.voicePersonalities = {
+            'syntaxprime': 'adam',
+            'syntaxbot': 'josh',
+            'nil.exe': 'onyx',
+            'ggpt': 'echo'
+        };
+
+        // Image Generation System - Date: 9/28/25
+        this.imageEnabled = false;
+        this.imageGenerationQueue = [];
+        this.currentImageGeneration = null;
+
         this.init();
     }
 
@@ -42,6 +59,8 @@ class SyntaxPrimeChat {
         this.setupDragAndDrop();
         this.autoResizeTextarea();
         this.initializeTrendsSystem();
+        this.initializeVoiceSystem(); // Date: 9/28/25
+        this.initializeImageSystem(); // Date: 9/28/25
 
         // Focus message input
         document.getElementById('messageInput').focus();
@@ -121,9 +140,9 @@ class SyntaxPrimeChat {
             messageInput._syntaxListenersAttached = true;
         }
         
-        // CRITICAL: Ensure only ONE click listener on send button
+        // CRITICAL: Ensure only ONE click listener on send button - PROTECTED
         if (sendButton && !sendButton._syntaxListenersAttached) {
-            console.log('🔧 Attaching click listener to send button');
+            console.log('🔧 Attaching click listener to send button - PROTECTED');
             sendButton.addEventListener('click', this.handleSendClick.bind(this));
             sendButton._syntaxListenersAttached = true;
         } else if (sendButton) {
@@ -161,7 +180,7 @@ class SyntaxPrimeChat {
         console.log('✅ Event listeners setup complete');
     }
 
-    // ENHANCED: Anti-duplication send handler with detailed logging
+    // ENHANCED: Anti-duplication send handler with detailed logging - PROTECTED
     handleSendClick(event) {
         console.log('🖱️ handleSendClick called');
         event.preventDefault();
@@ -239,6 +258,621 @@ class SyntaxPrimeChat {
         });
     }
 
+    // === Voice Synthesis Integration - Date: 9/28/25 ===
+    async initializeVoiceSystem() {
+        try {
+            console.log('🎤 Initializing Voice Synthesis system...');
+            
+            // Check if voice system is available
+            const healthCheck = await this.apiCall('/api/voice/health', 'GET');
+            
+            if (healthCheck && healthCheck.status === 'healthy') {
+                this.voiceEnabled = true;
+                console.log('✅ Voice Synthesis system available');
+                
+                // Load voice personality mappings
+                await this.loadVoicePersonalities();
+            } else {
+                console.log('⚠️ Voice Synthesis system not available');
+            }
+        } catch (error) {
+            console.log('⚠️ Voice Synthesis system not available:', error.message);
+            this.voiceEnabled = false;
+        }
+    }
+
+    async loadVoicePersonalities() {
+        try {
+            const personalities = await this.apiCall('/api/voice/personalities', 'GET');
+            if (personalities) {
+                this.voicePersonalities = { ...this.voicePersonalities, ...personalities };
+                console.log('🎭 Voice personalities loaded:', this.voicePersonalities);
+            }
+        } catch (error) {
+            console.error('Error loading voice personalities:', error);
+        }
+    }
+
+    async synthesizeVoice(text, messageId) {
+        if (!this.voiceEnabled) return null;
+
+        try {
+            console.log(`🎤 Synthesizing voice for message ${messageId}`);
+            
+            const voiceModel = this.voicePersonalities[this.currentPersonality] || 'adam';
+            
+            const response = await this.apiCall('/api/voice/synthesize', 'POST', {
+                text: text,
+                voice: voiceModel,
+                message_id: messageId
+            });
+
+            if (response && response.audio_url) {
+                // Cache the audio URL
+                this.audioCache.set(messageId, response.audio_url);
+                console.log(`✅ Voice synthesized for message ${messageId}`);
+                return response.audio_url;
+            }
+        } catch (error) {
+            console.error('Voice synthesis failed:', error);
+        }
+        return null;
+    }
+
+    async playVoiceMessage(messageId, speakerButton) {
+        if (!this.voiceEnabled) return;
+
+        try {
+            // Stop any currently playing audio
+            if (this.currentAudio) {
+                this.currentAudio.pause();
+                this.currentAudio = null;
+                this.clearPlayingStates();
+            }
+
+            // Set loading state
+            speakerButton.classList.add('loading');
+            speakerButton.innerHTML = '🔄';
+
+            // Check cache first
+            let audioUrl = this.audioCache.get(messageId);
+            
+            if (!audioUrl) {
+                // Try to fetch from API
+                const response = await this.apiCall(`/api/voice/audio/${messageId}`, 'GET');
+                if (response && response.audio_url) {
+                    audioUrl = response.audio_url;
+                    this.audioCache.set(messageId, audioUrl);
+                }
+            }
+
+            if (!audioUrl) {
+                throw new Error('Audio not available');
+            }
+
+            // Create and play audio
+            const audio = new Audio(audioUrl);
+            this.currentAudio = audio;
+
+            // Set playing state
+            speakerButton.classList.remove('loading');
+            speakerButton.classList.add('playing');
+            speakerButton.innerHTML = '🔊';
+
+            // Add waveform animation
+            this.showWaveformAnimation(speakerButton);
+
+            // Audio event handlers
+            audio.onended = () => {
+                this.clearPlayingStates();
+                this.hideWaveformAnimation(speakerButton);
+                speakerButton.innerHTML = '🔊';
+            };
+
+            audio.onerror = () => {
+                console.error('Audio playback failed');
+                this.clearPlayingStates();
+                this.hideWaveformAnimation(speakerButton);
+                speakerButton.innerHTML = '🔊';
+                speakerButton.classList.remove('loading', 'playing');
+            };
+
+            await audio.play();
+            console.log(`🔊 Playing voice for message ${messageId}`);
+
+        } catch (error) {
+            console.error('Voice playback failed:', error);
+            speakerButton.classList.remove('loading', 'playing');
+            speakerButton.innerHTML = '🔊';
+        }
+    }
+
+    clearPlayingStates() {
+        const playingButtons = document.querySelectorAll('.speaker-button.playing');
+        playingButtons.forEach(btn => {
+            btn.classList.remove('playing');
+            this.hideWaveformAnimation(btn);
+        });
+    }
+
+    showRememberButton(messageId) {
+        const rememberBtn = document.getElementById('rememberBtn');
+        if (rememberBtn) {
+            rememberBtn.style.display = 'block';
+            rememberBtn.setAttribute('data-message-id', messageId);
+        }
+    }
+
+    showError(message) {
+        console.error('Error:', message);
+        // Could add a toast notification here
+    }
+}
+
+// ENHANCED: Proper initialization with DOM ready protection - PROTECTED
+let syntaxChat = null;
+
+function initializeSyntaxChat() {
+    if (syntaxChat) {
+        console.log('⛔️ SyntaxChat already initialized, skipping');
+        return;
+    }
+
+    console.log('🚀 Initializing SyntaxChat');
+    try {
+        syntaxChat = new SyntaxPrimeChat();
+        window.syntaxPrimeChat = syntaxChat; // Global reference for onclick handlers
+        console.log('✅ SyntaxChat initialized successfully');
+    } catch (error) {
+        console.error('❌ Failed to initialize chat:', error);
+    }
+}
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeSyntaxChat);
+} else {
+    // DOM is already ready
+    initializeSyntaxChat();
+}
+
+// Add notification animations and Google Trends styling + Voice & Image Integration - Date: 9/28/25
+const style = document.createElement('style');
+style.textContent = `
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideOutRight {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+}
+
+/* Google Trends Training Styles */
+.trends-opportunity {
+    border-left: 4px solid #4CAF50;
+}
+
+.trends-header {
+    border-left: 4px solid #2196F3;
+}
+
+.trends-info {
+    border-left: 4px solid #FF9800;
+}
+
+.trends-error {
+    border-left: 4px solid #f44336;
+}
+
+.trends-bubble {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.opportunity-card {
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    color: #333;
+}
+
+.opportunity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.opportunity-keyword {
+    font-size: 18px;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.opportunity-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.business-area {
+    background: #3498db;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.urgency-level {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.urgency-level.critical {
+    background: #e74c3c;
+    color: white;
+}
+
+.urgency-level.high {
+    background: #f39c12;
+    color: white;
+}
+
+.urgency-level.medium {
+    background: #f1c40f;
+    color: #333;
+}
+
+.urgency-level.low {
+    background: #95a5a6;
+    color: white;
+}
+
+.opportunity-details {
+    margin-bottom: 16px;
+}
+
+.opportunity-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #666;
+}
+
+.opportunity-description {
+    color: #555;
+    line-height: 1.4;
+}
+
+.opportunity-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.training-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.training-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.training-btn:disabled {
+    cursor: not-allowed;
+}
+
+.good-match {
+    background: #27ae60;
+    color: white;
+}
+
+.good-match:hover:not(:disabled) {
+    background: #219a52;
+}
+
+.bad-match {
+    background: #e74c3c;
+    color: white;
+}
+
+.bad-match:hover:not(:disabled) {
+    background: #c0392b;
+}
+
+.feedback-success {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 8px;
+    color: #155724;
+}
+
+.success-icon {
+    font-size: 18px;
+}
+
+.success-text {
+    font-weight: 500;
+}
+
+/* Toast Notifications */
+.syntax-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    max-width: 400px;
+    transform: translateX(100%);
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.syntax-toast.toast-show {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.toast-content {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    background: white;
+    border-left: 4px solid #ccc;
+}
+
+.toast-info .toast-content {
+    border-left-color: #2196F3;
+}
+
+.toast-success .toast-content {
+    border-left-color: #4CAF50;
+}
+
+.toast-error .toast-content {
+    border-left-color: #f44336;
+}
+
+.toast-warning .toast-content {
+    border-left-color: #FF9800;
+}
+
+.toast-message {
+    flex: 1;
+    margin-right: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    line-height: 1;
+}
+
+.toast-close:hover {
+    color: #333;
+}
+`;
+document.head.appendChild(style);WaveformAnimation(speakerButton) {
+        // Remove existing waveform
+        this.hideWaveformAnimation(speakerButton);
+        
+        const waveform = document.createElement('div');
+        waveform.className = 'waveform-animation';
+        waveform.innerHTML = `
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+        `;
+        
+        speakerButton.parentNode.appendChild(waveform);
+    }
+
+    hideWaveformAnimation(speakerButton) {
+        const waveform = speakerButton.parentNode.querySelector('.waveform-animation');
+        if (waveform) {
+            waveform.remove();
+        }
+    }
+
+    // === Image Generation Integration - Date: 9/28/25 ===
+    async initializeImageSystem() {
+        try {
+            console.log('🎨 Initializing Image Generation system...');
+            
+            // Check if image system is available
+            const healthCheck = await this.apiCall('/integrations/image-generation/health', 'GET');
+            
+            if (healthCheck && healthCheck.status === 'healthy') {
+                this.imageEnabled = true;
+                console.log('✅ Image Generation system available');
+            } else {
+                console.log('⚠️ Image Generation system not available');
+            }
+        } catch (error) {
+            console.log('⚠️ Image Generation system not available:', error.message);
+            this.imageEnabled = false;
+        }
+    }
+
+    detectImageCommands(message) {
+        const imagePatterns = [
+            /^image\s+(.+)/i,
+            /^mockup\s+(.+)/i
+        ];
+        
+        for (const pattern of imagePatterns) {
+            const match = message.match(pattern);
+            if (match) {
+                return match[1].trim(); // Return the prompt
+            }
+        }
+        return null;
+    }
+
+    async generateImage(prompt, messageElement) {
+        if (!this.imageEnabled) return;
+
+        try {
+            console.log(`🎨 Generating image for prompt: "${prompt}"`);
+            
+            // Show progress indicator
+            const progressElement = this.showImageProgress(messageElement, prompt);
+            
+            const response = await this.apiCall('/integrations/image-generation/generate', 'POST', {
+                prompt: prompt,
+                format: 'png',
+                size: '512x512'
+            });
+
+            if (response && response.image_data) {
+                // Hide progress indicator
+                if (progressElement) {
+                    progressElement.remove();
+                }
+                
+                // Display the generated image
+                this.displayGeneratedImage(messageElement, response, prompt);
+                console.log('✅ Image generated and displayed');
+            } else {
+                throw new Error('No image data received');
+            }
+
+        } catch (error) {
+            console.error('Image generation failed:', error);
+            
+            // Hide progress and show error
+            const progressElement = messageElement.querySelector('.image-generation-progress');
+            if (progressElement) {
+                progressElement.remove();
+            }
+            
+            this.showImageError(messageElement, 'Image generation failed. Please try again.');
+        }
+    }
+
+    showImageProgress(messageElement, prompt) {
+        const progressDiv = document.createElement('div');
+        progressDiv.className = 'image-generation-progress';
+        progressDiv.innerHTML = `
+            <div class="progress-spinner"></div>
+            <div class="progress-info">
+                <div class="progress-title">Generating image...</div>
+                <div class="progress-subtitle">"${prompt.length > 50 ? prompt.substring(0, 50) + '...' : prompt}"</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+        `;
+        
+        const messageBubble = messageElement.querySelector('.message-bubble');
+        messageBubble.appendChild(progressDiv);
+        
+        // Animate progress bar
+        const progressBar = progressDiv.querySelector('.progress-bar');
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress += Math.random() * 15;
+            if (progress > 90) progress = 90;
+            progressBar.style.width = `${progress}%`;
+        }, 500);
+        
+        progressDiv._progressInterval = progressInterval;
+        return progressDiv;
+    }
+
+    displayGeneratedImage(messageElement, imageData, prompt) {
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'generated-image-container';
+        
+        const img = document.createElement('img');
+        img.className = 'generated-image';
+        img.src = `data:image/png;base64,${imageData.image_data}`;
+        img.alt = prompt;
+        
+        const controls = document.createElement('div');
+        controls.className = 'image-controls';
+        controls.innerHTML = `
+            <div class="image-info">
+                <div class="image-prompt">${prompt}</div>
+                <div class="image-metadata">Generated • PNG • 512x512</div>
+            </div>
+            <button class="download-button" onclick="window.syntaxPrimeChat.downloadImage('${imageData.image_data}', '${prompt}')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7,10 12,15 17,10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download PNG
+            </button>
+        `;
+        
+        imageContainer.appendChild(img);
+        imageContainer.appendChild(controls);
+        
+        const messageBubble = messageElement.querySelector('.message-bubble');
+        messageBubble.appendChild(imageContainer);
+        
+        // Scroll to show new image
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    showImageError(messageElement, errorMessage) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'image-generation-error';
+        errorDiv.innerHTML = `
+            <div style="color: var(--error); padding: var(--spacing-md); background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-md); margin-top: var(--spacing-sm);">
+                ❌ ${errorMessage}
+            </div>
+        `;
+        
+        const messageBubble = messageElement.querySelector('.message-bubble');
+        messageBubble.appendChild(errorDiv);
+    }
+
+    downloadImage(imageData, prompt) {
+        try {
+            const link = document.createElement('a');
+            link.href = `data:image/png;base64,${imageData}`;
+            link.download = `${prompt.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50)}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            console.log('📥 Image downloaded');
+        } catch (error) {
+            console.error('Download failed:', error);
+        }
+    }
+
     // === Message detection for trends keywords ===
     detectTrendsKeywords(message) {
         const trendsKeywords = [
@@ -253,7 +887,7 @@ class SyntaxPrimeChat {
     // === Google Trends Training System ===
     async initializeTrendsSystem() {
         try {
-            console.log('🔍 Initializing Google Trends system...');
+            console.log('📊 Initializing Google Trends system...');
             
             // Check if trends system is available
             const healthCheck = await this.apiCall('/api/health/trends', 'GET');
@@ -302,7 +936,7 @@ class SyntaxPrimeChat {
                 );
                 
                 if (newOpportunities.length > 0) {
-                    console.log(`🔔 ${newOpportunities.length} new trend opportunities found`);
+                    console.log(`📈 ${newOpportunities.length} new trend opportunities found`);
                     
                     // Add to pending list
                     this.pendingOpportunities.push(...newOpportunities);
@@ -315,7 +949,7 @@ class SyntaxPrimeChat {
                     
                     // Show in-app toast
                     this.showToast(
-                        `🔔 ${newOpportunities.length} new trend opportunities available`,
+                        `📈 ${newOpportunities.length} new trend opportunities available`,
                         'info'
                     );
                 }
@@ -349,7 +983,7 @@ class SyntaxPrimeChat {
         }
 
         try {
-            console.log('🔍 Loading trend opportunities...');
+            console.log('📊 Loading trend opportunities...');
             
             // Fetch latest opportunities
             const opportunities = await this.apiCall('/api/trends/opportunities', 'GET');
@@ -707,21 +1341,21 @@ class SyntaxPrimeChat {
         }
     }
 
-    // ENHANCED: Send message with detailed duplication tracking and trends detection
+    // ENHANCED: Send message with detailed duplication tracking and trends detection - PROTECTED
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
         const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         console.log(`🚀 sendMessage() called - ID: ${messageId}`);
-        console.log(`🔍 Message content: "${message}"`);
+        console.log(`📝 Message content: "${message}"`);
 
         if (!message && this.uploadedFiles.length === 0) {
             console.log('❌ Empty message, returning early');
             return;
         }
 
-        // CRITICAL: Enhanced anti-duplication with message tracking
+        // CRITICAL: Enhanced anti-duplication with message tracking - PROTECTED
         if (this.isSubmitting) {
             console.log(`⛔️ DUPLICATE BLOCKED: Already submitting (ID: ${messageId})`);
             return;
@@ -729,10 +1363,16 @@ class SyntaxPrimeChat {
 
         // Check for trends keywords and auto-load opportunities
         if (this.detectTrendsKeywords(message) && this.trendsEnabled) {
-            console.log('🔍 Trends keywords detected, loading opportunities...');
+            console.log('📊 Trends keywords detected, loading opportunities...');
             setTimeout(() => {
                 this.showTrendsOpportunities();
             }, 1000);
+        }
+
+        // Check for image generation commands - Date: 9/28/25
+        const imagePrompt = this.detectImageCommands(message);
+        if (imagePrompt && this.imageEnabled) {
+            console.log(`🎨 Image command detected: "${imagePrompt}"`);
         }
 
         console.log(`🔒 Setting isSubmitting = true (ID: ${messageId})`);
@@ -793,13 +1433,25 @@ class SyntaxPrimeChat {
 
             // Add AI response with response tracking
             console.log(`🤖 Adding AI response (ID: ${messageId} -> ${response.message_id})`);
-            this.addMessage('assistant', response.response, {
+            const assistantMessage = this.addMessage('assistant', response.response, {
                 messageId: response.message_id,
                 clientMessageId: messageId,
                 personality: response.personality_used,
                 responseTime: response.response_time_ms,
                 knowledgeSources: response.knowledge_sources || []
             });
+
+            // Voice synthesis for AI response - Date: 9/28/25
+            if (this.voiceEnabled && assistantMessage) {
+                console.log(`🎤 Starting voice synthesis for response ${response.message_id}`);
+                await this.synthesizeVoice(response.response, response.message_id);
+            }
+
+            // Image generation if requested - Date: 9/28/25
+            if (imagePrompt && this.imageEnabled && assistantMessage) {
+                console.log(`🎨 Starting image generation for prompt: "${imagePrompt}"`);
+                await this.generateImage(imagePrompt, assistantMessage);
+            }
 
             // Show remember button
             this.showRememberButton(response.message_id);
@@ -812,7 +1464,7 @@ class SyntaxPrimeChat {
                 clientMessageId: messageId
             });
         } finally {
-            // CRITICAL: Always re-enable input and reset submission flag
+            // CRITICAL: Always re-enable input and reset submission flag - PROTECTED
             console.log(`🔓 Resetting isSubmitting = false (ID: ${messageId})`);
             this.setInputState(true);
             this.isSubmitting = false;
@@ -852,7 +1504,7 @@ class SyntaxPrimeChat {
         }
     }
 
-    // ENHANCED: Message display from working version with feedback buttons
+    // ENHANCED: Message display from working version with feedback buttons + Voice & Image Integration - Date: 9/28/25
     addMessage(role, content, metadata = {}) {
         const messagesContainer = document.getElementById('chatMessages');
         const welcomeMessage = messagesContainer.querySelector('.welcome-message');
@@ -902,6 +1554,23 @@ class SyntaxPrimeChat {
 
         contentDiv.appendChild(bubble);
 
+        // Add voice controls for assistant messages - Date: 9/28/25
+        if (role === 'assistant' && !metadata.error && this.voiceEnabled) {
+            const voiceControls = document.createElement('div');
+            voiceControls.className = 'voice-controls';
+            
+            const speakerButton = document.createElement('button');
+            speakerButton.className = 'speaker-button';
+            speakerButton.title = 'Play Audio';
+            speakerButton.innerHTML = '🔊';
+            speakerButton.addEventListener('click', () => {
+                this.playVoiceMessage(metadata.messageId, speakerButton);
+            });
+            
+            voiceControls.appendChild(speakerButton);
+            contentDiv.appendChild(voiceControls);
+        }
+
         // Add message actions for assistant messages with feedback buttons
         if (role === 'assistant' && !metadata.error) {
             const actionsDiv = document.createElement('div');
@@ -932,10 +1601,11 @@ class SyntaxPrimeChat {
             badBtn.innerHTML = '👎';
             badBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'bad_answer'));
 
+            // FIXED: Personality feedback button - Date: 9/28/25
             const personalityBtn = document.createElement('button');
             personalityBtn.className = 'message-action feedback-personality';
             personalityBtn.title = 'Good Personality';
-            personalityBtn.innerHTML = '😄';
+            personalityBtn.innerHTML = '🖕'; // Fixed back to original
             personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good_personality'));
 
             actionsDiv.appendChild(copyBtn);
@@ -967,6 +1637,9 @@ class SyntaxPrimeChat {
 
         // Store message content for potential bookmarking
         messageDiv._messageContent = content;
+        
+        // Return message element for voice/image integration - Date: 9/28/25
+        return messageDiv;
     }
 
     formatMessageContent(content) {
@@ -1139,6 +1812,12 @@ class SyntaxPrimeChat {
             clearInterval(this.trendsPollingInterval);
         }
         
+        // Clean up audio - Date: 9/28/25
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+        }
+        
         sessionStorage.removeItem('syntaxprime_auth');
         window.location.href = 'login.html';
     }
@@ -1289,288 +1968,4 @@ class SyntaxPrimeChat {
         this.showBookmarkModal();
     }
 
-    showRememberButton(messageId) {
-        const rememberBtn = document.getElementById('rememberBtn');
-        if (rememberBtn) {
-            rememberBtn.style.display = 'block';
-            rememberBtn.setAttribute('data-message-id', messageId);
-        }
-    }
-
-    showError(message) {
-        console.error('Error:', message);
-        // Could add a toast notification here
-    }
-}
-
-// ENHANCED: Proper initialization with DOM ready protection
-let syntaxChat = null;
-
-function initializeSyntaxChat() {
-    if (syntaxChat) {
-        console.log('⛔️ SyntaxChat already initialized, skipping');
-        return;
-    }
-
-    console.log('🚀 Initializing SyntaxChat');
-    try {
-        syntaxChat = new SyntaxPrimeChat();
-        window.syntaxPrimeChat = syntaxChat; // Global reference for onclick handlers
-        console.log('✅ SyntaxChat initialized successfully');
-    } catch (error) {
-        console.error('❌ Failed to initialize chat:', error);
-    }
-}
-
-// Wait for DOM to be ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeSyntaxChat);
-} else {
-    // DOM is already ready
-    initializeSyntaxChat();
-}
-
-// Add notification animations and Google Trends styling
-const style = document.createElement('style');
-style.textContent = `
-@keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-@keyframes slideOutRight {
-    from { transform: translateX(0); opacity: 1; }
-    to { transform: translateX(100%); opacity: 0; }
-}
-
-/* Google Trends Training Styles */
-.trends-opportunity {
-    border-left: 4px solid #4CAF50;
-}
-
-.trends-header {
-    border-left: 4px solid #2196F3;
-}
-
-.trends-info {
-    border-left: 4px solid #FF9800;
-}
-
-.trends-error {
-    border-left: 4px solid #f44336;
-}
-
-.trends-bubble {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.opportunity-card {
-    border: 2px solid #e0e0e0;
-    border-radius: 12px;
-    padding: 16px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    color: #333;
-}
-
-.opportunity-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-}
-
-.opportunity-keyword {
-    font-size: 18px;
-    font-weight: bold;
-    color: #2c3e50;
-}
-
-.opportunity-meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.business-area {
-    background: #3498db;
-    color: white;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.urgency-level {
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: uppercase;
-}
-
-.urgency-level.critical {
-    background: #e74c3c;
-    color: white;
-}
-
-.urgency-level.high {
-    background: #f39c12;
-    color: white;
-}
-
-.urgency-level.medium {
-    background: #f1c40f;
-    color: #333;
-}
-
-.urgency-level.low {
-    background: #95a5a6;
-    color: white;
-}
-
-.opportunity-details {
-    margin-bottom: 16px;
-}
-
-.opportunity-stats {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #666;
-}
-
-.opportunity-description {
-    color: #555;
-    line-height: 1.4;
-}
-
-.opportunity-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-}
-
-.training-btn {
-    flex: 1;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 14px;
-}
-
-.training-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-.training-btn:disabled {
-    cursor: not-allowed;
-}
-
-.good-match {
-    background: #27ae60;
-    color: white;
-}
-
-.good-match:hover:not(:disabled) {
-    background: #219a52;
-}
-
-.bad-match {
-    background: #e74c3c;
-    color: white;
-}
-
-.bad-match:hover:not(:disabled) {
-    background: #c0392b;
-}
-
-.feedback-success {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 12px;
-    background: #d4edda;
-    border: 1px solid #c3e6cb;
-    border-radius: 8px;
-    color: #155724;
-}
-
-.success-icon {
-    font-size: 18px;
-}
-
-.success-text {
-    font-weight: 500;
-}
-
-/* Toast Notifications */
-.syntax-toast {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 10000;
-    max-width: 400px;
-    transform: translateX(100%);
-    opacity: 0;
-    transition: all 0.3s ease;
-}
-
-.syntax-toast.toast-show {
-    transform: translateX(0);
-    opacity: 1;
-}
-
-.toast-content {
-    display: flex;
-    align-items: center;
-    padding: 12px 16px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    background: white;
-    border-left: 4px solid #ccc;
-}
-
-.toast-info .toast-content {
-    border-left-color: #2196F3;
-}
-
-.toast-success .toast-content {
-    border-left-color: #4CAF50;
-}
-
-.toast-error .toast-content {
-    border-left-color: #f44336;
-}
-
-.toast-warning .toast-content {
-    border-left-color: #FF9800;
-}
-
-.toast-message {
-    flex: 1;
-    margin-right: 12px;
-    font-size: 14px;
-    line-height: 1.4;
-}
-
-.toast-close {
-    background: none;
-    border: none;
-    font-size: 18px;
-    cursor: pointer;
-    color: #666;
-    padding: 0;
-    line-height: 1;
-}
-
-.toast-close:hover {
-    color: #333;
-}
-`;
-document.head.appendChild(style);
+    show

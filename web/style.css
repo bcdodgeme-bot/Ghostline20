@@ -2,6 +2,7 @@
    Syntax Prime V2 - Modern Chat Interface Styles
    Dark theme with deep purple accents matching the grumpy cat logo
    RESTORED: Original design + critical input area fixes
+   Date: 9/28/25 - Added Voice Synthesis & Image Generation Integration
    ============================================================================= */
 
 /* === Reset & Base Styles === */
@@ -371,8 +372,8 @@ body {
     overflow-y: auto;
     padding: var(--spacing-lg);
     scroll-behavior: smooth;
-    /* FIXED: Add bottom padding to prevent input overlap */
-    padding-bottom: 120px;
+    /* FIXED: Add bottom padding to prevent input overlap - Date: 9/28/25 */
+    padding-bottom: 140px;
 }
 
 .welcome-message {
@@ -500,6 +501,255 @@ body {
     margin: 0;
 }
 
+/* === Voice Synthesis Integration Styles - Date: 9/28/25 === */
+.voice-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+.speaker-button {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--accent-primary);
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+}
+
+.speaker-button:hover {
+    background: rgba(123, 97, 255, 0.1);
+    border-color: var(--accent-primary);
+    transform: scale(1.05);
+}
+
+.speaker-button.playing {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.speaker-button.loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Custom Audio Player Styles - Date: 9/28/25 */
+.custom-audio-player {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    min-width: 280px;
+}
+
+.audio-play-button {
+    background: var(--accent-primary);
+    border: none;
+    color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 14px;
+}
+
+.audio-play-button:hover {
+    background: var(--accent-secondary);
+    transform: scale(1.05);
+}
+
+.audio-progress-container {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    position: relative;
+    cursor: pointer;
+}
+
+.audio-progress {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.1s ease;
+}
+
+.audio-time {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    min-width: 45px;
+    text-align: center;
+}
+
+/* Waveform Animation - Date: 9/28/25 */
+.waveform-animation {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 20px;
+    margin-left: var(--spacing-sm);
+}
+
+.waveform-bar {
+    width: 3px;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    animation: waveform 1.2s ease-in-out infinite;
+}
+
+.waveform-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
+.waveform-bar:nth-child(2) { animation-delay: 0.1s; height: 16px; }
+.waveform-bar:nth-child(3) { animation-delay: 0.2s; height: 12px; }
+.waveform-bar:nth-child(4) { animation-delay: 0.3s; height: 20px; }
+.waveform-bar:nth-child(5) { animation-delay: 0.4s; height: 8px; }
+
+@keyframes waveform {
+    0%, 100% { transform: scaleY(0.3); opacity: 0.7; }
+    50% { transform: scaleY(1); opacity: 1; }
+}
+
+/* === Image Generation Integration Styles - Date: 9/28/25 === */
+.generated-image-container {
+    margin-top: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+}
+
+.generated-image {
+    width: 100%;
+    max-width: 512px;
+    height: auto;
+    display: block;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.image-controls {
+    padding: var(--spacing-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-elevated);
+}
+
+.image-info {
+    flex: 1;
+}
+
+.image-prompt {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+    font-weight: 500;
+}
+
+.image-metadata {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+}
+
+.download-button {
+    background: var(--accent-primary);
+    border: none;
+    color: white;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.download-button:hover {
+    background: var(--accent-secondary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-glow);
+}
+
+/* Image Generation Progress Indicator - Date: 9/28/25 */
+.image-generation-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin-top: var(--spacing-md);
+}
+
+.progress-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--bg-secondary);
+    border-top: 3px solid var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.progress-info {
+    flex: 1;
+}
+
+.progress-title {
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.progress-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    margin-top: var(--spacing-sm);
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    animation: progressPulse 2s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 .message-actions {
     display: flex;
     gap: var(--spacing-sm);
@@ -571,7 +821,7 @@ body {
     }
 }
 
-/* === FIXED: Chat Input Container - Better Positioning === */
+/* === FIXED: Chat Input Container - Better Positioning - Date: 9/28/25 === */
 .chat-input-container {
     position: fixed !important;
     bottom: 0;
@@ -580,7 +830,7 @@ body {
     border-top: 1px solid var(--border-color);
     background: var(--bg-surface);
     backdrop-filter: blur(20px);
-    z-index: 100;
+    z-index: 50; /* FIXED: Lower z-index to prevent covering feedback buttons */
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
 }
 
@@ -1015,7 +1265,7 @@ body {
     line-height: 1.5;
 }
 
-/* === FIXED: Responsive Design - Input positioning === */
+/* === FIXED: Responsive Design - Input positioning - Date: 9/28/25 === */
 @media (max-width: 768px) {
     .sidebar {
         position: fixed;
@@ -1059,6 +1309,21 @@ body {
     .modal-content {
         margin: var(--spacing-md);
     }
+    
+    /* Mobile Voice/Image Controls - Date: 9/28/25 */
+    .custom-audio-player {
+        min-width: 250px;
+    }
+    
+    .generated-image {
+        max-width: 100%;
+    }
+    
+    .image-controls {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        align-items: flex-start;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1077,7 +1342,7 @@ body {
     
     .chat-messages {
         padding: var(--spacing-md);
-        padding-bottom: 140px; /* More padding on mobile */
+        padding-bottom: 160px; /* More padding on mobile for new features */
     }
     
     .message-bubble {
@@ -1094,6 +1359,24 @@ body {
     
     .welcome-message h2 {
         font-size: 1.5rem;
+    }
+    
+    /* Mobile Voice/Image Adjustments - Date: 9/28/25 */
+    .voice-controls {
+        flex-wrap: wrap;
+    }
+    
+    .custom-audio-player {
+        min-width: 200px;
+        padding: var(--spacing-sm);
+    }
+    
+    .waveform-animation {
+        height: 16px;
+    }
+    
+    .image-generation-progress {
+        padding: var(--spacing-sm);
     }
 }
 

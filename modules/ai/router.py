@@ -2,9 +2,10 @@
 """
 AI Brain Router for Syntax Prime V2 - DEBUGGED VERSION
 Handles all AI endpoints including chat with full integration support
-Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Health → Chat/AI
+Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Voice → Image → Health → Chat/AI
 Date: 9/27/25 - Added extensive debugging and fixed critical bugs
 Date: 9/27/25 - Added prayer notifications, location detection, and Google Trends integration
+Date: 9/28/25 - Added Voice Synthesis and Image Generation to integration chain
 """
 
 import asyncio
@@ -73,7 +74,7 @@ async def get_current_user_id() -> str:
 async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str = Depends(get_current_user_id)):
     """
     Main chat endpoint - processes message through complete AI brain
-    Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Health → Chat/AI
+    Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Voice → Image → Health → Chat/AI
     """
     start_time = time.time()
     thread_id = chat_request.thread_id or str(uuid.uuid4())
@@ -96,7 +97,9 @@ async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str
                 detect_bluesky_command, process_bluesky_command,
                 detect_rss_command, get_rss_marketing_context,
                 detect_scraper_command, process_scraper_command,
-                detect_trends_command, process_trends_command
+                detect_trends_command, process_trends_command,
+                detect_voice_command, process_voice_command,
+                detect_image_command, process_image_command
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -312,7 +315,7 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Prayer notification command processing failed: {e}")
                 special_response = f"🔔 **Prayer Notification Error**\n\nUnable to process notification request: {str(e)}"
         
-        # 5.2 📍 Location Detection Commands (FIFTH-B) - NEW
+        # 5.2 📍 Location Detection Commands (FIFTH-B)
         elif detect_location_command(message_content):
             logger.info("📍 DEBUG: Location command detected")
             try:
@@ -323,7 +326,7 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Location command processing failed: {e}")
                 special_response = f"📍 **Location Detection Error**\n\nUnable to process location request: {str(e)}"
         
-        # 6. 📈 Google Trends command detection (SIXTH) - NEW
+        # 6. 📈 Google Trends command detection (SIXTH)
         elif detect_trends_command(message_content)[0]:  # [0] gets the boolean from the tuple
             logger.info("📈 DEBUG: Google Trends command detected - processing...")
             try:
@@ -333,7 +336,27 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Google Trends processing failed: {e}")
                 special_response = f"📈 **Google Trends Processing Error**\n\nError: {str(e)}"
         
-        # 7. 🏥 Health Check command detection (SEVENTH)
+        # 7. 🎤 Voice Synthesis command detection (SEVENTH) - NEW 9/28/25
+        elif detect_voice_command(message_content):
+            logger.info("🎤 DEBUG: Voice synthesis command detected - processing...")
+            try:
+                special_response = await process_voice_command(message_content, user_id)
+                logger.info("✅ DEBUG: Voice synthesis response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Voice synthesis processing failed: {e}")
+                special_response = f"🎤 **Voice Synthesis Processing Error**\n\nError: {str(e)}"
+        
+        # 8. 🎨 Image Generation command detection (EIGHTH) - NEW 9/28/25
+        elif detect_image_command(message_content):
+            logger.info("🎨 DEBUG: Image generation command detected - processing...")
+            try:
+                special_response = await process_image_command(message_content, user_id)
+                logger.info("✅ DEBUG: Image generation response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
+                special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
+        
+        # 9. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:
@@ -357,7 +380,7 @@ All systems operational and ready to assist!"""
                 logger.error(f"❌ DEBUG: Health check processing failed: {e}")
                 special_response = f"🏥 **Health Check Error**\n\nUnable to retrieve system health: {str(e)}"
         
-        # 8. 🧠 Chat/AI function (EIGHTH - DEFAULT AI PROCESSING)
+        # 10. 🧠 Chat/AI function (TENTH - DEFAULT AI PROCESSING)
         if special_response:
             # Use the special response from one of the integrations
             logger.info(f"✅ DEBUG: Using special integration response (length: {len(special_response)} chars)")
@@ -425,7 +448,7 @@ Current time: {datetime_context.get('current_time_12h', 'Unknown')} ({datetime_c
 User Context: The user is asking questions on {datetime_context['full_datetime']}.
 When discussing time or dates, use the current information provided above.
 
-Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, Google Trends, and Health monitoring are available via chat commands."""
+Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketing Scraper, Prayer Times, Google Trends, Voice Synthesis, Image Generation, and Health monitoring are available via chat commands."""
                 ]
                 
                 # Add RSS context if available
@@ -537,7 +560,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     'thread_id': thread_id,
                     'message_count': context_info.get('total_messages', 0) + 1,
                     'has_knowledge': len(knowledge_sources) > 0,
-                    'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->google_trends->health->ai'
+                    'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->google_trends->voice->image->health->ai'
                 }
             )
             
@@ -767,7 +790,7 @@ async def get_ai_stats():
             },
             "personality_stats": personality_stats,
             "feedback_stats": feedback_summary,
-            "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
+            "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->voice->image->health->ai",
             "system_health": {
                 "memory_active": True,
                 "knowledge_engine_active": True,
@@ -809,7 +832,7 @@ async def test_ai_connection():
         "system_status": "healthy" if primary_healthy or fallback_available else "degraded",
         "primary_provider": "openrouter",
         "fallback_provider": "inception_labs",
-        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
+        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->voice->image->health->ai",
         "default_user_id": DEFAULT_USER_ID
     }
 
@@ -829,10 +852,10 @@ async def shutdown_ai_brain():
 def get_integration_info():
     """Get information about the AI brain router integration"""
     return {
-        "name": "AI Brain Router with Full Integration Support + DEBUG",
-        "version": "2.1.0",
-        "description": "Complete AI chat with ordered integration processing and extensive debugging",
-        "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 📈 Google Trends → 🏥 Health → 🧠 Chat/AI",
+        "name": "AI Brain Router with Full Integration Support + Voice & Image",
+        "version": "2.2.0",
+        "description": "Complete AI chat with ordered integration processing including Voice Synthesis and Image Generation",
+        "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 📈 Google Trends → 🎤 Voice → 🎨 Image → 🏥 Health → 🧠 Chat/AI",
         "components": [
             "Main Chat Endpoint (/ai/chat)",
             "Personality Engine",
@@ -847,6 +870,8 @@ def get_integration_info():
             "Prayer Times with Notifications",
             "Location Detection",
             "Google Trends Analysis",
+            "Voice Synthesis with ElevenLabs",
+            "Image Generation with Replicate",
             "Health Monitoring"
         ],
         "endpoints": {
@@ -869,6 +894,8 @@ def get_integration_info():
             "🕌 Islamic prayer times with notifications",
             "📍 IP-based location detection",
             "📈 Google Trends analysis",
+            "🎤 Voice synthesis with personality voices",
+            "🎨 AI image generation with inline display",
             "🏥 System health monitoring",
             "🧠 Advanced AI chat processing",
             "🔧 Extensive debug logging"
@@ -897,8 +924,10 @@ def check_module_health():
         "missing_vars": missing_vars,
         "status": "ready" if len(missing_vars) == 0 else "needs_configuration",
         "chat_endpoint_active": True,
-        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->health->ai",
+        "integration_order": "weather->bluesky->rss->scraper->prayer->google_trends->voice->image->health->ai",
         "debug_features_active": True,
+        "voice_synthesis_integrated": True,
+        "image_generation_integrated": True,
         "default_user_id": DEFAULT_USER_ID,
-        "note": "Complete AI router with all integrations properly ordered and extensive debugging"
+        "note": "Complete AI router with Voice & Image integrations properly ordered and extensive debugging"
     }
