@@ -30,6 +30,9 @@ import numpy as np
 from io import BytesIO
 import base64
 
+# Add to the existing imports section:
+from .pattern_fatigue import get_pattern_fatigue_tracker, handle_duplicate_complaint, handle_time_joke_complaint
+
 # Google Trends integration imports - 9/27/25
 from ..integrations.google_trends.opportunity_detector import OpportunityDetector
 from ..integrations.google_trends.opportunity_training import OpportunityTraining
@@ -1262,6 +1265,7 @@ Please try a different prompt or contact support if the issue persists."""
             generation_time = generation_result.get('generation_time_seconds', 0)
             enhanced_prompt = generation_result.get('enhanced_prompt', prompt)
             resolution = generation_result.get('resolution', '1024x1024')
+            image_base64 = generation_result.get('image_base64', '')
             
             return f"""✅ **Image Generated Successfully**
 
@@ -1272,8 +1276,9 @@ Please try a different prompt or contact support if the issue persists."""
 ⏱️ **Generation Time:** {generation_time:.1f} seconds
 💾 **Image ID:** {image_id}
 
-🖼️ **Base64 Image Data Available**
-The image has been generated and is ready for inline display!
+🖼️ **Image displayed below**
+
+<IMAGE_DATA>{image_base64}</IMAGE_DATA>
 
 **Download Options:**
 📥 PNG: `/integrations/image-generation/download/{image_id}?format=png`
@@ -1839,3 +1844,37 @@ def check_module_health() -> Dict[str, Any]:
         "file_processing_available": True,
         "note": "This is a helper module - endpoints are handled by router.py"
     }
+#-- Section 13: Pattern Fatigue Detection Functions 9/29/25
+def detect_pattern_complaint(message: str) -> tuple[bool, str, str]:
+    """Detect if user is complaining about repetitive patterns"""
+    message_lower = message.lower()
+    
+    duplicate_triggers = ["stop mentioning duplicate", "ignore duplicate", "stop pointing out double", "enough with the double", "stop saying twice", "stop being annoying", "quit that", "enough", "stop that"]
+    time_joke_triggers = ["stop with the 2am", "enough 2am jokes", "quit asking about 2am", "stop time jokes", "no more 2am"]
+    
+    for trigger in duplicate_triggers:
+        if trigger in message_lower:
+            return True, "duplicate_callouts", message
+    
+    for trigger in time_joke_triggers:
+        if trigger in message_lower:
+            return True, "2am_jokes", message
+    
+    return False, "", ""
+
+async def handle_pattern_complaint(user_id: str, pattern_type: str, complaint_text: str) -> str:
+    """Handle user complaints about annoying patterns"""
+    try:
+        if pattern_type == "duplicate_callouts":
+            return await handle_duplicate_complaint(user_id, complaint_text)
+        elif pattern_type == "2am_jokes":
+            return await handle_time_joke_complaint(user_id, complaint_text)
+        else:
+            return "Got it! I'll try to be less repetitive with that pattern."
+    except Exception as e:
+        logger.error(f"Failed to handle pattern complaint: {e}")
+        return "I'll try to be less repetitive with that pattern."
+
+def detect_pattern_fatigue_command(message: str) -> bool:
+    """Detect pattern fatigue management commands"""
+    return any(keyword in message.lower() for keyword in ["pattern fatigue", "pattern stats", "fatigue status"])

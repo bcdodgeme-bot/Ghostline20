@@ -30,6 +30,9 @@ from .feedback_processor import get_feedback_processor
 
 logger = logging.getLogger(__name__)
 
+# Add to existing imports from chat:
+detect_pattern_complaint, handle_pattern_complaint, detect_pattern_fatigue_command,
+
 #-- Request/Response Models
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message")
@@ -326,6 +329,17 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Location command processing failed: {e}")
                 special_response = f"📍 **Location Detection Error**\n\nUnable to process location request: {str(e)}"
         
+        # 5.3 🚫 Pattern Fatigue Complaints (FIFTH-C)
+        elif detect_pattern_complaint(message_content)[0]:
+            logger.info("🚫 DEBUG: Pattern complaint detected")
+            try:
+                is_complaint, pattern_type, complaint_text = detect_pattern_complaint(message_content)
+                special_response = await handle_pattern_complaint(user_id, pattern_type, complaint_text)
+                logger.info("✅ DEBUG: Pattern complaint handled successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Pattern complaint handling failed: {e}")
+                special_response = "I understand you want me to stop that pattern. I'll try to be less repetitive."
+        
         # 6. 📈 Google Trends command detection (SIXTH)
         elif detect_trends_command(message_content)[0]:  # [0] gets the boolean from the tuple
             logger.info("📈 DEBUG: Google Trends command detected - processing...")
@@ -494,30 +508,6 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 except Exception as e:
                     logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
                     raise
-                    
-                # PATTERN FATIGUE PROCESSING: Apply personality filtering with user awareness
-                    logger.info("🎭 DEBUG: Applying personality post-processing with pattern fatigue...")
-                    try:
-                        personality_engine = get_personality_engine()
-                        
-                        # Apply personality-specific post-processing with user_id for pattern fatigue
-                        filtered_response = personality_engine.process_personality_response(
-                            response_content,
-                            chat_request.personality_id,
-                            user_id  # This passes user_id to enable pattern fatigue filtering
-                        )
-                        
-                        # Log if response was modified by pattern fatigue
-                        if filtered_response != response_content:
-                            logger.info(f"🚫 DEBUG: Pattern fatigue filter applied - response modified")
-                            response_content = filtered_response
-                        else:
-                            logger.info("✅ DEBUG: Pattern fatigue check passed - no filtering needed")
-                            
-                    except Exception as e:
-                        logger.warning(f"⚠️ DEBUG: Pattern fatigue processing failed: {e}")
-                        # Continue with original response if filtering fails
-                        pass
                 
                 
                 # Extract response content
@@ -525,21 +515,30 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     final_response = ai_response['choices'][0]['message']['content']
                     model_used = ai_response.get('model', 'claude-3.5-sonnet')
                     logger.info(f"✅ DEBUG: AI response extracted (length: {len(final_response)} chars)")
+                    
+                    # Apply personality post-processing (includes pattern fatigue if available)
+                    logger.info("🎭 DEBUG: Applying personality post-processing...")
+                    try:
+                        personality_engine = get_personality_engine()
+                        processed_response = personality_engine.process_personality_response(
+                            final_response,
+                            chat_request.personality_id,
+                            user_id
+                        )
+                        
+                        if processed_response != final_response:
+                            logger.info("🚫 DEBUG: Response modified by personality processing")
+                            final_response = processed_response
+                        else:
+                            logger.info("✅ DEBUG: Personality processing completed, no changes")
+                            
+                    except Exception as e:
+                        logger.warning(f"⚠️ DEBUG: Personality processing failed: {e}")
+                        
                 else:
                     final_response = "I'm sorry, I encountered an error processing your message. Please try again."
                     model_used = "error"
                     logger.error("❌ DEBUG: Invalid AI response format")
-                    
-            except Exception as e:
-                logger.error(f"❌ DEBUG: Regular AI processing failed: {e}")
-                final_response = f"I encountered an error during AI processing: {str(e)}"
-                model_used = "error"
-                # Set default context_info for error cases
-                context_info = {
-                    'total_messages': 1,
-                    'estimated_tokens': 0,
-                    'has_memory_context': False
-                }
         
         # Calculate response time
         response_time_ms = int((time.time() - start_time) * 1000)

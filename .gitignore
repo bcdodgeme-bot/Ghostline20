@@ -38,3 +38,4 @@ modules/ai/__pycache__/personality_engine.cpython-311.pyc
 modules/ai/__pycache__/router.cpython-311.pyc
 modules/integrations/rss_learning/database_manager.py.backup.20250927_115151
 modules/ai/__pycache__/__init__.cpython-311.pyc
+modules/ai/__pycache__/pattern_fatigue.cpython-311.pyc
