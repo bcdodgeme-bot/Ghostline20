@@ -506,14 +506,13 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
                     raise
                 
-                
                 # Extract response content
                 if ai_response and 'choices' in ai_response:
                     final_response = ai_response['choices'][0]['message']['content']
                     model_used = ai_response.get('model', 'claude-3.5-sonnet')
                     logger.info(f"✅ DEBUG: AI response extracted (length: {len(final_response)} chars)")
                     
-# Apply personality post-processing (includes pattern fatigue if available)
+                    # Apply personality post-processing (includes pattern fatigue if available)
                     logger.info("🎭 DEBUG: Applying personality post-processing...")
                     try:
                         personality_engine = get_personality_engine()
@@ -531,29 +530,33 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     except Exception as e:
                         logger.warning(f"⚠️ DEBUG: Personality processing failed: {e}")
                         # Continue with original response if processing fails
-                            
-                    # Calculate response time
-                    response_time_ms = int((time.time() - start_time) * 1000)
-                    logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
+            
+            except Exception as e:
+                logger.error(f"❌ DEBUG: AI processing failed: {e}")
+                raise
         
-    # Store AI response
-                    logger.info("💾 DEBUG: Storing AI response...")
-                    try:
-                        ai_message_id = await memory_manager.add_message(
-                            thread_id=thread_id,
-                            role="assistant",
-                            content=final_response,
-                            model_used=model_used,
-                            response_time_ms=response_time_ms,
-                            knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
-                        )
-                        logger.info(f"✅ DEBUG: AI response stored: {ai_message_id}")
-                    except Exception as e:
-                        logger.error(f"❌ DEBUG: Failed to store AI response: {e}")
-                        ai_message_id = str(uuid.uuid4())  # Fallback ID
+        # Calculate response time
+        response_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
         
-                    # Build response
-                    logger.info("📦 DEBUG: Building final response object...")
+        # Store AI response
+        logger.info("💾 DEBUG: Storing AI response...")
+        try:
+            ai_message_id = await memory_manager.add_message(
+                thread_id=thread_id,
+                role="assistant",
+                content=final_response,
+                model_used=model_used,
+                response_time_ms=response_time_ms,
+                knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
+            )
+            logger.info(f"✅ DEBUG: AI response stored: {ai_message_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to store AI response: {e}")
+            ai_message_id = str(uuid.uuid4())  # Fallback ID
+        
+        # Build response
+        logger.info("📦 DEBUG: Building final response object...")
         
         try:
             chat_response = ChatResponse(
