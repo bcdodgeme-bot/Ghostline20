@@ -679,7 +679,7 @@ style.textContent = `
     color: #333;
 }
 `;
-document.head.appendChild(style);WaveformAnimation(speakerButton) {
+document.head.appendChild(style);showWaveformAnimation(speakerButton) {
         // Remove existing waveform
         this.hideWaveformAnimation(speakerButton);
         
