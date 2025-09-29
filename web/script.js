@@ -263,6 +263,8 @@ class SyntaxPrimeChat {
         try {
             console.log('🎤 Initializing Voice Synthesis system...');
             
+            this.voiceEnabled = true; // Force enable for testing
+            
             // Check if voice system is available
             const healthCheck = await this.apiCall('/api/voice/health', 'GET');
             
