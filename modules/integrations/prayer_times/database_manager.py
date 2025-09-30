@@ -415,7 +415,7 @@ class PrayerDatabaseManager:
             if now < prayer_time:
                 # Calculate time until prayer
                 now_dt = now_full
-                prayer_dt = datetime.combine(today, prayer_time)
+                prayer_dt = eastern.localize(datetime.combine(today, prayer_time))
                 time_until = prayer_dt - now_dt
                 
                 return {
@@ -434,8 +434,8 @@ class PrayerDatabaseManager:
 
         if tomorrow_prayer_data:
             tomorrow_fajr = tomorrow_prayer_data["prayer_times"]["fajr"]
-            now_dt = datetime.combine(today, now)
-            fajr_dt = datetime.combine(tomorrow, tomorrow_fajr)
+            now_dt = now_full
+            fajr_dt = eastern.localize(datetime.combine(tomorrow, tomorrow_fajr))
             time_until = fajr_dt - now_dt
             
             return {
