@@ -2077,6 +2077,76 @@ Each account has access to Analytics, Search Console, Gmail, Calendar, and Drive
                 else:
                     return "No Google accounts connected yet. Use `google auth setup` to connect!"
             
+            # Add this to modules/ai/chat.py in the process_google_command function
+# Insert this AFTER the keywords section and BEFORE the status section
+
+# ============================================================
+# EMAIL/GMAIL COMMANDS
+# ============================================================
+
+                elif command_type == 'email_summary':
+                    from ..integrations.google_workspace.gmail_client import get_email_summary
+                    
+                    try:
+                        summary = await get_email_summary(user_id, days=7)
+                        
+                        if not summary or summary.get('total_emails', 0) == 0:
+                            return """📧 **Email Summary**
+
+                No emails found in the last 7 days, or Gmail is not yet connected.
+
+                Use `google auth setup` to connect your Gmail account."""
+                        
+                        return f"""📧 **Email Summary (Last 7 Days)**
+
+                **Total Emails:** {summary.get('total_emails', 0)}
+                **Urgent:** {summary.get('urgent', 0)} 🔴
+                **High Priority:** {summary.get('high_priority', 0)} 🟡
+                **Needs Response:** {summary.get('needs_response', 0)} ✉️
+                **Business:** {summary.get('business', 0)} 💼
+                **Negative Sentiment:** {summary.get('negative_sentiment', 0)} ⚠️
+
+                Use `google email draft` to create responses!"""
+                        
+                    except Exception as e:
+                        logger.error(f"Email summary failed: {e}")
+                        return f"""📧 **Email Summary Error**
+
+                Could not retrieve email summary: {str(e)}
+
+                Make sure your Gmail account is connected with `google auth setup`"""
+
+                elif command_type == 'email_draft':
+                    return """📧 **Create Email Draft**
+
+                To create an email draft, I need more information:
+
+                **Example format:**
+                "Create an email draft to john@example.com about meeting tomorrow"
+
+                **Or provide:**
+                • **To:** Recipient email
+                • **Subject:** Email subject
+                • **Body:** Your message
+
+                Once you provide these details, I'll create a draft in your Gmail account that you can review and send."""
+
+                elif command_type == 'email_account':
+                    return """📧 **Gmail Account Management**
+
+                Your Gmail integration provides:
+                • 📊 Email analysis and prioritization
+                • 🔍 Smart filtering (urgent, business, needs response)
+                • 🎭 Sentiment analysis
+                • ✍️ Draft creation with AI assistance
+                • 🔒 Privacy-first (metadata only, 30-day retention)
+
+                **Commands:**
+                • `google email summary` - See last 7 days
+                • `google email draft` - Create a draft
+
+                **Connected Accounts:** Check with `google auth accounts`"""
+                            
             # ============================================================
             # STATUS & HELP COMMANDS
             # ============================================================
