@@ -1979,7 +1979,7 @@ def detect_google_command(message: str) -> tuple[bool, str]:
     else:
         return True, 'general_help'
         
-        async def process_google_command(message: str, user_id: str) -> str:
+async def process_google_command(message: str, user_id: str) -> str:
     """Process Google Workspace commands and return personality-driven responses"""
     try:
         import httpx
