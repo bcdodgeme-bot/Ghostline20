@@ -1993,7 +1993,7 @@ async def process_google_command(message: str, user_id: str) -> str:
         # Get base URL for API calls
         base_url = "http://localhost:8000"  # Adjust if needed
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+async with httpx.AsyncClient(timeout=30.0) as client:
             
             # ============================================================
             # AUTHENTICATION COMMANDS
