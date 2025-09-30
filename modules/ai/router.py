@@ -19,6 +19,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Any
 
 # Import our AI brain components
 from .openrouter_client import get_openrouter_client, cleanup_openrouter_client
@@ -71,11 +72,42 @@ async def get_current_user_id() -> str:
 
 #-- Main Chat Endpoint (THE CORE FUNCTIONALITY WITH EXTENSIVE DEBUG)
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str = Depends(get_current_user_id)):
+async def chat_with_ai(
+    message: str = Form(...),
+    personality_id: str = Form(default='syntaxprime'),
+    thread_id: Optional[str] = Form(None),
+    include_knowledge: bool = Form(default=True),
+    files: List[UploadFile] = File(default=[]),
+    request: Request = None,
+    user_id: str = Depends(get_current_user_id)
+):
     """
-    Main chat endpoint - processes message through complete AI brain
+    Main chat endpoint with file upload support
     Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Voice → Image → Health → Chat/AI
     """
+    # Process uploaded files if any
+    file_context = ""
+    if files and len(files) > 0:
+        logger.info(f"📎 Processing {len(files)} uploaded files")
+        from .chat import process_uploaded_files
+        
+        try:
+            processed_files = await process_uploaded_files(files)
+            logger.info(f"✅ Files processed successfully: {[f['filename'] for f in processed_files]}")
+            
+            # Add file context to the message
+            file_context = "\n\n**Uploaded Files:**\n"
+            for file_info in processed_files:
+                file_context += f"\n📎 **{file_info['filename']}**\n"
+                if file_info['analysis'].get('description'):
+                    file_context += f"   {file_info['analysis']['description']}\n"
+        except Exception as e:
+            logger.error(f"❌ File processing failed: {e}")
+            file_context = f"\n\n⚠️ Note: Some files could not be processed: {str(e)}"
+    
+    # Combine message with file context
+    full_message = message + file_contex
+    
     start_time = time.time()
     thread_id = chat_request.thread_id or str(uuid.uuid4())
     
@@ -100,6 +132,7 @@ async def chat_with_ai(chat_request: ChatRequest, request: Request, user_id: str
                 detect_trends_command, process_trends_command,
                 detect_voice_command, process_voice_command,
                 detect_image_command, process_image_command,
+                detect_google_command, process_google_command,
                 detect_pattern_complaint, handle_pattern_complaint
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
@@ -368,7 +401,20 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
         
-        # 9. 🏥 Health Check command detection (NINTH)
+        # 9. 🔍 Google Workspace command detection (NINTH) - NEW 9/30/25
+        elif detect_google_command(message_content)[0]:  # [0] gets the boolean from the tuple
+            logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+            try:
+                special_response = await process_google_command(message_content, user_id)
+                logger.info("✅ DEBUG: Google Workspace response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
+                special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
+       
+        # Continue with AI response if no special command detected
+        if special_response is None:
+       
+        # 10. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:

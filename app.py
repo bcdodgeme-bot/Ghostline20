@@ -61,6 +61,10 @@ from modules.integrations.voice_synthesis import get_integration_info as voice_i
 from modules.integrations.image_generation import router as image_generation_router
 from modules.integrations.image_generation.integration_info import get_integration_info as image_integration_info, check_module_health as image_module_health
 
+#-- NEW Section 2i: Google Workspace Integration - added 9/30/25
+from modules.integrations.google_workspace import router as google_workspace_router
+from modules.integrations.google_workspace import get_integration_info as google_workspace_integration_info, check_module_health as google_workspace_module_health
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -72,8 +76,22 @@ from modules.ai.chat import get_integration_info as chat_integration_info, check
 #-- Section 5: Authentication Module Imports - 9/23/25
 from modules.core.auth import AuthManager, get_current_user
 
-# Setup logging
+#-- Section 5.5: Enhanced Logging Configuration - 9/30/25
+# Configure root logger to DEBUG level to capture all router.py debug messages
+import logging
+
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.DEBUG,  # Changed from INFO to DEBUG
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Outputs to console/Railway logs
+    ]
+)
+
+# Setup app logger
 logger = logging.getLogger(__name__)
+logger.info("🔧 DEBUG logging enabled for chat diagnostics")
 
 #-- Section 6: FastAPI App Configuration - 9/23/25
 app = FastAPI(
@@ -727,6 +745,18 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
+    # Google Workspace integration - added 9/30/25
+    try:
+        integrations['google_workspace'] = {
+            'info': google_workspace_integration_info(),
+            'health': google_workspace_module_health()
+        }
+    except Exception as e:
+        integrations['google_workspace'] = {
+            'info': {'module': 'google_workspace', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
     # AI Brain integration
     try:
         integrations['ai_brain'] = {
@@ -777,6 +807,7 @@ async def integrations_info():
     }
 
 #-- Section 12: Integration Module Routers - updated 9/28/25 with Voice & Image
+#-- Section 12: Integration Module Routers - updated 9/30/25 with Google Workspace
 # Include Slack-ClickUp integration router
 app.include_router(slack_clickup_router)
 
@@ -809,6 +840,9 @@ app.include_router(voice_synthesis_router)
 
 # Include Image Generation integration router - added 9/28/25
 app.include_router(image_generation_router)
+
+# Include Google Workspace integration router - added 9/30/25
+app.include_router(google_workspace_router)
 
 #-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
 # Periodic cleanup of expired sessions (every hour) + Prayer notification service

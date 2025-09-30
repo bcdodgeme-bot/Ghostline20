@@ -70,3 +70,12 @@ charset-normalizer>=3.3.0
 urllib3>=2.0.0
 
 pytrends>=3.0.0
+
+# Google Workspace Integration - Added for Google Analytics, Search Console, Drive
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.108.0
+
+# Cryptography for token encryption (Fort Knox security)
+cryptography>=41.0.0

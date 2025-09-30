@@ -1736,7 +1736,7 @@ def get_integration_info():
     """Get information about the chat integration helper module"""
     return {
         "name": "AI Chat Integration Helper",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "description": "Helper functions for weather, prayer times, scraper, RSS, Bluesky, Google Trends, Voice Synthesis, Image Generation, and file processing",
         "note": "This module provides helper functions only - endpoints are handled by router.py",
         "features": [
@@ -1748,6 +1748,9 @@ def get_integration_info():
             "Google Trends opportunity detection and training",
             "Voice synthesis with ElevenLabs integration",
             "Image generation with Replicate AI",
+            "Google Workspace integration (Analytics, Search Console, Gmail, Calendar, Drive)",
+            "Self-evolving Intelligence Engine with pattern recognition",
+            "Multi-account Google authentication with OAuth device flow",
             "File upload processing (images, PDFs, CSVs, text)",
             "Real-time datetime context generation",
             "Location detection for prayer times",
@@ -1764,6 +1767,7 @@ def get_integration_info():
             "google_trends_integration",
             "voice_synthesis_detection_and_processing",
             "image_generation_detection_and_processing",
+            "google_workspace_command_processing",
             "file_upload_and_analysis"
         ]
     }
@@ -1878,3 +1882,522 @@ async def handle_pattern_complaint(user_id: str, pattern_type: str, complaint_te
 def detect_pattern_fatigue_command(message: str) -> bool:
     """Detect pattern fatigue management commands"""
     return any(keyword in message.lower() for keyword in ["pattern fatigue", "pattern stats", "fatigue status"])
+
+#-- Section 14: Google Workspace Integration Functions - 9/30/25
+def detect_google_command(message: str) -> tuple[bool, str]:
+    """Detect Google Workspace commands and determine command type"""
+    google_keywords = [
+        'google auth', 'google status', 'google sites', 'google accounts',
+        'google keywords', 'google analytics', 'google drive', 'google email',
+        'google gmail', 'google calendar', 'google suggest', 'google patterns',
+        'google predict', 'google intelligence', 'google optimal'
+    ]
+    
+    message_lower = message.lower()
+    
+    # Check if it's a Google command
+    is_google_command = any(keyword in message_lower for keyword in google_keywords)
+    
+    if not is_google_command:
+        return False, ''
+    
+    # Determine command type
+    if 'auth' in message_lower:
+        if 'setup' in message_lower or 'start' in message_lower:
+            return True, 'auth_setup'
+        elif 'status' in message_lower:
+            return True, 'auth_status'
+        elif 'accounts' in message_lower:
+            return True, 'auth_accounts'
+        else:
+            return True, 'auth_help'
+    
+    elif 'keywords' in message_lower or 'keyword' in message_lower:
+        if 'pending' in message_lower:
+            return True, 'keywords_pending'
+        elif 'approve' in message_lower:
+            return True, 'keywords_approve'
+        elif 'ignore' in message_lower:
+            return True, 'keywords_ignore'
+        else:
+            return True, 'keywords_view'
+    
+    elif 'analytics' in message_lower:
+        if 'all' in message_lower:
+            return True, 'analytics_all'
+        else:
+            return True, 'analytics_site'
+    
+    elif 'optimal' in message_lower and 'timing' in message_lower:
+        return True, 'optimal_timing'
+    
+    elif 'drive' in message_lower:
+        if 'create' in message_lower and 'doc' in message_lower:
+            return True, 'drive_create_doc'
+        elif 'create' in message_lower and 'sheet' in message_lower:
+            return True, 'drive_create_sheet'
+        elif 'recent' in message_lower:
+            return True, 'drive_recent'
+        else:
+            return True, 'drive_help'
+    
+    elif 'email' in message_lower or 'gmail' in message_lower:
+        if 'summary' in message_lower:
+            return True, 'email_summary'
+        elif 'draft' in message_lower:
+            return True, 'email_draft'
+        else:
+            return True, 'email_account'
+    
+    elif 'calendar' in message_lower:
+        if 'today' in message_lower:
+            return True, 'calendar_today'
+        elif 'week' in message_lower:
+            return True, 'calendar_week'
+        elif 'feeds' in message_lower:
+            return True, 'calendar_feeds'
+        elif 'windows' in message_lower:
+            return True, 'calendar_windows'
+        else:
+            return True, 'calendar_help'
+    
+    elif 'suggest' in message_lower or 'intelligence' in message_lower:
+        return True, 'intelligence_suggest'
+    
+    elif 'patterns' in message_lower:
+        return True, 'intelligence_patterns'
+    
+    elif 'predict' in message_lower:
+        return True, 'intelligence_predict'
+    
+    elif 'status' in message_lower:
+        return True, 'status_check'
+    
+    elif 'sites' in message_lower:
+        return True, 'sites_list'
+    
+    else:
+        return True, 'general_help'
+        
+        async def process_google_command(message: str, user_id: str) -> str:
+    """Process Google Workspace commands and return personality-driven responses"""
+    try:
+        import httpx
+        from ..integrations.google_workspace import extract_site_from_message
+        
+        is_google, command_type = detect_google_command(message)
+        
+        if not is_google:
+            return "I didn't recognize that as a Google Workspace command. Try `google status` to see what's available!"
+        
+        # Get base URL for API calls
+        base_url = "http://localhost:8000"  # Adjust if needed
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            
+            # ============================================================
+            # AUTHENTICATION COMMANDS
+            # ============================================================
+            
+            if command_type == 'auth_setup':
+                response = await client.get(f"{base_url}/google/auth/start")
+                data = response.json()
+                
+                if data.get('success'):
+                    device_code = data['device_code']
+                    user_code = data['user_code']
+                    verification_url = data['verification_url']
+                    
+                    return f"""🔐 **Google Workspace Authentication Started!**
+
+**Step 1:** Visit this URL:
+{verification_url}
+
+**Step 2:** Enter this code:
+`{user_code}`
+
+**Step 3:** Approve the permissions
+
+I'll keep checking... this usually takes about 30 seconds. Use `google auth status` to check if I'm connected yet!
+
+*Device Code: {device_code}*"""
+                else:
+                    return f"❌ **Authentication Failed:** {data.get('error', 'Unknown error')}\n\nMake sure your Google credentials are configured in the environment."
+            
+            elif command_type == 'auth_status':
+                response = await client.get(f"{base_url}/google/status")
+                data = response.json()
+                
+                oauth_status = data.get('oauth_authentication', {})
+                accounts = oauth_status.get('accounts', [])
+                
+                if accounts:
+                    account_list = "\n".join([f"   • {acc['email']} - ✅ Connected" for acc in accounts])
+                    return f"""🔐 **Google Workspace Status**
+
+**OAuth Accounts:**
+{account_list}
+
+**Analytics Sites:** {len(data.get('analytics_sites', []))} configured
+**Search Console Sites:** {len(data.get('search_console_sites', []))} configured
+
+You're all set! Try `google keywords bcdodge` to see opportunities."""
+                else:
+                    return """🔐 **Google Workspace Status**
+
+❌ No OAuth accounts connected yet.
+
+Use `google auth setup` to connect your Google accounts and unlock:
+   • 📊 Analytics insights
+   • 🔍 Search Console keyword opportunities
+   • 📧 Gmail intelligence
+   • 📅 Calendar integration
+   • 🎯 Self-evolving content suggestions"""
+            
+            elif command_type == 'auth_accounts':
+                response = await client.get(f"{base_url}/google/auth/accounts")
+                data = response.json()
+                
+                accounts = data.get('accounts', [])
+                if accounts:
+                    account_details = []
+                    for acc in accounts:
+                        scopes_count = len(acc.get('scopes', []))
+                        account_details.append(f"   📧 {acc['email']} ({scopes_count} permissions)")
+                    
+                    accounts_text = "\n".join(account_details)
+                    return f"""🔐 **Connected Google Accounts**
+
+{accounts_text}
+
+**Total Accounts:** {len(accounts)}
+
+Each account has access to Analytics, Search Console, Gmail, Calendar, and Drive based on your permissions."""
+                else:
+                    return "No Google accounts connected yet. Use `google auth setup` to connect!"
+            
+            # ============================================================
+            # KEYWORDS COMMANDS (PRIMARY FOCUS)
+            # ============================================================
+            
+            elif command_type == 'keywords_view':
+                site_name = extract_site_from_message(message)
+                
+                if not site_name:
+                    return """🔍 **Keyword Opportunities**
+
+Please specify a site:
+   • `google keywords bcdodge`
+   • `google keywords rose_angel`
+   • `google keywords meals_feelz`
+   • `google keywords tv_signals`
+   • `google keywords damn_it_carl`
+
+Or use `google keywords pending` to see all pending opportunities across sites."""
+                
+                response = await client.get(f"{base_url}/google/keywords/opportunities/{site_name}")
+                data = response.json()
+                
+                if not data.get('success'):
+                    return f"❌ **Error:** {data.get('error', 'Failed to fetch keywords')}"
+                
+                opportunities = data.get('opportunities', [])
+                
+                if not opportunities:
+                    return f"""🔍 **Keyword Opportunities for {site_name}**
+
+No new opportunities found right now. This could mean:
+   • ✅ You've already reviewed all current opportunities
+   • 🔄 Search Console data is being refreshed
+   • 📊 Try checking Analytics: `google analytics {site_name}`"""
+                
+                # Format opportunities with personality
+                keyword_list = []
+                for i, opp in enumerate(opportunities[:10], 1):  # Show top 10
+                    keyword = opp.get('keyword', 'Unknown')
+                    clicks = opp.get('clicks', 0)
+                    impressions = opp.get('impressions', 0)
+                    position = opp.get('position', 0)
+                    
+                    keyword_list.append(f"{i}. **{keyword}**")
+                    keyword_list.append(f"   📊 Position: {position:.1f} | Clicks: {clicks} | Impressions: {impressions}")
+                
+                keywords_text = "\n".join(keyword_list)
+                
+                return f"""🔍 **Keyword Opportunities for {site_name}**
+
+Found {len(opportunities)} opportunities! Here are the top performers:
+
+{keywords_text}
+
+**Actions:**
+   • `google keywords approve {site_name} [keyword]` - Add to your content table
+   • `google keywords ignore {site_name} [keyword]` - Not interested
+
+These keywords are already ranking but could perform better with dedicated content!"""
+            
+            elif command_type == 'keywords_pending':
+                response = await client.get(f"{base_url}/google/keywords/pending")
+                data = response.json()
+                
+                if not data.get('success'):
+                    return f"❌ **Error:** {data.get('error', 'Failed to fetch pending keywords')}"
+                
+                pending = data.get('pending_opportunities', {})
+                
+                if not pending:
+                    return """🔍 **Pending Keyword Opportunities**
+
+No pending opportunities across any sites right now. All caught up!
+
+Try:
+   • `google keywords [site]` to scan a specific site
+   • `google analytics all` to see traffic insights"""
+                
+                # Format by site
+                site_summaries = []
+                for site, opps in pending.items():
+                    count = len(opps)
+                    site_summaries.append(f"   • **{site}**: {count} opportunities")
+                
+                sites_text = "\n".join(site_summaries)
+                total = sum(len(opps) for opps in pending.values())
+                
+                return f"""🔍 **Pending Keyword Opportunities**
+
+**Total:** {total} opportunities across {len(pending)} sites
+
+{sites_text}
+
+Use `google keywords [site]` to review opportunities for a specific site."""
+            
+            elif command_type in ['keywords_approve', 'keywords_ignore']:
+                # Extract site and keyword from message
+                site_name = extract_site_from_message(message)
+                
+                # Extract keyword (everything after approve/ignore and site name)
+                message_lower = message.lower()
+                if 'approve' in message_lower:
+                    keyword_start = message_lower.find('approve') + len('approve')
+                else:
+                    keyword_start = message_lower.find('ignore') + len('ignore')
+                
+                keyword_part = message[keyword_start:].strip()
+                
+                # Remove site name if it's in the keyword part
+                if site_name and site_name in keyword_part.lower():
+                    keyword_part = keyword_part.lower().replace(site_name, '').strip()
+                
+                keyword = keyword_part.strip()
+                
+                if not site_name or not keyword:
+                    return """❌ **Missing Information**
+
+Please specify both site and keyword:
+   • `google keywords approve bcdodge web development tips`
+   • `google keywords ignore rose_angel meditation guide`"""
+                
+                action = 'approve' if command_type == 'keywords_approve' else 'ignore'
+                
+                response = await client.post(
+                    f"{base_url}/google/keywords/decision",
+                    json={
+                        'site_name': site_name,
+                        'keyword': keyword,
+                        'decision': action,
+                        'user_id': user_id
+                    }
+                )
+                data = response.json()
+                
+                if data.get('success'):
+                    if action == 'approve':
+                        return f"""✅ **Keyword Approved!**
+
+**Site:** {site_name}
+**Keyword:** "{keyword}"
+
+This keyword has been added to your content table and will be tracked for performance. The Intelligence Engine will start learning from this decision!"""
+                    else:
+                        return f"""🚫 **Keyword Ignored**
+
+**Site:** {site_name}
+**Keyword:** "{keyword}"
+
+Got it - I won't suggest this one again. The Intelligence Engine is learning your preferences!"""
+                else:
+                    return f"❌ **Error:** {data.get('error', 'Failed to process decision')}"
+            
+            # ============================================================
+            # ANALYTICS COMMANDS
+            # ============================================================
+            
+            elif command_type == 'analytics_site':
+                site_name = extract_site_from_message(message)
+                
+                if not site_name:
+                    return """📊 **Google Analytics**
+
+Please specify a site:
+   • `google analytics bcdodge`
+   • `google analytics rose_angel`
+   • `google analytics all` - See all sites"""
+                
+                response = await client.get(f"{base_url}/google/analytics/summary/{site_name}")
+                data = response.json()
+                
+                if not data.get('success'):
+                    return f"❌ **Error:** {data.get('error', 'Failed to fetch analytics')}"
+                
+                summary = data.get('summary', {})
+                
+                return f"""📊 **Analytics Summary for {site_name}**
+
+**Traffic (Last 30 Days):**
+   • Total Users: {summary.get('total_users', 0):,}
+   • Total Sessions: {summary.get('total_sessions', 0):,}
+   • Pageviews: {summary.get('pageviews', 0):,}
+   • Bounce Rate: {summary.get('bounce_rate', 0):.1f}%
+
+**Top Pages:**
+{chr(10).join(f"   {i+1}. {page}" for i, page in enumerate(summary.get('top_pages', [])[:5]))}
+
+**Traffic Sources:**
+{chr(10).join(f"   • {source}: {count:,}" for source, count in summary.get('traffic_sources', {}).items())}
+
+Try `google optimal timing {site_name}` to see when your audience is most active!"""
+            
+            elif command_type == 'analytics_all':
+                sites = ['bcdodge', 'rose_angel', 'meals_feelz', 'tv_signals', 'damn_it_carl']
+                
+                site_summaries = []
+                for site in sites:
+                    try:
+                        response = await client.get(f"{base_url}/google/analytics/summary/{site}")
+                        data = response.json()
+                        if data.get('success'):
+                            summary = data.get('summary', {})
+                            users = summary.get('total_users', 0)
+                            site_summaries.append(f"   • **{site}**: {users:,} users")
+                    except:
+                        site_summaries.append(f"   • **{site}**: Data unavailable")
+                
+                summaries_text = "\n".join(site_summaries)
+                
+                return f"""📊 **Analytics Summary (All Sites)**
+
+**Last 30 Days:**
+{summaries_text}
+
+Use `google analytics [site]` for detailed insights on a specific site."""
+            
+            elif command_type == 'optimal_timing':
+                site_name = extract_site_from_message(message)
+                
+                if not site_name:
+                    return "Please specify a site: `google optimal timing bcdodge`"
+                
+                response = await client.get(f"{base_url}/google/analytics/optimal-timing/{site_name}")
+                data = response.json()
+                
+                if not data.get('success'):
+                    return f"❌ **Error:** {data.get('error', 'Failed to fetch timing data')}"
+                
+                timing = data.get('optimal_timing', {})
+                best_day = timing.get('best_day', 'Unknown')
+                best_hour = timing.get('best_hour', 0)
+                
+                # Convert hour to readable time
+                if best_hour < 12:
+                    time_str = f"{best_hour}:00 AM" if best_hour > 0 else "12:00 AM"
+                elif best_hour == 12:
+                    time_str = "12:00 PM"
+                else:
+                    time_str = f"{best_hour - 12}:00 PM"
+                
+                return f"""⏰ **Optimal Posting Time for {site_name}**
+
+**Best Day:** {best_day}
+**Best Time:** {time_str}
+
+Based on your Analytics data, this is when your audience is most engaged. The Intelligence Engine will use this for content suggestions!"""
+            
+            # ============================================================
+            # STATUS & HELP COMMANDS
+            # ============================================================
+            
+            elif command_type == 'status_check':
+                response = await client.get(f"{base_url}/google/status")
+                data = response.json()
+                
+                health = "✅ Healthy" if data.get('overall_health') == 'healthy' else "⚠️ Issues Detected"
+                oauth_count = len(data.get('oauth_authentication', {}).get('accounts', []))
+                analytics_count = len(data.get('analytics_sites', []))
+                
+                return f"""🔍 **Google Workspace Status**
+
+**System Health:** {health}
+**OAuth Accounts:** {oauth_count} connected
+**Analytics Sites:** {analytics_count} configured
+**Features Active:**
+   • 🔍 Search Console keyword tracking
+   • 📊 Analytics insights
+   • 📧 Gmail intelligence (multi-account)
+   • 📅 Calendar integration (11 feeds)
+   • 🎯 Self-evolving Intelligence Engine
+   • 💾 Drive document creation
+
+Use `google auth accounts` to see connected accounts."""
+            
+            elif command_type == 'sites_list':
+                return """🌐 **Configured Sites**
+
+**Active Sites:**
+   1. **bcdodge** - Primary site
+   2. **rose_angel** - Meditation & wellness
+   3. **meals_feelz** - Food & recipes
+   4. **tv_signals** - TV & entertainment
+   5. **damn_it_carl** - Personal blog
+
+Each site has Analytics and Search Console tracking enabled. Use `google keywords [site]` to see opportunities!"""
+            
+            else:
+                return """🔍 **Google Workspace Commands**
+
+**Authentication:**
+   • `google auth setup` - Connect your Google accounts
+   • `google auth status` - Check connection status
+   • `google auth accounts` - List connected accounts
+
+**Keywords (Search Console):**
+   • `google keywords [site]` - View opportunities for a site
+   • `google keywords pending` - See all pending across sites
+   • `google keywords approve [site] [keyword]` - Add to content table
+   • `google keywords ignore [site] [keyword]` - Skip this opportunity
+
+**Analytics:**
+   • `google analytics [site]` - Traffic summary
+   • `google analytics all` - All sites overview
+   • `google optimal timing [site]` - Best posting times
+
+**Status:**
+   • `google status` - Integration health check
+   • `google sites` - List configured sites
+
+**More features coming:** Gmail, Calendar, Drive, and Intelligence commands!"""
+    
+    except Exception as e:
+        logger.error(f"Google command processing failed: {e}")
+        return f"❌ **Google Workspace Error:** {str(e)}\n\nTry `google status` to check if the integration is running."
+        
+        def extract_site_from_message(message: str) -> Optional[str]:
+    """Extract site name from message"""
+    message_lower = message.lower()
+    
+    sites = ['bcdodge', 'rose_angel', 'meals_feelz', 'tv_signals', 'damn_it_carl']
+    
+    for site in sites:
+        if site in message_lower:
+            return site
+    
+    return None
