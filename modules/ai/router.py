@@ -106,7 +106,7 @@ async def chat_with_ai(
             file_context = f"\n\n⚠️ Note: Some files could not be processed: {str(e)}"
     
     # Combine message with file context
-    full_message = message + file_contex
+    full_message = message + file_context
     
     start_time = time.time()
     thread_id = chat_request.thread_id or str(uuid.uuid4())
