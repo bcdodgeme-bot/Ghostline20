@@ -16,9 +16,6 @@ Integration Philosophy:
 - Privacy-first approach with minimal data retention
 """
 
-from .router import router
-from .integration_info import get_integration_info, check_module_health
-
 # Module metadata
 __version__ = "2.0.0"
 __description__ = "Google Workspace integration with keyword intelligence"
@@ -80,6 +77,11 @@ OAUTH_SCOPES = [
 POLL_INTERVAL_SECONDS = 7200  # 2 hours (not every 3 minutes like V1!)
 MAX_KEYWORD_OPPORTUNITIES_PER_SITE = 50  # Limit opportunities to prevent overwhelm
 KEYWORD_OPPORTUNITY_EXPIRY_DAYS = 30  # How long opportunities stay active
+
+# Import router and functions AFTER all constants are defined
+# This prevents circular import errors
+from .router import router
+from .integration_info import get_integration_info, check_module_health
 
 # Export public API
 __all__ = [
