@@ -1993,6 +1993,10 @@ async def process_google_command(message: str, user_id: str) -> str:
         # Get base URL for API calls
         base_url = "http://localhost:8000"  # Adjust if needed
         
+    except Exception as e:
+        logger.error(f"Google Workspace command processing failed: {e}")
+        return f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
+        
 async with httpx.AsyncClient(timeout=30.0) as client:
             
             # ============================================================
