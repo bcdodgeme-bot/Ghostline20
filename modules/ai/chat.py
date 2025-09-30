@@ -1885,6 +1885,7 @@ def detect_pattern_fatigue_command(message: str) -> bool:
 
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
+#-- Section 14: Google Workspace Integration Functions - 9/30/25
 def detect_google_command(message: str) -> tuple[bool, str]:
     """Detect Google Workspace commands and determine command type"""
     google_keywords = [
@@ -1984,7 +1985,6 @@ async def process_google_command(message: str, user_id: str) -> str:
     """Process Google Workspace commands and return personality-driven responses"""
     try:
         import httpx
-        from ..integrations.google_workspace import extract_site_from_message
         
         is_google, command_type = detect_google_command(message)
         
@@ -1992,7 +1992,7 @@ async def process_google_command(message: str, user_id: str) -> str:
             return "I didn't recognize that as a Google Workspace command. Try `google status` to see what's available!"
         
         # Get base URL for API calls
-        base_url = "http://localhost:8000"  # Adjust if needed
+        base_url = "http://localhost:8000"
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             
@@ -2009,21 +2009,21 @@ async def process_google_command(message: str, user_id: str) -> str:
                     user_code = data['user_code']
                     verification_url = data['verification_url']
                     
-                    return f"""🔐 **Google Workspace Authentication Started!**
+                    return f"""Google Workspace Authentication Started!
 
-**Step 1:** Visit this URL:
+Step 1: Visit this URL:
 {verification_url}
 
-**Step 2:** Enter this code:
+Step 2: Enter this code:
 `{user_code}`
 
-**Step 3:** Approve the permissions
+Step 3: Approve the permissions
 
 I'll keep checking... this usually takes about 30 seconds. Use `google auth status` to check if I'm connected yet!
 
-*Device Code: {device_code}*"""
+Device Code: {device_code}"""
                 else:
-                    return f"❌ **Authentication Failed:** {data.get('error', 'Unknown error')}\n\nMake sure your Google credentials are configured in the environment."
+                    return f"Authentication Failed: {data.get('error', 'Unknown error')}\n\nMake sure your Google credentials are configured in the environment."
             
             elif command_type == 'auth_status':
                 response = await client.get(f"{base_url}/google/status")
@@ -2033,27 +2033,27 @@ I'll keep checking... this usually takes about 30 seconds. Use `google auth stat
                 accounts = oauth_status.get('accounts', [])
                 
                 if accounts:
-                    account_list = "\n".join([f"   • {acc['email']} - ✅ Connected" for acc in accounts])
-                    return f"""🔐 **Google Workspace Status**
+                    account_list = "\n".join([f"   - {acc['email']} - Connected" for acc in accounts])
+                    return f"""Google Workspace Status
 
-**OAuth Accounts:**
+OAuth Accounts:
 {account_list}
 
-**Analytics Sites:** {len(data.get('analytics_sites', []))} configured
-**Search Console Sites:** {len(data.get('search_console_sites', []))} configured
+Analytics Sites: {len(data.get('analytics_sites', []))} configured
+Search Console Sites: {len(data.get('search_console_sites', []))} configured
 
 You're all set! Try `google keywords bcdodge` to see opportunities."""
                 else:
-                    return """🔐 **Google Workspace Status**
+                    return """Google Workspace Status
 
-❌ No OAuth accounts connected yet.
+No OAuth accounts connected yet.
 
 Use `google auth setup` to connect your Google accounts and unlock:
-   • 📊 Analytics insights
-   • 🔍 Search Console keyword opportunities
-   • 📧 Gmail intelligence
-   • 📅 Calendar integration
-   • 🎯 Self-evolving content suggestions"""
+   - Analytics insights
+   - Search Console keyword opportunities
+   - Gmail intelligence
+   - Calendar integration
+   - Self-evolving content suggestions"""
             
             elif command_type == 'auth_accounts':
                 response = await client.get(f"{base_url}/google/auth/accounts")
@@ -2064,89 +2064,86 @@ Use `google auth setup` to connect your Google accounts and unlock:
                     account_details = []
                     for acc in accounts:
                         scopes_count = len(acc.get('scopes', []))
-                        account_details.append(f"   📧 {acc['email']} ({scopes_count} permissions)")
+                        account_details.append(f"   - {acc['email']} ({scopes_count} permissions)")
                     
                     accounts_text = "\n".join(account_details)
-                    return f"""🔐 **Connected Google Accounts**
+                    return f"""Connected Google Accounts
 
 {accounts_text}
 
-**Total Accounts:** {len(accounts)}
+Total Accounts: {len(accounts)}
 
 Each account has access to Analytics, Search Console, Gmail, Calendar, and Drive based on your permissions."""
                 else:
                     return "No Google accounts connected yet. Use `google auth setup` to connect!"
             
-            # Add this to modules/ai/chat.py in the process_google_command function
-# Insert this AFTER the keywords section and BEFORE the status section
-
-# ============================================================
-# EMAIL/GMAIL COMMANDS
-# ============================================================
-
-                elif command_type == 'email_summary':
-                    from ..integrations.google_workspace.gmail_client import get_email_summary
+            # ============================================================
+            # EMAIL/GMAIL COMMANDS
+            # ============================================================
+            
+            elif command_type == 'email_summary':
+                from ..integrations.google_workspace.gmail_client import get_email_summary
+                
+                try:
+                    summary = await get_email_summary(user_id, days=7)
                     
-                    try:
-                        summary = await get_email_summary(user_id, days=7)
-                        
-                        if not summary or summary.get('total_emails', 0) == 0:
-                            return """📧 **Email Summary**
+                    if not summary or summary.get('total_emails', 0) == 0:
+                        return """Email Summary
 
-                No emails found in the last 7 days, or Gmail is not yet connected.
+No emails found in the last 7 days, or Gmail is not yet connected.
 
-                Use `google auth setup` to connect your Gmail account."""
-                        
-                        return f"""📧 **Email Summary (Last 7 Days)**
+Use `google auth setup` to connect your Gmail account."""
+                    
+                    return f"""Email Summary (Last 7 Days)
 
-                **Total Emails:** {summary.get('total_emails', 0)}
-                **Urgent:** {summary.get('urgent', 0)} 🔴
-                **High Priority:** {summary.get('high_priority', 0)} 🟡
-                **Needs Response:** {summary.get('needs_response', 0)} ✉️
-                **Business:** {summary.get('business', 0)} 💼
-                **Negative Sentiment:** {summary.get('negative_sentiment', 0)} ⚠️
+Total Emails: {summary.get('total_emails', 0)}
+Urgent: {summary.get('urgent', 0)}
+High Priority: {summary.get('high_priority', 0)}
+Needs Response: {summary.get('needs_response', 0)}
+Business: {summary.get('business', 0)}
+Negative Sentiment: {summary.get('negative_sentiment', 0)}
 
-                Use `google email draft` to create responses!"""
-                        
-                    except Exception as e:
-                        logger.error(f"Email summary failed: {e}")
-                        return f"""📧 **Email Summary Error**
+Use `google email draft` to create responses!"""
+                    
+                except Exception as e:
+                    logger.error(f"Email summary failed: {e}")
+                    return f"""Email Summary Error
 
-                Could not retrieve email summary: {str(e)}
+Could not retrieve email summary: {str(e)}
 
-                Make sure your Gmail account is connected with `google auth setup`"""
+Make sure your Gmail account is connected with `google auth setup`"""
+            
+            elif command_type == 'email_draft':
+                return """Create Email Draft
 
-                elif command_type == 'email_draft':
-                    return """📧 **Create Email Draft**
+To create an email draft, I need more information:
 
-                To create an email draft, I need more information:
+Example format:
+"Create an email draft to john@example.com about meeting tomorrow"
 
-                **Example format:**
-                "Create an email draft to john@example.com about meeting tomorrow"
+Or provide:
+- To: Recipient email
+- Subject: Email subject
+- Body: Your message
 
-                **Or provide:**
-                • **To:** Recipient email
-                • **Subject:** Email subject
-                • **Body:** Your message
+Once you provide these details, I'll create a draft in your Gmail account that you can review and send."""
+            
+            elif command_type == 'email_account':
+                return """Gmail Account Management
 
-                Once you provide these details, I'll create a draft in your Gmail account that you can review and send."""
+Your Gmail integration provides:
+- Email analysis and prioritization
+- Smart filtering (urgent, business, needs response)
+- Sentiment analysis
+- Draft creation with AI assistance
+- Privacy-first (metadata only, 30-day retention)
 
-                elif command_type == 'email_account':
-                    return """📧 **Gmail Account Management**
+Commands:
+- `google email summary` - See last 7 days
+- `google email draft` - Create a draft
 
-                Your Gmail integration provides:
-                • 📊 Email analysis and prioritization
-                • 🔍 Smart filtering (urgent, business, needs response)
-                • 🎭 Sentiment analysis
-                • ✍️ Draft creation with AI assistance
-                • 🔒 Privacy-first (metadata only, 30-day retention)
-
-                **Commands:**
-                • `google email summary` - See last 7 days
-                • `google email draft` - Create a draft
-
-                **Connected Accounts:** Check with `google auth accounts`"""
-                            
+Connected Accounts: Check with `google auth accounts`"""
+            
             # ============================================================
             # STATUS & HELP COMMANDS
             # ============================================================
@@ -2155,62 +2152,67 @@ Each account has access to Analytics, Search Console, Gmail, Calendar, and Drive
                 response = await client.get(f"{base_url}/google/status")
                 data = response.json()
                 
-                health = "✅ Healthy" if data.get('overall_health') == 'healthy' else "⚠️ Issues Detected"
+                health = "Healthy" if data.get('overall_health') == 'healthy' else "Issues Detected"
                 oauth_count = len(data.get('oauth_authentication', {}).get('accounts', []))
                 analytics_count = len(data.get('analytics_sites', []))
                 
-                return f"""🔐 **Google Workspace Status**
+                return f"""Google Workspace Status
 
-**System Health:** {health}
-**OAuth Accounts:** {oauth_count} connected
-**Analytics Sites:** {analytics_count} configured
-**Features Active:**
-   • 🔍 Search Console keyword tracking
-   • 📊 Analytics insights
-   • 📧 Gmail intelligence (multi-account)
-   • 📅 Calendar integration (11 feeds)
-   • 🎯 Self-evolving Intelligence Engine
-   • 💾 Drive document creation
+System Health: {health}
+OAuth Accounts: {oauth_count} connected
+Analytics Sites: {analytics_count} configured
+Features Active:
+   - Search Console keyword tracking
+   - Analytics insights
+   - Gmail intelligence (multi-account)
+   - Calendar integration (11 feeds)
+   - Self-evolving Intelligence Engine
+   - Drive document creation
 
 Use `google auth accounts` to see connected accounts."""
             
             elif command_type == 'sites_list':
-                return """🌐 **Configured Sites**
+                return """Configured Sites
 
-**Active Sites:**
-   1. **bcdodge** - Primary site
-   2. **rose_angel** - Meditation & wellness
-   3. **meals_feelz** - Food & recipes
-   4. **tv_signals** - TV & entertainment
-   5. **damn_it_carl** - Personal blog
+Active Sites:
+   1. bcdodge - Primary site
+   2. rose_angel - Meditation & wellness
+   3. meals_feelz - Food & recipes
+   4. tv_signals - TV & entertainment
+   5. damn_it_carl - Personal blog
 
 Each site has Analytics and Search Console tracking enabled. Use `google keywords [site]` to see opportunities!"""
             
             else:
-                return """🔐 **Google Workspace Commands**
+                return """Google Workspace Commands
 
-**Authentication:**
-   • `google auth setup` - Connect your Google accounts
-   • `google auth status` - Check connection status
-   • `google auth accounts` - List connected accounts
+Authentication:
+   - `google auth setup` - Connect your Google accounts
+   - `google auth status` - Check connection status
+   - `google auth accounts` - List connected accounts
 
-**Keywords (Search Console):**
-   • `google keywords [site]` - View opportunities for a site
-   • `google keywords pending` - See all pending across sites
+Keywords (Search Console):
+   - `google keywords [site]` - View opportunities for a site
+   - `google keywords pending` - See all pending across sites
 
-**Analytics:**
-   • `google analytics [site]` - Traffic summary
-   • `google analytics all` - All sites overview
+Analytics:
+   - `google analytics [site]` - Traffic summary
+   - `google analytics all` - All sites overview
 
-**Status:**
-   • `google status` - Integration health check
-   • `google sites` - List configured sites
+Email:
+   - `google email summary` - Last 7 days of email
+   - `google email draft` - Create email draft
+   - `google email account` - Gmail integration info
 
-**More features coming:** Gmail, Calendar, Drive, and Intelligence commands!"""
+Status:
+   - `google status` - Integration health check
+   - `google sites` - List configured sites
+
+More features coming: Calendar, Drive, and Intelligence commands!"""
     
     except Exception as e:
         logger.error(f"Google command processing failed: {e}")
-        return f"❌ **Google Workspace Error:** {str(e)}\n\nTry `google status` to check if the integration is running."
+        return f"Google Workspace Error: {str(e)}\n\nTry `google status` to check if the integration is running."
 
 def extract_site_from_message(message: str) -> Optional[str]:
     """Extract site name from message"""
