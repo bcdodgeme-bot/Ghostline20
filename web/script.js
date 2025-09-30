@@ -1073,6 +1073,7 @@ class SyntaxPrimeChat {
     }
 
     // ENHANCED: Send message with detailed duplication tracking and trends detection - PROTECTED
+    // ENHANCED: Send message with detailed duplication tracking and trends detection - PROTECTED 9/30/25
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
@@ -1129,26 +1130,28 @@ class SyntaxPrimeChat {
             // Show typing indicator
             this.showTypingIndicator();
 
-            // Enhanced datetime context from working version
-            const currentDateTime = new Date();
-            const requestData = {
-                message: message,
-                personality_id: this.currentPersonality,
-                thread_id: this.currentThreadId,
-                include_knowledge: true,
-                client_message_id: messageId, // Track client-side message ID
-                context: {
-                    current_date: currentDateTime.toISOString().split('T')[0],
-                    current_time: currentDateTime.toLocaleTimeString('en-US', { hour12: false }),
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                    timestamp: currentDateTime.toISOString()
+            // FIXED: Create FormData instead of JSON object
+            const formData = new FormData();
+            formData.append('message', message);
+            formData.append('personality_id', this.currentPersonality);
+            
+            if (this.currentThreadId) {
+                formData.append('thread_id', this.currentThreadId);
+            }
+            
+            formData.append('include_knowledge', 'true');
+            
+            // Add uploaded files if any
+            if (this.uploadedFiles && this.uploadedFiles.length > 0) {
+                for (const file of this.uploadedFiles) {
+                    formData.append('files', file);
                 }
-            };
+            }
 
-            console.log(`📤 Sending API request (ID: ${messageId}):`, requestData.context);
+            console.log(`📤 Sending API request (ID: ${messageId}) with FormData`);
 
-            // Send request
-            const response = await this.apiCall('/ai/chat', 'POST', requestData);
+            // Send request - apiCall will handle FormData correctly
+            const response = await this.apiCall('/ai/chat', 'POST', formData);
 
             console.log(`📥 Received API response (ID: ${messageId}):`, {
                 messageId: response.message_id,
@@ -1190,16 +1193,12 @@ class SyntaxPrimeChat {
         } catch (error) {
             console.error(`❌ Chat error (ID: ${messageId}):`, error);
             this.hideTypingIndicator();
-            this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.', {
-                error: true,
-                clientMessageId: messageId
-            });
+            this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
         } finally {
-            // CRITICAL: Always re-enable input and reset submission flag - PROTECTED
+            // Always reset submission state
             console.log(`🔓 Resetting isSubmitting = false (ID: ${messageId})`);
-            this.setInputState(true);
             this.isSubmitting = false;
-            messageInput.focus();
+            this.setInputState(true);
         }
     }
 
