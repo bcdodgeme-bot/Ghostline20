@@ -109,11 +109,11 @@ async def chat_with_ai(
     full_message = message + file_context
     
     start_time = time.time()
-    thread_id = chat_request.thread_id or str(uuid.uuid4())
+    thread_id = thread_id or str(uuid.uuid4())
     
     # 🚨 CRITICAL DEBUG: Log everything
-    logger.info(f"🚀 CHAT START: Processing message '{chat_request.message[:50]}...'")
-    logger.info(f"🔍 DEBUG: user_id={user_id}, personality={chat_request.personality_id}")
+    logger.info(f"🚀 CHAT START: Processing message '{message[:50]}...'")
+    logger.info(f"🔍 DEBUG: user_id={user_id}, personality={personality_id}")
     logger.info(f"🧵 DEBUG: thread_id={thread_id}")
     
     try:
@@ -164,7 +164,7 @@ async def chat_with_ai(
         # Ensure thread exists or create it
         logger.info("🧵 DEBUG: Managing conversation thread...")
         try:
-            if not chat_request.thread_id:
+            if not thread_id:
                 logger.info("🆕 DEBUG: Creating new thread...")
                 thread_id = await memory_manager.create_conversation_thread(
                     platform='web',
@@ -173,22 +173,22 @@ async def chat_with_ai(
                 logger.info(f"✅ DEBUG: New thread created: {thread_id}")
             else:
                 # Verify existing thread exists
-                logger.info(f"🔍 DEBUG: Verifying existing thread: {chat_request.thread_id}")
+                logger.info(f"🔍 DEBUG: Verifying existing thread: {thread_id}")
                 try:
                     from ..core.database import db_manager
                     thread_check = await db_manager.fetch_one(
                         "SELECT id FROM conversation_threads WHERE id = $1 AND user_id = $2",
-                        chat_request.thread_id, user_id
+                        thread_id, user_id
                     )
                     if not thread_check:
-                        logger.warning(f"⚠️ DEBUG: Thread {chat_request.thread_id} not found, creating new thread")
+                        logger.warning(f"⚠️ DEBUG: Thread {thread_id} not found, creating new thread")
                         thread_id = await memory_manager.create_conversation_thread(
                             platform='web',
                             title=None
                         )
                         logger.info(f"✅ DEBUG: Fallback thread created: {thread_id}")
                     else:
-                        thread_id = chat_request.thread_id
+                        thread_id = thread_id
                         logger.info(f"✅ DEBUG: Using existing thread: {thread_id}")
                 except Exception as e:
                     logger.error(f"❌ DEBUG: Error checking thread: {e}")
@@ -208,7 +208,7 @@ async def chat_with_ai(
             user_message_id = await memory_manager.add_message(
                 thread_id=thread_id,
                 role="user",
-                content=chat_request.message
+                content=message
             )
             logger.info(f"✅ DEBUG: User message stored: {user_message_id}")
         except Exception as e:
@@ -216,7 +216,7 @@ async def chat_with_ai(
             raise
         
         # Build message content
-        message_content = chat_request.message
+        message_content = message
         logger.info(f"🔍 DEBUG: Processing message content: '{message_content[:100]}...'")
         
         # INTEGRATION ORDER: Check for special commands in the specified order
@@ -458,12 +458,12 @@ All systems operational and ready to assist!"""
                 logger.info(f"✅ DEBUG: Conversation history retrieved: {context_info.get('total_messages', 0)} messages")
                 
                 # Search knowledge base if requested
-                if chat_request.include_knowledge:
+                if include_knowledge:
                     logger.info("🔍 DEBUG: Searching knowledge base...")
                     try:
                         knowledge_results = await knowledge_engine.search_knowledge(
                             query=message_content,
-                            personality_id=chat_request.personality_id,
+                            personality_id=personality_id,
                             limit=5
                         )
                         knowledge_sources = knowledge_results
@@ -490,7 +490,7 @@ All systems operational and ready to assist!"""
                 logger.info("🎭 DEBUG: Building personality system prompt...")
                 try:
                     personality_prompt = personality_engine.get_personality_system_prompt(
-                        chat_request.personality_id,
+                        personality_id,
                         conversation_context=conversation_history
                     )
                     logger.info(f"✅ DEBUG: Personality prompt generated (length: {len(personality_prompt)} chars)")
@@ -567,7 +567,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         personality_engine = get_personality_engine()
                         processed_response = personality_engine.process_personality_response(
                             final_response,
-                            chat_request.personality_id,
+                            personality_id,
                             user_id
                         )
                         
@@ -612,7 +612,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 response=final_response,
                 thread_id=thread_id,
                 message_id=ai_message_id,
-                personality_id=chat_request.personality_id,
+                personality_id=personality_id,
                 model_used=model_used,
                 response_time_ms=response_time_ms,
                 knowledge_sources=[
@@ -666,7 +666,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
             response=error_message,
             thread_id=thread_id,
             message_id=error_message_id,
-            personality_id=chat_request.personality_id,
+            personality_id=personality_id,
             model_used="error",
             response_time_ms=response_time_ms,
             knowledge_sources=[],
