@@ -413,6 +413,8 @@ Weather data powered by Tomorrow.io"""
        
         # Continue with AI response if no special command detected
         if special_response is None:
+            # Use the special response from one of the integrations
+            final_response = special_response
        
         # 10. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
