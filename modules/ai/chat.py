@@ -2136,6 +2136,9 @@ def detect_pattern_fatigue_command(message: str) -> bool:
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
 #-- Section 14: Google Workspace Integration Functions updated for web autho - 10/1/25
+#-- Section 14: Google Workspace Integration Functions - 9/30/25
+#-- Section 14: Google Workspace Integration Functions - 9/30/25
+#-- Section 14: Google Workspace Integration Functions - 9/30/25
 def detect_google_command(message: str) -> tuple[bool, str]:
     """Detect Google Workspace commands and determine command type"""
     google_keywords = [
@@ -2273,3 +2276,179 @@ This will give me access to:
 All tokens are encrypted and stored securely."""
                 else:
                     return f"❌ **Authentication Failed**\n\n{data.get('message', 'Unknown error')}"
+            
+            elif command_type == 'auth_status':
+                # Check OAuth status
+                response = await client.get(f"{base_url}/google/auth/accounts")
+                data = response.json()
+                
+                if data.get('count', 0) > 0:
+                    accounts = data['accounts']
+                    account_list = "\n".join([f"   • {acc['email']} - {'✅ Active' if not acc.get('is_expired') else '⚠️ Expired'}" for acc in accounts])
+                    return f"""Google Auth Status
+
+Connected Accounts ({data['count']}):
+{account_list}
+
+Use `google auth setup` to add more accounts!"""
+                else:
+                    return "No Google accounts connected yet. Use `google auth setup` to connect!"
+            
+            elif command_type == 'auth_accounts':
+                response = await client.get(f"{base_url}/google/auth/accounts")
+                data = response.json()
+                
+                if data.get('count', 0) > 0:
+                    accounts = data['accounts']
+                    account_details = []
+                    for acc in accounts:
+                        status = "✅ Active" if not acc.get('is_expired') else "⚠️ Expired"
+                        account_details.append(f"""Account: {acc['email']}
+Status: {status}
+Scopes: {len(acc.get('scopes', []))} permissions
+Connected: {acc.get('authenticated_at', 'Unknown')}""")
+                    
+                    return f"""Connected Google Accounts
+
+{chr(10).join(account_details)}
+
+Total: {data['count']} account(s)"""
+                else:
+                    return "No Google accounts connected yet. Use `google auth setup` to connect!"
+            
+            # ============================================================
+            # EMAIL/GMAIL COMMANDS
+            # ============================================================
+            
+            elif command_type == 'email_summary':
+                from ..integrations.google_workspace.gmail_client import get_email_summary
+                
+                try:
+                    summary = await get_email_summary(user_id, days=7)
+                    
+                    if not summary or summary.get('total_emails', 0) == 0:
+                        return """Email Summary
+
+No emails found in the last 7 days, or Gmail is not yet connected.
+
+Use `google auth setup` to connect your Gmail account."""
+                    
+                    return f"""Email Summary (Last 7 Days)
+
+Total Emails: {summary.get('total_emails', 0)}
+Urgent: {summary.get('urgent', 0)}
+High Priority: {summary.get('high_priority', 0)}
+Needs Response: {summary.get('needs_response', 0)}
+Business: {summary.get('business', 0)}
+Negative Sentiment: {summary.get('negative_sentiment', 0)}
+
+Use `google email draft` to create responses!"""
+                    
+                except Exception as e:
+                    logger.error(f"Email summary failed: {e}")
+                    return f"""Email Summary Error
+
+Could not retrieve email summary: {str(e)}
+
+Make sure your Gmail account is connected with `google auth setup`"""
+            
+            elif command_type == 'email_draft':
+                return """Create Email Draft
+
+To create an email draft, I need more information:
+
+Example format:
+"Create an email draft to john@example.com about meeting tomorrow"
+
+Or provide:
+- To: Recipient email
+- Subject: Email subject
+- Body: Your message
+
+Once you provide these details, I'll create a draft in your Gmail account that you can review and send."""
+            
+            elif command_type == 'email_account':
+                return """Gmail Account Management
+
+Your Gmail integration provides:
+- Email analysis and prioritization
+- Smart filtering (urgent, business, needs response)
+- Sentiment analysis
+- Draft creation with AI assistance
+- Privacy-first (metadata only, 30-day retention)
+
+Commands:
+- `google email summary` - See last 7 days
+- `google email draft` - Create a draft
+
+Connected Accounts: Check with `google auth accounts`"""
+            
+            # ============================================================
+            # STATUS & HELP COMMANDS
+            # ============================================================
+            
+            elif command_type == 'status_check':
+                response = await client.get(f"{base_url}/google/status")
+                data = response.json()
+                
+                health = "Healthy" if data.get('overall_health') == 'healthy' else "Issues Detected"
+                oauth_count = len(data.get('oauth_authentication', {}).get('accounts', []))
+                analytics_count = len(data.get('analytics_sites', []))
+                
+                return f"""Google Workspace Status
+
+System Health: {health}
+OAuth Accounts: {oauth_count} connected
+Analytics Sites: {analytics_count} configured
+Features Active:
+   - Search Console keyword tracking
+   - Analytics insights
+   - Gmail intelligence (multi-account)
+   - Calendar integration (11 feeds)
+   - Self-evolving Intelligence Engine
+   - Drive document creation
+
+Use `google auth accounts` to see connected accounts."""
+            
+            elif command_type == 'sites_list':
+                return """Configured Sites
+
+Active Sites:
+   1. bcdodge - Primary site
+   2. rose_angel - Meditation & wellness
+   3. meals_feelz - Food & recipes
+   4. tv_signals - TV & entertainment
+   5. damn_it_carl - Personal blog
+
+Each site has Analytics and Search Console tracking enabled. Use `google keywords [site]` to see opportunities!"""
+            
+            else:
+                return """Google Workspace Commands
+
+Authentication:
+   - `google auth setup` - Connect your Google accounts
+   - `google auth status` - Check connection status
+   - `google auth accounts` - List connected accounts
+
+Keywords (Search Console):
+   - `google keywords [site]` - View opportunities for a site
+   - `google keywords pending` - See all pending across sites
+
+Analytics:
+   - `google analytics [site]` - Traffic summary
+   - `google analytics all` - All sites overview
+
+Email:
+   - `google email summary` - Last 7 days of email
+   - `google email draft` - Create email draft
+   - `google email account` - Gmail integration info
+
+Status:
+   - `google status` - Integration health check
+   - `google sites` - List configured sites
+
+More features coming: Calendar, Drive, and Intelligence commands!"""
+    
+    except Exception as e:
+        logger.error(f"Google command processing failed: {e}")
+        return f"Error processing Google command: {str(e)}"
