@@ -125,8 +125,11 @@ async def start_oauth_flow(user = Depends(get_current_user)):
         )
         
     except Exception as e:
-        logger.error(f"❌ Failed to start OAuth flow: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Failed to start OAuth flow: {type(e).__name__}: {str(e)}")
+        logger.error(f"❌ Exception repr: {repr(e)}")
+        import traceback
+        logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 @router.get("/auth/device/{device_code}")
 async def check_oauth_status(device_code: str, user = Depends(get_current_user)):
