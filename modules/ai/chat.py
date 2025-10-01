@@ -2250,7 +2250,7 @@ async def process_google_command(message: str, user_id: str) -> str:
             # ============================================================
             
             if command_type == 'auth_setup':
-                response = await client.get(f"{base_url}/google/auth/start")
+                response = await client.get(f"{base_url}/google/auth/start?user_id={user_id}")
                 data = response.json()
                 
                 if data.get('success'):
