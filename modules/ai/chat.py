@@ -150,8 +150,60 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
         return {"error": str(e)}
 
 #-- Section 4: Bluesky Integration Functions - 9/26/25
+#-- Section 4: Bluesky Integration Functions updated for posting - 9/30/25
+import re
+from typing import Tuple, Optional
+
+def detect_bluesky_post_command(message: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
+    """
+    Detect V1-style Bluesky posting commands
+    
+    Returns: (is_post_command, command_type, account, text)
+    command_type: 'direct', 'write', 'improve', 'smart'
+    """
+    message_lower = message.lower().strip()
+    
+    # Pattern 1: bluesky post [account] "text"
+    direct_pattern = r'bluesky post (\w+)\s+["\'](.+?)["\']'
+    match = re.search(direct_pattern, message, re.IGNORECASE)
+    if match:
+        account = match.group(1)
+        text = match.group(2)
+        return True, 'direct', account, text
+    
+    # Pattern 2: write bluesky post about [topic] for [account]
+    write_pattern = r'write bluesky post about (.+?) for (\w+)'
+    match = re.search(write_pattern, message, re.IGNORECASE)
+    if match:
+        topic = match.group(1).strip()
+        account = match.group(2).strip()
+        return True, 'write', account, topic
+    
+    # Pattern 3: improve bluesky post: [text]
+    improve_pattern = r'improve bluesky post:\s*(.+)'
+    match = re.search(improve_pattern, message, re.IGNORECASE | re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+        return True, 'improve', None, text
+    
+    # Pattern 4: bluesky post smart "text"
+    smart_pattern = r'bluesky post smart\s+["\'](.+?)["\']'
+    match = re.search(smart_pattern, message, re.IGNORECASE)
+    if match:
+        text = match.group(1)
+        return True, 'smart', None, text
+    
+    return False, '', None, None
+
 def detect_bluesky_command(message: str) -> bool:
-    """Detect Bluesky management commands"""
+    """Detect ALL Bluesky commands including V1-style posting"""
+    
+    # Check for V1-style posting commands first
+    is_post, _, _, _ = detect_bluesky_post_command(message)
+    if is_post:
+        return True
+    
+    # Original detection for management commands
     bluesky_keywords = [
         "bluesky scan", "bluesky opportunities", "bluesky accounts",
         "bluesky health", "bluesky status", "bluesky", "social media opportunities"
@@ -159,9 +211,202 @@ def detect_bluesky_command(message: str) -> bool:
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in bluesky_keywords)
 
+async def process_bluesky_post_command(command_type: str, account: Optional[str],
+                                      text: str, user_id: str) -> str:
+    """Process V1-style Bluesky posting commands"""
+    try:
+        from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
+        
+        multi_client = get_bluesky_multi_client()
+        
+        # Account name mapping
+        account_map = {
+            'syntaxprime': 'personal',
+            'personal': 'personal',
+            'roseangel': 'rose_angel',
+            'rose': 'rose_angel',
+            'rose_angel': 'rose_angel',
+            'bingetv': 'binge_tv',
+            'tv': 'binge_tv',
+            'binge_tv': 'binge_tv',
+            'mealsfeelz': 'meals_feelz',
+            'meals': 'meals_feelz',
+            'meals_feelz': 'meals_feelz',
+            'carl': 'damn_it_carl',
+            'damnitcarl': 'damn_it_carl',
+            'damn_it_carl': 'damn_it_carl'
+        }
+        
+        # Command 1: Direct Post
+        if command_type == 'direct':
+            account_id = account_map.get(account.lower())
+            
+            if not account_id:
+                return f"❌ Unknown account: {account}\n\nAvailable: syntaxprime, roseangel, bingetv, mealsfeelz, damnitcarl"
+            
+            if len(text) > 300:
+                return f"❌ Post too long! ({len(text)}/300 characters)\n\nPlease shorten your post."
+            
+            result = await multi_client.create_post(account_id, text)
+            
+            if result['success']:
+                account_info = multi_client.get_account_info(account_id)
+                return f"""✅ Posted to {account_info['handle']}!
+
+📝 "{text}"
+
+Character count: {len(text)}/300"""
+            else:
+                return f"❌ Failed to post: {result.get('error', 'Unknown error')}"
+        
+        # Command 2: AI Write Post
+        elif command_type == 'write':
+            account_id = account_map.get(account.lower())
+            
+            if not account_id:
+                return f"❌ Unknown account: {account}\n\nAvailable: syntaxprime, roseangel, bingetv, mealsfeelz, damnitcarl"
+            
+            account_info = multi_client.get_account_info(account_id)
+            personality = account_info['personality']
+            
+            ai_post = await _generate_ai_post(text, personality, account_id)
+            
+            return f"""🤖 AI-Generated Post for {account_info['handle']}
+
+📝 **Draft:**
+"{ai_post}"
+
+Character count: {len(ai_post)}/300
+
+To post this, say:
+`bluesky post {account} "{ai_post}"`
+
+Or edit it first!"""
+        
+        # Command 3: Improve Post
+        elif command_type == 'improve':
+            improved_text = await _improve_post_text(text)
+            
+            return f"""✨ Improved Version:
+
+"{improved_text}"
+
+Character count: {len(improved_text)}/300
+
+Original:
+"{text}"
+
+To post this, choose an account:
+`bluesky post [account] "{improved_text}"`"""
+        
+        # Command 4: Smart Post
+        elif command_type == 'smart':
+            best_account = await _pick_best_account(text, multi_client)
+            
+            if len(text) > 300:
+                return f"❌ Post too long! ({len(text)}/300 characters)\n\nPlease shorten your post."
+            
+            result = await multi_client.create_post(best_account, text)
+            
+            if result['success']:
+                account_info = multi_client.get_account_info(best_account)
+                return f"""🎯 Smart Post - Selected {account_info['handle']}
+
+📝 "{text}"
+
+Why this account: {_get_account_reasoning(best_account, text)}
+
+Character count: {len(text)}/300"""
+            else:
+                return f"❌ Failed to post: {result.get('error', 'Unknown error')}"
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+async def _generate_ai_post(topic: str, personality: str, account_id: str) -> str:
+    """Generate AI post based on topic and personality"""
+    
+    if 'coding' in topic.lower() or 'web' in topic.lower() or 'python' in topic.lower():
+        posts = {
+            'syntaxprime': f"Hot take: {topic} is actually way simpler than everyone makes it sound. Here's why... 🧵",
+            'professional': f"Key insights on {topic} for modern development practices. Worth considering for your next project.",
+            'compassionate': f"Learning about {topic}? Remember: everyone starts somewhere. You've got this! 💚"
+        }
+    else:
+        posts = {
+            'syntaxprime': f"Real talk about {topic} - it's not what you think. (Spoiler: it's better) ✨",
+            'professional': f"Important considerations regarding {topic}. Essential reading for professionals in the field.",
+            'compassionate': f"Thinking about {topic} today. It's important to approach this with empathy and understanding. 🌟"
+        }
+    
+    return posts.get(personality, posts['syntaxprime'])
+
+async def _improve_post_text(original_text: str) -> str:
+    """Improve post text while maintaining meaning"""
+    
+    improved = original_text.strip()
+    
+    # Add emoji if missing and appropriate
+    if not any(char in improved for char in '😀😁😂🤣😃😄😅😆😉😊😋😎✨🚀💚🌟'):
+        if 'great' in improved.lower() or 'awesome' in improved.lower():
+            improved += " ✨"
+        elif 'think' in improved.lower() or 'consider' in improved.lower():
+            improved += " 🤔"
+    
+    # Ensure proper capitalization
+    if improved and improved[0].islower():
+        improved = improved[0].upper() + improved[1:]
+    
+    # Trim if too long
+    if len(improved) > 280:
+        improved = improved[:277] + "..."
+    
+    return improved
+
+async def _pick_best_account(text: str, multi_client) -> str:
+    """Analyze text content and pick best account"""
+    
+    text_lower = text.lower()
+    
+    if any(word in text_lower for word in ['code', 'coding', 'python', 'javascript', 'web', 'dev', 'tech']):
+        return 'personal'
+    
+    elif any(word in text_lower for word in ['business', 'nonprofit', 'consulting', 'strategy', 'professional']):
+        return 'rose_angel'
+    
+    elif any(word in text_lower for word in ['tv', 'show', 'movie', 'watch', 'streaming', 'netflix', 'series']):
+        return 'binge_tv'
+    
+    elif any(word in text_lower for word in ['food', 'meal', 'recipe', 'cooking', 'hunger', 'charity', 'giving']):
+        return 'meals_feelz'
+    
+    elif any(word in text_lower for word in ['creative', 'burnout', 'therapy', 'art', 'design']):
+        return 'damn_it_carl'
+    
+    return 'personal'
+
+def _get_account_reasoning(account_id: str, text: str) -> str:
+    """Explain why this account was chosen"""
+    
+    reasons = {
+        'personal': "Content matches your tech/coding expertise",
+        'rose_angel': "Professional consulting/business content",
+        'binge_tv': "Entertainment and streaming content",
+        'meals_feelz': "Food, charity, or community focus",
+        'damn_it_carl': "Creative and personal expression"
+    }
+    
+    return reasons.get(account_id, "Best match for your content")
+
 async def process_bluesky_command(message: str, user_id: str) -> str:
     """Process Bluesky-related commands"""
     try:
+        # Check for V1-style posting commands FIRST
+        is_post, cmd_type, account, text = detect_bluesky_post_command(message)
+        if is_post:
+            return await process_bluesky_post_command(cmd_type, account, text, user_id)
+        
+        # Original management commands
         from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
         from ..integrations.bluesky.engagement_analyzer import get_engagement_analyzer
         from ..integrations.bluesky.approval_system import get_approval_system
@@ -238,6 +483,10 @@ No engagement opportunities found at this time.
 • `bluesky scan` - Force scan all accounts  
 • `bluesky opportunities` - View engagement suggestions
 • `bluesky accounts` - Check account status
+• `bluesky post [account] "text"` - Post directly
+• `write bluesky post about [topic] for [account]` - AI generates post
+• `improve bluesky post: [text]` - AI improves your draft
+• `bluesky post smart "text"` - AI picks best account
 
 Ready to find your next great engagement opportunity?"""
     

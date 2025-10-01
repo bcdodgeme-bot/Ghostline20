@@ -139,9 +139,15 @@ class GoogleAuthManager:
             }
             
             async with aiohttp.ClientSession() as session:
+                logger.info(f"🔍 DEBUG: Attempting device flow with client_id: {self.client_id[:20]}...")
+                logger.info(f"🔍 DEBUG: Scopes: {' '.join(self.oauth_scopes)}")
+                
                 async with session.post(self.device_code_url, data=payload) as response:
+                    logger.info(f"🔍 DEBUG: Google response status: {response.status}")
+                    
                     if response.status != 200:
                         error_text = await response.text()
+                        logger.error(f"❌ DEBUG: Google error response: {error_text}")
                         raise GoogleAuthenticationError(f"Device flow start failed: {error_text}")
                     
                     data = await response.json()
