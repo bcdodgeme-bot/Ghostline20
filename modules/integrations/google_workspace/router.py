@@ -101,19 +101,21 @@ class SpreadsheetCreateRequest(BaseModel):
 # ==================== AUTHENTICATION ENDPOINTS ====================
 
 @router.get("/auth/start")
-async def start_oauth_flow(user = Depends(get_current_user)):
+async def start_oauth_flow(user_id: Optional[str] = None, user = Depends(get_current_user)):
     """
     Start Google OAuth device flow
     
     Returns device code and verification URL for user authentication
     """
     try:
-        if not user:
+        # Allow either authenticated user OR user_id parameter (for internal calls)
+        if not user and not user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
+        # Use user_id from parameter if provided, otherwise from authenticated user
+        final_user_id = user_id if user_id else user['id']
         
-        flow_data = await start_google_oauth(user_id)
+        flow_data = await start_google_oauth(final_user_id)
         
         return OAuthStartResponse(
             success=True,

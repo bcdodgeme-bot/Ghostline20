@@ -123,7 +123,7 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
         }
         
         async with httpx.AsyncClient() as client:
-            response = await client.get(base_url, params=params)
+            response = await client.get(f"{base_url}/google/auth/start?user_id={user_id}")
             
             if response.status_code == 200:
                 data = response.json()
