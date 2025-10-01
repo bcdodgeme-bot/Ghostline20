@@ -93,8 +93,8 @@ class GmailClient:
             logger.error(f"❌ Gmail initialization failed: {e}")
             raise
     
-    async def get_recent_messages(self, email: Optional[str] = None, 
-                                  max_results: int = 20, 
+    async def get_recent_messages(self, email: Optional[str] = None,
+                                  max_results: int = 20,
                                   days: int = 7) -> List[Dict[str, Any]]:
         """
         Get recent email messages with metadata
@@ -303,7 +303,7 @@ class GmailClient:
         
         return 'unknown@example.com'
     
-    async def generate_response_suggestion(self, message: Dict[str, Any], 
+    async def generate_response_suggestion(self, message: Dict[str, Any],
                                           analysis: Dict[str, Any],
                                           personality: str = 'syntax') -> str:
         """
@@ -348,7 +348,7 @@ Generate a brief, professional response suggestion for this email.
             logger.error(f"❌ Failed to generate response suggestion: {e}")
             return "Thank you for your email. I'll respond shortly."
     
-    async def create_draft(self, email: Optional[str], to: str, 
+    async def create_draft(self, email: Optional[str], to: str,
                           subject: str, body: str) -> Dict[str, Any]:
         """
         Create an email draft
@@ -405,7 +405,8 @@ Generate a brief, professional response suggestion for this email.
             # Extract email date from message
             email_date = datetime.now()  # Would parse from message in production
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute('''
                     INSERT INTO google_gmail_analysis
                     (user_id, email_account, message_id, thread_id, sender_email,
@@ -430,13 +431,15 @@ Generate a brief, professional response suggestion for this email.
                 analysis.get('requires_response', False),
                 email_date
                 )
+            finally:
+                await db_manager.release_connection(conn)
             
             logger.info(f"✅ Stored email analysis for {email_account}")
             
         except Exception as e:
             logger.error(f"❌ Failed to store email analysis: {e}")
     
-    async def get_email_summary(self, email: Optional[str] = None, 
+    async def get_email_summary(self, email: Optional[str] = None,
                                days: int = 7) -> Dict[str, Any]:
         """
         Get personality-driven email summary
@@ -449,7 +452,8 @@ Generate a brief, professional response suggestion for this email.
             Email summary with statistics and highlights
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 if email:
                     # Single account summary
                     stats = await conn.fetchrow('''
@@ -491,6 +495,8 @@ Generate a brief, professional response suggestion for this email.
                 }
                 
                 return summary
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get email summary: {e}")

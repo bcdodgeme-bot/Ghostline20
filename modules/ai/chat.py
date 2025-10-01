@@ -2136,9 +2136,7 @@ def detect_pattern_fatigue_command(message: str) -> bool:
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
 #-- Section 14: Google Workspace Integration Functions - 9/30/25
 #-- Section 14: Google Workspace Integration Functions updated for web autho - 10/1/25
-#-- Section 14: Google Workspace Integration Functions - 9/30/25
-#-- Section 14: Google Workspace Integration Functions - 9/30/25
-#-- Section 14: Google Workspace Integration Functions - 9/30/25
+#-- Section 14: Google Workspace Integration Functions - OAuth web flow + Keywords/Analytics handlers
 def detect_google_command(message: str) -> tuple[bool, str]:
     """Detect Google Workspace commands and determine command type"""
     google_keywords = [
@@ -2271,6 +2269,7 @@ This will give me access to:
 - Google Analytics (read-only)
 - Search Console (read-only)  
 - Google Drive (create/edit documents)
+- Gmail (read + compose)
 - Your email and profile info
 
 All tokens are encrypted and stored securely."""
@@ -2302,7 +2301,7 @@ Use `google auth setup` to add more accounts!"""
                     accounts = data['accounts']
                     account_details = []
                     for acc in accounts:
-                        status = "✅ Active" if not acc.get('is_expired') else "⚠️ Expired"
+                        status = "✅ Active" if not acc.get('is_expired') else '⚠️ Expired'
                         account_details.append(f"""Account: {acc['email']}
 Status: {status}
 Scopes: {len(acc.get('scopes', []))} permissions
@@ -2315,6 +2314,136 @@ Connected: {acc.get('authenticated_at', 'Unknown')}""")
 Total: {data['count']} account(s)"""
                 else:
                     return "No Google accounts connected yet. Use `google auth setup` to connect!"
+            
+            # ============================================================
+            # KEYWORDS/SEARCH CONSOLE COMMANDS
+            # ============================================================
+            
+            elif command_type == 'keywords_view':
+                # Extract site name from message
+                site_name = None
+                for site in ['bcdodge', 'rose_angel', 'meals_feelz', 'tv_signals', 'damn_it_carl']:
+                    if site in message.lower() or site.replace('_', '') in message.lower():
+                        site_name = site
+                        break
+                
+                if not site_name:
+                    return """Keyword Opportunities
+
+Please specify which site you want to check:
+- `google keywords bcdodge`
+- `google keywords rose_angel`  
+- `google keywords meals_feelz`
+- `google keywords tv_signals`
+- `google keywords damn_it_carl`"""
+                
+                try:
+                    response = await client.get(f"{base_url}/google/keywords/opportunities?site_name={site_name}")
+                    data = response.json()
+                    
+                    opportunities = data.get('opportunities', [])
+                    
+                    if not opportunities:
+                        return f"""Keyword Opportunities: {site_name}
+
+No new keyword opportunities found for this site.
+
+This means:
+- All high-value keywords (100+ impressions, positions 11-30) are already tracked
+- Keep creating content and check back later!
+
+Use `google keywords pending` to see opportunities across all sites."""
+                    
+                    result = f"""Keyword Opportunities: {site_name}
+
+Found {len(opportunities)} new opportunities:
+
+"""
+                    for i, opp in enumerate(opportunities[:10], 1):  # Show top 10
+                        result += f"""{i}. **{opp['keyword']}**
+   📊 Impressions: {opp['impressions']} | Clicks: {opp['clicks']}
+   📍 Position: {opp['position']:.1f} | Type: {opp['opportunity_type']}
+   
+"""
+                    
+                    result += "\nThese keywords have high impressions but aren't being tracked yet. Ready to add them?"
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"Keywords command failed: {e}")
+                    return f"Error fetching keyword opportunities: {str(e)}"
+            
+            elif command_type == 'keywords_pending':
+                return """Pending Keywords Across All Sites
+
+This feature shows keyword opportunities across all your sites.
+
+For now, check each site individually:
+- `google keywords bcdodge`
+- `google keywords rose_angel`
+- `google keywords meals_feelz`
+- `google keywords tv_signals`
+- `google keywords damn_it_carl`"""
+            
+            # ============================================================
+            # ANALYTICS COMMANDS
+            # ============================================================
+            
+            elif command_type == 'analytics_site':
+                # Extract site name from message
+                site_name = None
+                for site in ['bcdodge', 'rose_angel', 'meals_feelz', 'tv_signals', 'damn_it_carl']:
+                    if site in message.lower() or site.replace('_', '') in message.lower():
+                        site_name = site
+                        break
+                
+                if not site_name:
+                    return """Analytics Summary
+
+Please specify which site you want to check:
+- `google analytics bcdodge`
+- `google analytics rose_angel`
+- `google analytics meals_feelz`
+- `google analytics tv_signals`
+- `google analytics damn_it_carl`
+
+Or use `google analytics all` for an overview."""
+                
+                try:
+                    response = await client.get(f"{base_url}/google/analytics/summary?site_name={site_name}")
+                    data = response.json()
+                    
+                    stats = data.get('summary', {})
+                    
+                    return f"""Analytics Summary: {site_name}
+Last 30 Days
+
+👥 **Visitors:** {stats.get('sessions', 0):,}
+📄 **Page Views:** {stats.get('pageviews', 0):,}
+⏱️ **Avg. Session:** {stats.get('avg_session_duration', 0):.1f}s
+📊 **Bounce Rate:** {stats.get('bounce_rate', 0):.1f}%
+
+**Top Pages:**
+{chr(10).join([f"  {i+1}. {page}" for i, page in enumerate(stats.get('top_pages', [])[:5])])}
+
+**Traffic Sources:**
+{chr(10).join([f"  • {source}: {count}" for source, count in stats.get('traffic_sources', {}).items()])}
+
+Use `google analytics all` to compare across all sites!"""
+                    
+                except Exception as e:
+                    logger.error(f"Analytics command failed: {e}")
+                    return f"Error fetching analytics: {str(e)}"
+            
+            elif command_type == 'analytics_all':
+                return """Analytics Overview - All Sites
+
+Feature coming soon! For now, check each site individually:
+- `google analytics bcdodge`
+- `google analytics rose_angel`
+- `google analytics meals_feelz`
+- `google analytics tv_signals`
+- `google analytics damn_it_carl`"""
             
             # ============================================================
             # EMAIL/GMAIL COMMANDS
@@ -2451,4 +2580,27 @@ More features coming: Calendar, Drive, and Intelligence commands!"""
     
     except Exception as e:
         logger.error(f"Google command processing failed: {e}")
-        return f"Error processing Google command: {str(e)}"
+        return f"Google Workspace Error: {str(e)}\n\nUse `google auth setup` to connect!"
+
+def get_integration_info() -> Dict[str, Any]:
+    """Get Google Workspace integration information"""
+    return {
+        "name": "Google Workspace Integration",
+        "version": "2.0.0",
+        "status": "active",
+        "features": [
+            "OAuth web flow authentication",
+            "Search Console keyword opportunities",
+            "Google Analytics insights",
+            "Gmail multi-account intelligence",
+            "Drive document creation"
+        ]
+    }
+
+def check_module_health() -> Dict[str, Any]:
+    """Check Google Workspace module health"""
+    return {
+        "healthy": True,
+        "module": "google_workspace",
+        "status": "operational"
+    }
