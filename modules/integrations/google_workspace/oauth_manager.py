@@ -75,11 +75,13 @@ class GoogleAuthManager:
         
         # OAuth Scopes (comprehensive access including Search Console)
         self.oauth_scopes = [
-            'https://www.googleapis.com/auth/analytics.readonly',
-            'https://www.googleapis.com/auth/webmasters.readonly',
-            'https://www.googleapis.com/auth/drive',
-            'https://www.googleapis.com/auth/userinfo.email',
-            'https://www.googleapis.com/auth/userinfo.profile'
+               'https://www.googleapis.com/auth/analytics.readonly',
+               'https://www.googleapis.com/auth/webmasters.readonly',
+               'https://www.googleapis.com/auth/drive',
+               'https://www.googleapis.com/auth/gmail.readonly',
+               'https://www.googleapis.com/auth/gmail.compose',
+               'https://www.googleapis.com/auth/userinfo.email',
+               'https://www.googleapis.com/auth/userinfo.profile'
         ]
         
         # OAuth URLs
