@@ -168,7 +168,9 @@ async def get_accounts(user = Depends(get_current_user)):
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
+        logger.info(f"Getting accounts for user: {user['id']}")
         accounts = await get_google_accounts(user['id'])
+        logger.info(f"Retrieved {len(accounts)} accounts")
         
         return {
             "success": True,
