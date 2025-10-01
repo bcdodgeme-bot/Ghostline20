@@ -4,7 +4,7 @@ Google Workspace Integration Router
 FastAPI endpoints for Google Workspace functionality
 
 Endpoints:
-- OAuth authentication (device flow)
+- OAuth authentication (web flow)
 - Search Console keyword opportunities
 - Analytics summaries and insights
 - Drive document creation
@@ -18,7 +18,8 @@ Chat Commands Integration:
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import RedirectResponse
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -28,9 +29,9 @@ logger = logging.getLogger(__name__)
 from ...core.auth import get_current_user
 from . import SUPPORTED_SITES
 from .oauth_manager import (
-    google_auth_manager, 
-    start_google_oauth, 
-    check_oauth_completion,
+    google_auth_manager,
+    start_google_oauth,
+    handle_google_oauth_callback,
     get_google_accounts,
     GoogleTokenExpiredError
 )
@@ -62,15 +63,11 @@ router = APIRouter(prefix="/google", tags=["google_workspace"])
 
 class OAuthStartResponse(BaseModel):
     success: bool
-    device_code: str
-    user_code: str
-    verification_url: str
-    expires_in: int
+    authorization_url: str
     message: str
 
-class OAuthStatusResponse(BaseModel):
+class OAuthCallbackResponse(BaseModel):
     success: bool
-    status: str
     message: str
     email: Optional[str] = None
 
@@ -103,9 +100,9 @@ class SpreadsheetCreateRequest(BaseModel):
 @router.get("/auth/start")
 async def start_oauth_flow(user_id: Optional[str] = None, user = Depends(get_current_user)):
     """
-    Start Google OAuth device flow
+    Start Google OAuth web flow
     
-    Returns device code and verification URL for user authentication
+    Returns authorization URL for user to visit
     """
     try:
         # Allow either authenticated user OR user_id parameter (for internal calls)
@@ -115,59 +112,63 @@ async def start_oauth_flow(user_id: Optional[str] = None, user = Depends(get_cur
         # Use user_id from parameter if provided, otherwise from authenticated user
         final_user_id = user_id if user_id else user['id']
         
-        flow_data = await start_google_oauth(final_user_id)
+        auth_url = await start_google_oauth(final_user_id)
         
         return OAuthStartResponse(
             success=True,
-            device_code=flow_data['device_code'],
-            user_code=flow_data['user_code'],
-            verification_url=flow_data['verification_url'],
-            expires_in=flow_data['expires_in'],
-            message=f"Visit {flow_data['verification_url']} and enter code: {flow_data['user_code']}"
+            authorization_url=auth_url,
+            message="Visit the authorization URL to complete authentication"
         )
         
     except Exception as e:
-        logger.error(f"❌ Failed to start OAuth flow: {type(e).__name__}: {str(e)}")
-        logger.error(f"❌ Exception repr: {repr(e)}")
+        logger.error(f"Failed to start OAuth flow: {type(e).__name__}: {str(e)}")
+        logger.error(f"Exception repr: {repr(e)}")
         import traceback
-        logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
-@router.get("/auth/device/{device_code}")
-async def check_oauth_status(device_code: str, user = Depends(get_current_user)):
+@router.get("/auth/callback")
+async def oauth_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    state: str = Query(..., description="State token for CSRF protection")
+):
     """
-    Check OAuth device flow completion status
+    Handle OAuth callback from Google
     
-    Railway-friendly endpoint for completing authentication
+    This endpoint receives the redirect after user authorizes
     """
     try:
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        result = await handle_google_oauth_callback(code, state)
         
-        user_id = user['id']
-        
-        result = await check_oauth_completion(user_id, device_code)
-        
-        return OAuthStatusResponse(
-            success=result['success'],
-            status=result.get('status', 'completed' if result['success'] else 'pending'),
-            message=result.get('message', 'Authentication completed!' if result['success'] else 'Waiting for authorization...'),
-            email=result.get('email')
-        )
+        if result['success']:
+            # Redirect to a success page or back to chat
+            return RedirectResponse(
+                url=f"/chat?google_auth=success&email={result['email']}",
+                status_code=302
+            )
+        else:
+            return RedirectResponse(
+                url="/chat?google_auth=failed",
+                status_code=302
+            )
         
     except Exception as e:
-        logger.error(f"❌ Failed to check OAuth status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"OAuth callback failed: {e}")
+        return RedirectResponse(
+            url=f"/chat?google_auth=error&message={str(e)}",
+            status_code=302
+        )
 
 @router.get("/auth/accounts")
-async def get_authenticated_accounts(user = Depends(get_current_user)):
-    """Get list of authenticated Google accounts"""
+async def get_accounts(user = Depends(get_current_user)):
+    """
+    Get list of authenticated Google accounts
+    """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
-        accounts = await get_google_accounts(user_id)
+        accounts = await get_google_accounts(user['id'])
         
         return {
             "success": True,
@@ -176,209 +177,167 @@ async def get_authenticated_accounts(user = Depends(get_current_user)):
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to get accounts: {e}")
+        logger.error(f"Failed to get accounts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== SEARCH CONSOLE ENDPOINTS ====================
 
-@router.get("/keywords/opportunities/{site_name}")
-async def get_keyword_opportunities(site_name: str, user = Depends(get_current_user)):
+@router.get("/keywords/opportunities")
+async def get_keyword_opportunities(
+    site_name: str,
+    user = Depends(get_current_user)
+):
     """
-    Get keyword opportunities for a specific site
-    
-    Returns keywords NOT in existing site keyword table with optimization potential
+    Get keyword opportunities for a site from Search Console
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
         if site_name not in SUPPORTED_SITES:
-            raise HTTPException(status_code=404, detail=f"Unknown site: {site_name}")
+            raise HTTPException(status_code=400, detail=f"Site not supported. Supported sites: {list(SUPPORTED_SITES.keys())}")
         
-        user_id = user['id']
-        
-        opportunities = await find_keyword_opportunities(user_id, site_name)
+        opportunities = await find_keyword_opportunities(user['id'], site_name)
         
         return {
             "success": True,
-            "site_name": site_name,
+            "site": site_name,
             "opportunities": opportunities,
             "count": len(opportunities)
         }
         
     except GoogleTokenExpiredError as e:
-        return {
-            "success": False,
-            "error": "token_expired",
-            "message": "Hey, your Google Authorization expired again! Use 'google auth setup' to renew."
-        }
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
-        logger.error(f"❌ Failed to get keyword opportunities: {e}")
+        logger.error(f"Failed to get keyword opportunities: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/keywords/decision")
-async def make_keyword_decision(request: KeywordDecisionRequest, user = Depends(get_current_user)):
+async def make_keyword_decision(
+    decision: KeywordDecisionRequest,
+    user = Depends(get_current_user)
+):
     """
-    Make decision on keyword opportunity (add to site table or ignore)
+    Approve or reject a keyword opportunity
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
-        
-        if request.decision == 'add':
-            success = await approve_keyword(user_id, request.site_name, request.keyword)
-            message = f"Added '{request.keyword}' to {request.site_name} keyword table"
-        elif request.decision == 'ignore':
-            success = await reject_keyword(user_id, request.site_name, request.keyword)
-            message = f"Ignored keyword '{request.keyword}'"
+        if decision.decision == 'add':
+            result = await approve_keyword(user['id'], decision.site_name, decision.keyword)
+        elif decision.decision == 'ignore':
+            result = await reject_keyword(user['id'], decision.site_name, decision.keyword)
         else:
             raise HTTPException(status_code=400, detail="Decision must be 'add' or 'ignore'")
         
-        return {
-            "success": success,
-            "message": message,
-            "keyword": request.keyword,
-            "decision": request.decision
-        }
+        return result
         
     except Exception as e:
-        logger.error(f"❌ Failed to process keyword decision: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/keywords/pending")
-async def get_pending_keywords(limit: int = 20, user = Depends(get_current_user)):
-    """Get pending keyword opportunities across all sites"""
-    try:
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        
-        user_id = user['id']
-        
-        opportunities = await search_console_client.get_pending_opportunities(limit)
-        
-        return {
-            "success": True,
-            "opportunities": opportunities,
-            "count": len(opportunities)
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to get pending keywords: {e}")
+        logger.error(f"Failed to process keyword decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== ANALYTICS ENDPOINTS ====================
 
-@router.get("/analytics/summary/{site_name}")
-async def get_analytics_summary(site_name: str, days: int = 30, user = Depends(get_current_user)):
+@router.get("/analytics/summary")
+async def get_analytics_summary(
+    site_name: str,
+    days: int = 30,
+    user = Depends(get_current_user)
+):
     """
-    Get Analytics summary for a site
-    
-    Returns traffic metrics, user behavior, and content performance
+    Get analytics summary for a site
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
         if site_name not in SUPPORTED_SITES:
-            raise HTTPException(status_code=404, detail=f"Unknown site: {site_name}")
+            raise HTTPException(status_code=400, detail=f"Site not supported")
         
-        user_id = user['id']
-        
-        summary = await fetch_analytics_summary(user_id, site_name, days)
+        summary = await fetch_analytics_summary(user['id'], site_name, days)
         
         return {
             "success": True,
-            "site_name": site_name,
+            "site": site_name,
+            "period_days": days,
             "summary": summary
         }
         
-    except GoogleTokenExpiredError:
-        return {
-            "success": False,
-            "error": "token_expired",
-            "message": "Hey, your Google Authorization expired again! Use 'google auth setup' to renew."
-        }
+    except GoogleTokenExpiredError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
-        logger.error(f"❌ Failed to get Analytics summary: {e}")
+        logger.error(f"Failed to get analytics summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/analytics/optimal-timing/{site_name}")
-async def get_optimal_posting_time(site_name: str, user = Depends(get_current_user)):
+@router.get("/analytics/timing")
+async def get_posting_timing(
+    site_name: str,
+    user = Depends(get_current_user)
+):
     """
-    Get optimal content posting time based on traffic patterns
+    Get optimal posting timing based on analytics
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        if site_name not in SUPPORTED_SITES:
-            raise HTTPException(status_code=404, detail=f"Unknown site: {site_name}")
-        
-        user_id = user['id']
-        
-        timing = await get_optimal_timing(user_id, site_name)
+        timing = await get_optimal_timing(user['id'], site_name)
         
         return {
             "success": True,
-            "site_name": site_name,
+            "site": site_name,
             "optimal_timing": timing
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to get optimal timing: {e}")
+        logger.error(f"Failed to get optimal timing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== DRIVE ENDPOINTS ====================
 
-@router.post("/drive/create/document")
-async def create_document(request: DocumentCreateRequest, user = Depends(get_current_user)):
+@router.post("/drive/document")
+async def create_document(
+    request: DocumentCreateRequest,
+    user = Depends(get_current_user)
+):
     """
-    Create a Google Doc from chat content
+    Create a Google Doc
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
-        
-        doc_info = await create_google_doc(
-            user_id, 
-            request.title, 
-            request.content, 
+        doc = await create_google_doc(
+            user['id'],
+            request.title,
+            request.content,
             request.chat_thread_id
         )
         
         return {
             "success": True,
-            "document": doc_info,
-            "message": f"Created Google Doc: {request.title}"
+            "document": doc
         }
         
-    except GoogleTokenExpiredError:
-        return {
-            "success": False,
-            "error": "token_expired",
-            "message": "Hey, your Google Authorization expired again! Use 'google auth setup' to renew."
-        }
     except Exception as e:
-        logger.error(f"❌ Failed to create document: {e}")
+        logger.error(f"Failed to create document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/drive/create/spreadsheet")
-async def create_spreadsheet(request: SpreadsheetCreateRequest, user = Depends(get_current_user)):
+@router.post("/drive/spreadsheet")
+async def create_spreadsheet(
+    request: SpreadsheetCreateRequest,
+    user = Depends(get_current_user)
+):
     """
-    Create a Google Sheet from structured data
+    Create a Google Sheet
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
-        
-        sheet_info = await create_google_sheet(
-            user_id,
+        sheet = await create_google_sheet(
+            user['id'],
             request.title,
             request.data,
             request.chat_thread_id
@@ -386,80 +345,51 @@ async def create_spreadsheet(request: SpreadsheetCreateRequest, user = Depends(g
         
         return {
             "success": True,
-            "spreadsheet": sheet_info,
-            "message": f"Created Google Sheet: {request.title}"
-        }
-        
-    except GoogleTokenExpiredError:
-        return {
-            "success": False,
-            "error": "token_expired",
-            "message": "Hey, your Google Authorization expired again! Use 'google auth setup' to renew."
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to create spreadsheet: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/drive/recent")
-async def get_recent_documents(limit: int = 10, user = Depends(get_current_user)):
-    """Get recently created Drive documents"""
-    try:
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        
-        user_id = user['id']
-        
-        docs = await google_workspace_db.get_recent_documents(user_id, limit)
-        
-        return {
-            "success": True,
-            "documents": docs,
-            "count": len(docs)
+            "spreadsheet": sheet
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to get recent documents: {e}")
+        logger.error(f"Failed to create spreadsheet: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==================== INTEGRATION STATUS ====================
+# ==================== STATUS ENDPOINTS ====================
 
 @router.get("/status")
 async def get_integration_status(user = Depends(get_current_user)):
     """
-    Get overall Google Workspace integration status
-    
-    Returns OAuth status, data freshness, and statistics
+    Get Google Workspace integration status
     """
     try:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        user_id = user['id']
-        
-        # Get comprehensive status
-        stats = await get_workspace_stats(user_id)
-        oauth_status = await google_workspace_db.get_oauth_status(user_id)
-        data_freshness = await google_workspace_db.get_data_freshness(user_id)
+        accounts = await get_google_accounts(user['id'])
+        stats = await get_workspace_stats(user['id'])
         
         return {
             "success": True,
-            "status": {
-                "oauth": oauth_status,
-                "data_freshness": data_freshness,
-                "statistics": stats,
-                "sites_configured": SUPPORTED_SITES
-            }
+            "authenticated_accounts": len(accounts),
+            "accounts": accounts,
+            "statistics": stats,
+            "supported_sites": list(SUPPORTED_SITES.keys())
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to get integration status: {e}")
+        logger.error(f"Failed to get status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/sites")
-async def get_supported_sites():
-    """Get list of supported sites with configuration"""
+@router.get("/health")
+async def health_check():
+    """
+    Health check endpoint
+    """
     return {
-        "success": True,
-        "sites": SUPPORTED_SITES,
-        "count": len(SUPPORTED_SITES)
+        "status": "healthy",
+        "service": "google_workspace",
+        "components": {
+            "oauth": "ready",
+            "search_console": "ready",
+            "analytics": "ready",
+            "drive": "ready"
+        }
     }

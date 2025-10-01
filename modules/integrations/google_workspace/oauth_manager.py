@@ -1,18 +1,18 @@
 # modules/integrations/google_workspace/oauth_manager.py
 """
 Google Workspace Authentication Manager
-Railway-compatible OAuth Device Flow + Service Account Hybrid System
+Railway-compatible OAuth Web Flow + Service Account Hybrid System
 
 This module handles:
 1. Service Account authentication for carl@bcdodge.me domain
-2. OAuth Device Flow for additional Gmail accounts (Railway-friendly)
+2. OAuth Web Flow for additional Gmail accounts (Railway-friendly)
 3. Token management with Fort Knox encryption
 4. Automatic token refresh and error handling
 5. Multi-account support with unified API access
 
 Authentication Flows:
 - Service Account: Seamless access to domain resources
-- Device Flow: User-friendly authentication for additional accounts
+- Web Flow: User clicks link, authorizes, gets redirected back
 """
 
 import os
@@ -34,7 +34,7 @@ try:
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
-    logger.warning("⚠️ Google auth libraries not installed - install google-auth and google-auth-oauthlib")
+    logger.warning("Google auth libraries not installed - install google-auth and google-auth-oauthlib")
 
 from ...core.database import db_manager
 from ...core.crypto import encrypt_token, decrypt_token, encrypt_json, decrypt_json
@@ -50,26 +50,30 @@ class GoogleTokenExpiredError(GoogleAuthenticationError):
 class GoogleAuthManager:
     """
     Hybrid Google authentication system for Railway deployment
-    Combines service account and OAuth device flow authentication
+    Combines service account and OAuth web flow authentication
     """
     
     def __init__(self):
         """Initialize authentication manager with environment configuration"""
         
         if not GOOGLE_AUTH_AVAILABLE:
-            logger.error("❌ Google authentication libraries not available")
+            logger.error("Google authentication libraries not available")
             raise RuntimeError("Google auth libraries required - run: pip install google-auth google-auth-oauthlib")
         
-        # V1 Configuration (working credentials)
-        self.client_id = os.getenv('GOOGLE_CLIENT_ID', '301236765855-eb1n47m7pg904kr6ng56c3179lrpbju5.apps.googleusercontent.com')
-        self.client_secret = os.getenv('GOOGLE_CLIENT_SECRET', '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')
+        # OAuth Client Configuration (Web Application type)
+        self.client_id = os.getenv('GOOGLE_CLIENT_ID')
+        self.client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        
+        if not self.client_id or not self.client_secret:
+            logger.error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+            raise RuntimeError("Missing Google OAuth credentials")
         
         # Service Account Configuration
         self.service_account_path = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
         self.workspace_domain = os.getenv('GOOGLE_WORKSPACE_DOMAIN', 'bcdodge.me')
         self.admin_email = os.getenv('GOOGLE_WORKSPACE_ADMIN_EMAIL', 'carl@bcdodge.me')
         
-        # OAuth Scopes (comprehensive access)
+        # OAuth Scopes (comprehensive access including Search Console)
         self.oauth_scopes = [
             'https://www.googleapis.com/auth/analytics.readonly',
             'https://www.googleapis.com/auth/webmasters.readonly',
@@ -78,17 +82,17 @@ class GoogleAuthManager:
             'https://www.googleapis.com/auth/userinfo.profile'
         ]
         
-        # Device Flow URLs
-        self.device_code_url = 'https://oauth2.googleapis.com/device/code'
+        # OAuth URLs
+        self.auth_url = 'https://accounts.google.com/o/oauth2/v2/auth'
         self.token_url = 'https://oauth2.googleapis.com/token'
-        self.device_verification_url = 'https://www.google.com/device'
+        self.redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8000/google/auth/callback')
         
         # Authentication state
         self._service_credentials = None
         self._oauth_credentials_cache = {}  # email -> credentials
-        self._device_flow_cache = {}  # device_code -> flow_data
+        self._state_cache = {}  # state -> user_id mapping
         
-        logger.info("🔐 Google Auth Manager initialized")
+        logger.info("Google Auth Manager initialized")
     
     async def initialize_service_account(self) -> bool:
         """
@@ -99,7 +103,7 @@ class GoogleAuthManager:
         """
         try:
             if not os.path.exists(self.service_account_path):
-                logger.warning(f"⚠️ Service account file not found: {self.service_account_path}")
+                logger.warning(f"Service account file not found: {self.service_account_path}")
                 return False
             
             # Load service account credentials
@@ -114,148 +118,119 @@ class GoogleAuthManager:
             # Store encrypted service account info in database
             await self._store_service_account_config()
             
-            logger.info("✅ Service account authentication initialized")
+            logger.info("Service account authentication initialized")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Service account initialization failed: {e}")
+            logger.error(f"Service account initialization failed: {e}")
             return False
     
-    async def start_oauth_device_flow(self, user_id: str) -> Dict[str, str]:
+    async def start_oauth_web_flow(self, user_id: str) -> str:
         """
-        Start OAuth device flow for additional Google accounts
-        Railway-compatible - no browser popup required
+        Start OAuth web flow - returns authorization URL
         
         Args:
-            user_id: User ID for token storage
+            user_id: User ID for state tracking
             
         Returns:
-            Dict with device_code, user_code, verification_url, and expires_in
+            Authorization URL for user to visit
         """
         try:
-            payload = {
-                'client_id': self.client_id,
-                'scope': ' '.join(self.oauth_scopes)
+            import secrets
+            
+            # Generate state token for CSRF protection
+            state = secrets.token_urlsafe(32)
+            
+            # Store state temporarily (expires in 10 minutes)
+            self._state_cache[state] = {
+                'user_id': user_id,
+                'created_at': datetime.now()
             }
             
-            async with aiohttp.ClientSession() as session:
-                logger.info(f"🔍 DEBUG: Attempting device flow with client_id: {self.client_id[:20]}...")
-                logger.info(f"🔍 DEBUG: Scopes: {' '.join(self.oauth_scopes)}")
-                
-                async with session.post(self.device_code_url, data=payload) as response:
-                    logger.info(f"🔍 DEBUG: Google response status: {response.status}")
-                    
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"❌ DEBUG: Google error response: {error_text}")
-                        raise GoogleAuthenticationError(f"Device flow start failed: {error_text}")
-                    
-                    data = await response.json()
-                    
-                    # Store device flow state temporarily
-                    device_code = data['device_code']
-                    self._device_flow_cache[f"{user_id}:{device_code}"] = {
-                        **data,
-                        'created_at': datetime.now()
-                    }
-                    
-                    logger.info(f"🎯 Device flow started for user {user_id}")
-                    
-                    return {
-                        'device_code': device_code,
-                        'user_code': data['user_code'],
-                        'verification_url': data['verification_url'],
-                        'expires_in': data['expires_in'],
-                        'interval': data.get('interval', 5)
-                    }
-                    
+            # Build authorization URL
+            from urllib.parse import urlencode
+            
+            params = {
+                'client_id': self.client_id,
+                'redirect_uri': self.redirect_uri,
+                'response_type': 'code',
+                'scope': ' '.join(self.oauth_scopes),
+                'state': state,
+                'access_type': 'offline',
+                'prompt': 'consent'
+            }
+            
+            auth_url = f"{self.auth_url}?{urlencode(params)}"
+            
+            logger.info(f"OAuth web flow started for user {user_id}")
+            return auth_url
+            
         except Exception as e:
-            logger.error(f"❌ Device flow start failed: {e}")
-            raise GoogleAuthenticationError(f"Failed to start device flow: {e}")
+            logger.error(f"Web flow start failed: {e}")
+            raise GoogleAuthenticationError(f"Failed to start web flow: {e}")
     
-    async def poll_device_flow_completion(self, user_id: str, device_code: str) -> Dict[str, Any]:
+    async def handle_oauth_callback(self, code: str, state: str) -> Dict[str, Any]:
         """
-        Poll for device flow completion and exchange for tokens
+        Handle OAuth callback and exchange code for tokens
         
         Args:
-            user_id: User ID
-            device_code: Device code from start_oauth_device_flow
+            code: Authorization code from Google
+            state: State token for CSRF verification
             
         Returns:
-            Dict with success status and token info
+            Dict with success status and user info
         """
         try:
-            # Get device flow state
-            key = f"{user_id}:{device_code}"
-            flow_state = self._device_flow_cache.get(key)
+            # Verify state token
+            if state not in self._state_cache:
+                raise GoogleAuthenticationError("Invalid or expired state token")
             
-            if not flow_state:
-                raise GoogleAuthenticationError("Device flow state not found")
+            state_data = self._state_cache[state]
+            user_id = state_data['user_id']
             
+            # Check if state is expired (10 minutes)
+            if datetime.now() - state_data['created_at'] > timedelta(minutes=10):
+                del self._state_cache[state]
+                raise GoogleAuthenticationError("State token expired")
+            
+            # Exchange code for tokens
             payload = {
                 'client_id': self.client_id,
                 'client_secret': self.client_secret,
-                'device_code': device_code,
-                'grant_type': 'urn:ietf:params:oauth:grant-type:device_code'
+                'code': code,
+                'redirect_uri': self.redirect_uri,
+                'grant_type': 'authorization_code'
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.token_url, data=payload) as response:
-                    data = await response.json()
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Token exchange failed: {error_text}")
+                        raise GoogleAuthenticationError(f"Token exchange failed: {error_text}")
                     
-                    if response.status == 200:
-                        # Success! Store the tokens
-                        await self._store_oauth_tokens(user_id, data)
-                        
-                        # Get user email from token
-                        user_email = await self._get_user_email_from_token(data['access_token'])
-                        
-                        # Clean up device flow cache
-                        del self._device_flow_cache[key]
-                        
-                        logger.info(f"✅ OAuth completed for {user_email}")
-                        
-                        return {
-                            'success': True,
-                            'email': user_email,
-                            'access_expires_in': data.get('expires_in', 3600)
-                        }
-                    
-                    elif response.status == 428:  # Authorization pending
-                        return {
-                            'success': False,
-                            'status': 'pending',
-                            'message': 'User has not completed authorization yet'
-                        }
-                    
-                    elif response.status == 400:
-                        error = data.get('error', 'unknown')
-                        if error == 'expired_token':
-                            # Clean up expired device flow
-                            if key in self._device_flow_cache:
-                                del self._device_flow_cache[key]
-                            return {
-                                'success': False,
-                                'status': 'expired',
-                                'message': 'Device code expired. Please start over.'
-                            }
-                        elif error == 'access_denied':
-                            return {
-                                'success': False,
-                                'status': 'denied',
-                                'message': 'User denied authorization'
-                            }
-                    
-                    # Other error
-                    error_msg = data.get('error_description', 'Unknown error')
-                    raise GoogleAuthenticationError(f"Token exchange failed: {error_msg}")
-                    
+                    token_data = await response.json()
+            
+            # Store tokens
+            await self._store_oauth_tokens(user_id, token_data)
+            
+            # Get user email
+            user_email = await self._get_user_email_from_token(token_data['access_token'])
+            
+            # Clean up state
+            del self._state_cache[state]
+            
+            logger.info(f"OAuth completed for {user_email}")
+            
+            return {
+                'success': True,
+                'email': user_email,
+                'user_id': user_id
+            }
+            
         except Exception as e:
-            logger.error(f"❌ Device flow polling failed: {e}")
-            if isinstance(e, GoogleAuthenticationError):
-                raise
-            else:
-                raise GoogleAuthenticationError(f"Device flow polling error: {e}")
+            logger.error(f"OAuth callback failed: {e}")
+            raise GoogleAuthenticationError(f"OAuth callback error: {e}")
     
     async def get_valid_credentials(self, user_id: str, email: Optional[str] = None):
         """
@@ -276,7 +251,7 @@ class GoogleAuthManager:
                         self._service_credentials.refresh(Request())
                     return self._service_credentials
                 else:
-                    logger.warning("⚠️ Service account not initialized")
+                    logger.warning("Service account not initialized")
                     return None
             
             # Use OAuth credentials for specific email
@@ -289,7 +264,7 @@ class GoogleAuthManager:
                         await self._update_oauth_tokens(user_id, email, creds)
                         return creds
                     except RefreshError:
-                        logger.error(f"❌ Token refresh failed for {email}")
+                        logger.error(f"Token refresh failed for {email}")
                         # Remove invalid credentials
                         del self._oauth_credentials_cache[email]
                         raise GoogleTokenExpiredError(f"Hey, your Google Authorization expired again! Use 'google auth setup' to renew.")
@@ -301,7 +276,7 @@ class GoogleAuthManager:
         except GoogleTokenExpiredError:
             raise
         except Exception as e:
-            logger.error(f"❌ Failed to get credentials: {e}")
+            logger.error(f"Failed to get credentials: {e}")
             return None
     
     async def get_authenticated_accounts(self, user_id: str) -> List[Dict[str, Any]]:
@@ -349,7 +324,7 @@ class GoogleAuthManager:
             return accounts
             
         except Exception as e:
-            logger.error(f"❌ Failed to get authenticated accounts: {e}")
+            logger.error(f"Failed to get authenticated accounts: {e}")
             return []
     
     # Private helper methods
@@ -388,10 +363,10 @@ class GoogleAuthManager:
                         self.oauth_scopes
                     )
                     
-                    logger.info("🔐 Service account config stored securely")
+                    logger.info("Service account config stored securely")
                     
         except Exception as e:
-            logger.error(f"❌ Failed to store service account config: {e}")
+            logger.error(f"Failed to store service account config: {e}")
     
     async def _store_oauth_tokens(self, user_id: str, token_data: Dict[str, Any]):
         """Store encrypted OAuth tokens in database"""
@@ -427,7 +402,7 @@ class GoogleAuthManager:
                     encrypted_refresh_token,
                     expires_at,
                     self.oauth_scopes,
-                    'oauth'
+                    'oauth_web'
                 )
             
             # Cache credentials
@@ -441,10 +416,10 @@ class GoogleAuthManager:
             
             self._oauth_credentials_cache[user_email] = credentials
             
-            logger.info(f"🔐 OAuth tokens stored for {user_email}")
+            logger.info(f"OAuth tokens stored for {user_email}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to store OAuth tokens: {e}")
+            logger.error(f"Failed to store OAuth tokens: {e}")
             raise
     
     async def _load_oauth_credentials(self, user_id: str, email: str):
@@ -482,7 +457,7 @@ class GoogleAuthManager:
                 return credentials
                 
         except Exception as e:
-            logger.error(f"❌ Failed to load OAuth credentials for {email}: {e}")
+            logger.error(f"Failed to load OAuth credentials for {email}: {e}")
             return None
     
     async def _get_user_email_from_token(self, access_token: str) -> str:
@@ -497,7 +472,7 @@ class GoogleAuthManager:
                     else:
                         raise GoogleAuthenticationError("Failed to get user email from token")
         except Exception as e:
-            logger.error(f"❌ Failed to get user email: {e}")
+            logger.error(f"Failed to get user email: {e}")
             raise GoogleAuthenticationError(f"Failed to get user email: {e}")
     
     async def _update_oauth_tokens(self, user_id: str, email: str, credentials: Credentials):
@@ -515,10 +490,10 @@ class GoogleAuthManager:
             async with db_manager.get_connection() as conn:
                 await conn.execute(query, encrypted_access_token, expires_at, user_id, email)
                 
-            logger.info(f"🔄 Tokens updated for {email}")
+            logger.info(f"Tokens updated for {email}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to update tokens for {email}: {e}")
+            logger.error(f"Failed to update tokens for {email}: {e}")
 
 # Global instance
 google_auth_manager = GoogleAuthManager()
@@ -528,13 +503,13 @@ async def get_google_credentials(user_id: str, email: Optional[str] = None):
     """Get valid Google credentials for API calls"""
     return await google_auth_manager.get_valid_credentials(user_id, email)
 
-async def start_google_oauth(user_id: str) -> Dict[str, str]:
-    """Start Google OAuth device flow"""
-    return await google_auth_manager.start_oauth_device_flow(user_id)
+async def start_google_oauth(user_id: str) -> str:
+    """Start Google OAuth web flow - returns authorization URL"""
+    return await google_auth_manager.start_oauth_web_flow(user_id)
 
-async def check_oauth_completion(user_id: str, device_code: str) -> Dict[str, Any]:
-    """Check if OAuth device flow is complete"""
-    return await google_auth_manager.poll_device_flow_completion(user_id, device_code)
+async def handle_google_oauth_callback(code: str, state: str) -> Dict[str, Any]:
+    """Handle OAuth callback"""
+    return await google_auth_manager.handle_oauth_callback(code, state)
 
 async def get_google_accounts(user_id: str) -> List[Dict[str, Any]]:
     """Get list of authenticated Google accounts"""
