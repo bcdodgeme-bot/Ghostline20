@@ -300,7 +300,8 @@ class GoogleAuthManager:
             '''
             
             accounts = []
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 rows = await conn.fetch(query, user_id)
                 
                 for row in rows:
@@ -311,6 +312,8 @@ class GoogleAuthManager:
                         'expires_at': row['token_expires_at'],
                         'is_expired': datetime.now() > row['token_expires_at'] if row['token_expires_at'] else False
                     })
+            finally:
+                await db_manager.release_connection(conn)
             
             # Add service account info if available
             if self._service_credentials:
@@ -343,27 +346,35 @@ class GoogleAuthManager:
             
             # Get user ID
             async with db_manager.get_connection() as conn:
-                user_id = await conn.fetchval("SELECT id FROM users LIMIT 1")
-                
-                if user_id:
-                    query = '''
-                        INSERT INTO google_service_config 
-                        (user_id, service_account_email, service_key_encrypted, domain, scopes)
-                        VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (user_id, domain) DO UPDATE SET
-                            service_account_email = EXCLUDED.service_account_email,
-                            service_key_encrypted = EXCLUDED.service_key_encrypted,
-                            scopes = EXCLUDED.scopes
-                    '''
+                conn = await db_manager.get_connection()
+                try:
+                    user_id = await conn.fetchval("SELECT id FROM users LIMIT 1")
                     
-                    await conn.execute(
-                        query,
-                        user_id,
-                        service_account_data.get('client_email'),
-                        encrypted_key,
-                        self.workspace_domain,
-                        self.oauth_scopes
-                    )
+                    if user_id:
+                        query = '''
+                            INSERT INTO google_service_config 
+                            (user_id, service_account_email, service_key_encrypted, domain, scopes)
+                            VALUES ($1, $2, $3, $4, $5)
+                            ON CONFLICT (user_id, domain) DO UPDATE SET
+                                service_account_email = EXCLUDED.service_account_email,
+                                service_key_encrypted = EXCLUDED.service_key_encrypted,
+                                scopes = EXCLUDED.scopes
+                        '''
+                        
+                        conn = await db_manager.get_connection()
+                        try:
+                            await conn.execute(
+                                query,
+                                user_id,
+                                user_email,
+                                encrypted_access_token,
+                                encrypted_refresh_token,
+                                expires_at,
+                                self.oauth_scopes,
+                                'oauth_web'
+                            )
+                        finally:
+                            await db_manager.release_connection(conn)
                     
                     logger.info("Service account config stored securely")
                     
@@ -395,7 +406,8 @@ class GoogleAuthManager:
                     updated_at = NOW()
             '''
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute(
                     query,
                     user_id,
@@ -406,6 +418,8 @@ class GoogleAuthManager:
                     self.oauth_scopes,
                     'oauth_web'
                 )
+            finally:
+                await db_manager.release_connection(conn)
             
             # Cache credentials
             credentials = Credentials(
@@ -433,11 +447,18 @@ class GoogleAuthManager:
                 WHERE user_id = $1 AND email_address = $2 AND is_active = TRUE
             '''
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 row = await conn.fetchrow(query, user_id, email)
                 
                 if not row:
                     return None
+                
+                # Decrypt tokens
+                access_token = decrypt_token(row['access_token_encrypted'])
+                refresh_token = decrypt_token(row['refresh_token_encrypted']) if row['refresh_token_encrypted'] else None
+            finally:
+                await db_manager.release_connection(conn)
                 
                 # Decrypt tokens
                 access_token = decrypt_token(row['access_token_encrypted'])
@@ -489,8 +510,12 @@ class GoogleAuthManager:
                 WHERE user_id = $3 AND email_address = $4
             '''
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute(query, encrypted_access_token, expires_at, user_id, email)
+            finally:
+                await db_manager.release_connection(conn)
+
                 
             logger.info(f"Tokens updated for {email}")
             
