@@ -240,23 +240,46 @@ class GoogleAuthManager:
         
         Args:
             user_id: User ID
-            email: Specific email account, or None for service account
+            email: Specific email account, or None for service account OR first available OAuth account
             
         Returns:
             Valid credentials or None if unavailable
         """
         try:
             if email is None:
-                # Use service account
+                # Try service account first
                 if self._service_credentials:
                     if self._service_credentials.expired:
                         self._service_credentials.refresh(Request())
                     return self._service_credentials
-                else:
-                    logger.warning("Service account not initialized")
-                    return None
+                
+                # If no service account, look for ANY OAuth credentials
+                logger.info("Service account not available, checking for OAuth credentials...")
+                
+                # Query database for any active OAuth account for this user
+                query = '''
+                    SELECT email_address
+                    FROM google_oauth_accounts
+                    WHERE user_id = $1 AND is_active = TRUE
+                    ORDER BY authenticated_at DESC
+                    LIMIT 1
+                '''
+                
+                conn = await db_manager.get_connection()
+                try:
+                    row = await conn.fetchrow(query, user_id)
+                    
+                    if row:
+                        email = row['email_address']
+                        logger.info(f"Found OAuth credentials for {email}, using these instead")
+                        # Continue to OAuth flow below
+                    else:
+                        logger.warning("No service account or OAuth credentials available")
+                        return None
+                finally:
+                    await db_manager.release_connection(conn)
             
-            # Use OAuth credentials for specific email
+            # Use OAuth credentials for specific email (or auto-detected email)
             if email in self._oauth_credentials_cache:
                 creds = self._oauth_credentials_cache[email]
                 if creds.expired and creds.refresh_token:
@@ -293,7 +316,7 @@ class GoogleAuthManager:
         """
         try:
             query = '''
-                SELECT email_address, scopes, authenticated_at, token_expires_at, is_active
+                SELECT email_address, scopes::text as scopes_text, authenticated_at, token_expires_at, is_active
                 FROM google_oauth_accounts
                 WHERE user_id = $1 AND is_active = TRUE
                 ORDER BY authenticated_at DESC
@@ -305,9 +328,17 @@ class GoogleAuthManager:
                 rows = await conn.fetch(query, user_id)
                 
                 for row in rows:
+                    # Parse scopes if it's JSON
+                    scopes = row['scopes_text']
+                    if scopes:
+                        try:
+                            scopes = json.loads(scopes) if isinstance(scopes, str) else scopes
+                        except:
+                            pass
+                    
                     accounts.append({
                         'email': row['email_address'],
-                        'scopes': row['scopes'],
+                        'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
                         'expires_at': row['token_expires_at'],
                         'is_expired': datetime.now() > row['token_expires_at'] if row['token_expires_at'] else False
@@ -330,6 +361,8 @@ class GoogleAuthManager:
             
         except Exception as e:
             logger.error(f"Failed to get authenticated accounts: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
     # Private helper methods
