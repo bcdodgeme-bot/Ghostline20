@@ -315,8 +315,9 @@ class GoogleAuthManager:
             List of account info dictionaries
         """
         try:
+            # FIXED: Remove ::text casting - asyncpg returns ARRAY as Python list automatically
             query = '''
-                SELECT email_address, scopes::text as scopes_text, authenticated_at, token_expires_at, is_active
+                SELECT email_address, scopes, authenticated_at, token_expires_at, is_active
                 FROM google_oauth_accounts
                 WHERE user_id = $1 AND is_active = TRUE
                 ORDER BY authenticated_at DESC
@@ -328,13 +329,8 @@ class GoogleAuthManager:
                 rows = await conn.fetch(query, user_id)
                 
                 for row in rows:
-                    # Parse scopes if it's JSON
-                    scopes = row['scopes_text']
-                    if scopes:
-                        try:
-                            scopes = json.loads(scopes) if isinstance(scopes, str) else scopes
-                        except:
-                            pass
+                    # FIXED: asyncpg returns ARRAY as Python list - no casting needed
+                    scopes = row['scopes'] if row['scopes'] else []
                     
                     accounts.append({
                         'email': row['email_address'],
@@ -393,6 +389,7 @@ class GoogleAuthManager:
                             scopes = EXCLUDED.scopes
                     '''
                     
+                    # Python list automatically converts to PostgreSQL ARRAY
                     await conn.execute(
                         query,
                         user_id,
@@ -436,6 +433,7 @@ class GoogleAuthManager:
             
             conn = await db_manager.get_connection()
             try:
+                # Python list automatically converts to PostgreSQL ARRAY
                 await conn.execute(
                     query,
                     user_id,
