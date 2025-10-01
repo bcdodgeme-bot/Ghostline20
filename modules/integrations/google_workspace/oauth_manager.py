@@ -20,7 +20,7 @@ import json
 import logging
 import asyncio
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -337,7 +337,8 @@ class GoogleAuthManager:
                         'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
                         'expires_at': row['token_expires_at'],
-                        'is_expired': datetime.now() > row['token_expires_at'] if row['token_expires_at'] else False
+                        'is_expired': datetime.now(timezone.utc) > row['token_expires_at'] if row['token_expires_at']
+                            else False
                     })
             finally:
                 await db_manager.release_connection(conn)
