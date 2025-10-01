@@ -73,15 +73,15 @@ class GoogleAuthManager:
         self.workspace_domain = os.getenv('GOOGLE_WORKSPACE_DOMAIN', 'bcdodge.me')
         self.admin_email = os.getenv('GOOGLE_WORKSPACE_ADMIN_EMAIL', 'carl@bcdodge.me')
         
-        # OAuth Scopes (comprehensive access including Search Console)
+        # OAuth Scopes (comprehensive access including Search Console and Gmail)
         self.oauth_scopes = [
-               'https://www.googleapis.com/auth/analytics.readonly',
-               'https://www.googleapis.com/auth/webmasters.readonly',
-               'https://www.googleapis.com/auth/drive',
-               'https://www.googleapis.com/auth/gmail.readonly',
-               'https://www.googleapis.com/auth/gmail.compose',
-               'https://www.googleapis.com/auth/userinfo.email',
-               'https://www.googleapis.com/auth/userinfo.profile'
+            'https://www.googleapis.com/auth/analytics.readonly',
+            'https://www.googleapis.com/auth/webmasters.readonly',
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.compose',
+            'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/userinfo.profile'
         ]
         
         # OAuth URLs
@@ -345,38 +345,33 @@ class GoogleAuthManager:
             encrypted_key = encrypt_json(service_account_data)
             
             # Get user ID
-            async with db_manager.get_connection() as conn:
-                conn = await db_manager.get_connection()
-                try:
-                    user_id = await conn.fetchval("SELECT id FROM users LIMIT 1")
+            conn = await db_manager.get_connection()
+            try:
+                user_id = await conn.fetchval("SELECT id FROM users LIMIT 1")
+                
+                if user_id:
+                    query = '''
+                        INSERT INTO google_service_config 
+                        (user_id, service_account_email, service_key_encrypted, domain, scopes)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (user_id, domain) DO UPDATE SET
+                            service_account_email = EXCLUDED.service_account_email,
+                            service_key_encrypted = EXCLUDED.service_key_encrypted,
+                            scopes = EXCLUDED.scopes
+                    '''
                     
-                    if user_id:
-                        query = '''
-                            INSERT INTO google_service_config 
-                            (user_id, service_account_email, service_key_encrypted, domain, scopes)
-                            VALUES ($1, $2, $3, $4, $5)
-                            ON CONFLICT (user_id, domain) DO UPDATE SET
-                                service_account_email = EXCLUDED.service_account_email,
-                                service_key_encrypted = EXCLUDED.service_key_encrypted,
-                                scopes = EXCLUDED.scopes
-                        '''
-                        
-                        conn = await db_manager.get_connection()
-                        try:
-                            await conn.execute(
-                                query,
-                                user_id,
-                                user_email,
-                                encrypted_access_token,
-                                encrypted_refresh_token,
-                                expires_at,
-                                self.oauth_scopes,
-                                'oauth_web'
-                            )
-                        finally:
-                            await db_manager.release_connection(conn)
+                    await conn.execute(
+                        query,
+                        user_id,
+                        service_account_data.get('client_email'),
+                        encrypted_key,
+                        self.workspace_domain,
+                        self.oauth_scopes
+                    )
                     
                     logger.info("Service account config stored securely")
+            finally:
+                await db_manager.release_connection(conn)
                     
         except Exception as e:
             logger.error(f"Failed to store service account config: {e}")
@@ -457,12 +452,6 @@ class GoogleAuthManager:
                 # Decrypt tokens
                 access_token = decrypt_token(row['access_token_encrypted'])
                 refresh_token = decrypt_token(row['refresh_token_encrypted']) if row['refresh_token_encrypted'] else None
-            finally:
-                await db_manager.release_connection(conn)
-                
-                # Decrypt tokens
-                access_token = decrypt_token(row['access_token_encrypted'])
-                refresh_token = decrypt_token(row['refresh_token_encrypted']) if row['refresh_token_encrypted'] else None
                 
                 # Create credentials
                 credentials = Credentials(
@@ -478,6 +467,8 @@ class GoogleAuthManager:
                 self._oauth_credentials_cache[email] = credentials
                 
                 return credentials
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"Failed to load OAuth credentials for {email}: {e}")
@@ -515,7 +506,6 @@ class GoogleAuthManager:
                 await conn.execute(query, encrypted_access_token, expires_at, user_id, email)
             finally:
                 await db_manager.release_connection(conn)
-
                 
             logger.info(f"Tokens updated for {email}")
             
