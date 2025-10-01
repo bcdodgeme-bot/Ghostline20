@@ -405,10 +405,14 @@ Weather data powered by Tomorrow.io"""
         elif detect_google_command(message_content)[0]:  # [0] gets the boolean from the tuple
             logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
             try:
+                logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
                 special_response = await process_google_command(message_content, user_id)
                 logger.info("✅ DEBUG: Google Workspace response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
+                logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                import traceback
+                logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                 special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
        
         # Continue with AI response if no special command detected
