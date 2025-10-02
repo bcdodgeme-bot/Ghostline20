@@ -544,6 +544,31 @@ class GoogleAuthManager:
         except Exception as e:
             logger.error(f"Failed to update tokens for {email}: {e}")
 
+    async def get_aiogoogle_creds(self, user_id: str, email: Optional[str] = None):
+            """
+            Get credentials in aiogoogle format
+            
+            Returns:
+                UserCreds object for aiogoogle
+            """
+            from aiogoogle.auth.creds import UserCreds
+            
+            # Get regular credentials first
+            credentials = await self.get_valid_credentials(user_id, email)
+            
+            if not credentials:
+                return None
+            
+            # Convert to aiogoogle format
+            user_creds = UserCreds(
+                access_token=credentials.token,
+                refresh_token=credentials.refresh_token,
+                expires_at=credentials.expiry.isoformat() if credentials.expiry else None,
+                scopes=list(credentials.scopes) if credentials.scopes else []
+            )
+            
+            return user_creds
+
 # Global instance
 google_auth_manager = GoogleAuthManager()
 
@@ -563,3 +588,7 @@ async def handle_google_oauth_callback(code: str, state: str) -> Dict[str, Any]:
 async def get_google_accounts(user_id: str) -> List[Dict[str, Any]]:
     """Get list of authenticated Google accounts"""
     return await google_auth_manager.get_authenticated_accounts(user_id)
+
+async def get_aiogoogle_credentials(user_id: str, email: Optional[str] = None):
+    """Get aiogoogle-formatted credentials"""
+    return await google_auth_manager.get_aiogoogle_creds(user_id, email)
