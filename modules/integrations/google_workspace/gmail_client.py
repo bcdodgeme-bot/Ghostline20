@@ -139,7 +139,8 @@ class GmailClient:
     async def _store_email_data(self, message: Dict[str, Any]):
         """Store email data in database for analysis"""
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 # Parse date
                 try:
                     email_date = datetime.fromtimestamp(int(message['internal_date']) / 1000)
@@ -166,8 +167,11 @@ class GmailClient:
                 message['labels'],
                 message['snippet']
                 )
-            
-            logger.debug(f"💾 Stored email: {message['subject'][:50]}")
+                
+                logger.debug(f"💾 Stored email: {message['subject'][:50]}")
+                
+            finally:
+                await db_manager.release_connection(conn)
             
         except Exception as e:
             logger.error(f"❌ Failed to store email data: {e}", exc_info=True)
@@ -188,7 +192,8 @@ class GmailClient:
             # Check if we have recent data in database
             cutoff_date = datetime.now() - timedelta(days=days)
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 count = await conn.fetchval('''
                     SELECT COUNT(*) FROM gmail_messages
                     WHERE user_id = $1 
@@ -245,6 +250,9 @@ class GmailClient:
                 
                 logger.info(f"✅ Email summary generated: {summary['total_emails']} total emails")
                 return summary
+                
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get email summary: {e}", exc_info=True)
