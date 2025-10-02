@@ -121,19 +121,21 @@ async def chat_with_ai(
         logger.info("📦 DEBUG: Loading helper functions from chat.py...")
         try:
             from .chat import (
-                get_current_datetime_context,
-                detect_weather_request, get_weather_for_user,
-                detect_prayer_command, process_prayer_command,
-                detect_prayer_notification_command, process_prayer_notification_command,
-                detect_location_command, process_location_command,
-                detect_bluesky_command, process_bluesky_command,
-                detect_rss_command, get_rss_marketing_context,
-                detect_scraper_command, process_scraper_command,
-                detect_trends_command, process_trends_command,
-                detect_voice_command, process_voice_command,
-                detect_image_command, process_image_command,
-                detect_google_command, process_google_command,
-                detect_pattern_complaint, handle_pattern_complaint
+                 get_current_datetime_context,
+                 detect_weather_request, get_weather_for_user,
+                 detect_prayer_command, process_prayer_command,
+                 detect_prayer_notification_command, process_prayer_notification_command,
+                 detect_location_command, process_location_command,
+                 detect_bluesky_command, process_bluesky_command,
+                 detect_rss_command, get_rss_marketing_context,
+                 detect_scraper_command, process_scraper_command,
+                 detect_trends_command, process_trends_command,
+                 detect_voice_command, process_voice_command,
+                 detect_image_command, process_image_command,
+                 detect_google_command, process_google_command,
+                 detect_pattern_complaint, handle_pattern_complaint,
+                 detect_email_detail_command, process_email_detail_command,
+                 detect_draft_creation_command, process_draft_creation_command # NEW 10/2/25
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -401,24 +403,33 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
         
-        # 9. 🔍 Google Workspace command detection (NINTH) - NEW 9/30/25
-        elif detect_google_command(message_content)[0]:  # [0] gets the boolean from the tuple
-            logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+       # 9a. 📧 Email Detail & Draft Commands - NEW 10/2/25
+        is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
+        is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
+        
+        if is_email_cmd:
+            logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
             try:
-                logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
-                special_response = await process_google_command(message_content, user_id)
-                logger.info("✅ DEBUG: Google Workspace response generated successfully")
+                special_response = await process_email_detail_command(action_type, email_num, user_id)
+                logger.info("✅ DEBUG: Email detail response generated successfully")
             except Exception as e:
-                logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
-                logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                logger.error(f"❌ DEBUG: Email detail processing failed: {e}")
                 import traceback
                 logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
-                special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
-       
-        # Continue with AI response if no special command detected
-        if special_response is None:
-            # Use the special response from one of the integrations
-            final_response = special_response
+                special_response = f"📧 **Email Detail Error**\n\nError: {str(e)}"
+        
+        elif is_draft_cmd:
+            logger.info(f"✉️ DEBUG: Draft creation command detected")
+            try:
+                # Get conversation history for context
+                history = await memory_manager.get_conversation_history(thread_id, limit=10)
+                special_response = await process_draft_creation_command(history, user_id, draft_instruction)
+                logger.info("✅ DEBUG: Draft created successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Draft creation failed: {e}")
+                import traceback
+                logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+                special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
        
         # 10. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):

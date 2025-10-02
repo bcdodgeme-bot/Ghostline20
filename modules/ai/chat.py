@@ -2762,3 +2762,174 @@ Actions:
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return f"Error processing email command: {str(e)}"
+
+def detect_draft_creation_command(message: str) -> tuple[bool, Optional[int], Optional[str]]:
+    """
+    Detect draft creation requests
+    
+    Returns: (is_draft_cmd, email_reply_number, draft_instruction)
+    
+    Examples:
+    - "save as draft" -> (True, None, None) - uses last AI response
+    - "create draft replying thanks" -> (True, None, "thanks")
+    - "save this as a draft" -> (True, None, None)
+    """
+    import re
+    message_lower = message.lower()
+    
+    # Patterns that indicate wanting to save a draft
+    draft_patterns = [
+        r'save (?:this |that )?(?:as |to )?draft',
+        r'create (?:a )?draft',
+        r'make (?:this |that )?(?:a )?draft',
+        r'save to drafts',
+        r'draft this'
+    ]
+    
+    for pattern in draft_patterns:
+        if re.search(pattern, message_lower):
+            # Check if they're providing additional instruction
+            instruction_patterns = [
+                r'(?:saying|with|that says?|about)\s+(.+)',
+                r'draft:\s*(.+)',
+                r'draft\s+(.+)'
+            ]
+            
+            for inst_pattern in instruction_patterns:
+                match = re.search(inst_pattern, message_lower)
+                if match:
+                    return True, None, match.group(1).strip()
+            
+            return True, None, None
+    
+    return False, None, None
+
+async def process_draft_creation_command(conversation_history: List[Dict], user_id: str, custom_instruction: Optional[str] = None) -> str:
+    """
+    Create a Gmail draft from conversation context
+    
+    Args:
+        conversation_history: Recent messages to extract draft content from
+        user_id: User ID for Gmail authentication
+        custom_instruction: Optional custom text for the draft
+        
+    Returns:
+        Confirmation message with draft details
+    """
+    try:
+        from ..integrations.google_workspace.gmail_client import gmail_client
+        
+        # Initialize if needed
+        if not gmail_client._user_id:
+            await gmail_client.initialize(user_id)
+        
+        # Extract draft content from conversation
+        # Look for the last assistant message that looks like an email
+        draft_content = None
+        recipient = None
+        subject = None
+        
+        # Search backwards through conversation for email content
+        for msg in reversed(conversation_history):
+            if msg['role'] == 'assistant':
+                content = msg['content']
+                
+                # Try to parse email structure
+                if 'Subject:' in content or 'To:' in content:
+                    # Parse structured email
+                    lines = content.split('\n')
+                    body_lines = []
+                    
+                    for line in lines:
+                        if line.startswith('To:'):
+                            recipient = line.replace('To:', '').strip()
+                        elif line.startswith('Subject:') or line.startswith('Re:'):
+                            subject = line.replace('Subject:', '').strip()
+                        elif line.strip() and not line.startswith(('From:', 'Date:', '**', '---', 'Actions:')):
+                            body_lines.append(line)
+                    
+                    if body_lines:
+                        draft_content = '\n'.join(body_lines).strip()
+                        break
+        
+        # Use custom instruction if provided
+        if custom_instruction:
+            draft_content = custom_instruction
+        
+        if not draft_content:
+            return """Unable to Create Draft
+
+I couldn't find draft content in our recent conversation. 
+
+To create a draft, either:
+1. Generate a draft response first (e.g., "draft a reply to email 4")
+2. Then say "save as draft"
+
+Or provide the content directly:
+- "create draft saying [your message here]"
+- "save as draft: [your message here]"
+
+What would you like to do?"""
+        
+        # Get recipient and subject from context if not found
+        if not recipient:
+            # Try to extract from earlier in conversation
+            for msg in reversed(conversation_history):
+                if 'email' in msg['content'].lower():
+                    # Look for email addresses
+                    import re
+                    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', msg['content'])
+                    if emails:
+                        recipient = emails[0]
+                        break
+            
+            if not recipient:
+                recipient = "recipient@example.com"  # Placeholder
+        
+        if not subject:
+            subject = "Draft Reply"
+        
+        # Create the draft
+        try:
+            draft_result = await gmail_client.create_draft(
+                email=None,  # Use default account
+                to=recipient,
+                subject=subject,
+                body=draft_content
+            )
+            
+            return f"""Draft Created Successfully
+
+**Draft ID:** {draft_result['id']}
+**To:** {recipient}
+**Subject:** {subject}
+
+**Content Preview:**
+{draft_content[:200]}{'...' if len(draft_content) > 200 else ''}
+
+The draft has been saved to your Gmail drafts folder. You can:
+- Open Gmail to review and send it
+- Edit it before sending
+- Delete it if you change your mind
+
+Draft is ready to send whenever you are!"""
+            
+        except Exception as e:
+            logger.error(f"Failed to create Gmail draft: {e}")
+            return f"""Draft Creation Failed
+
+Could not save draft to Gmail: {str(e)}
+
+**Draft Content (for your reference):**
+To: {recipient}
+Subject: {subject}
+
+{draft_content}
+
+You can copy this and create the draft manually in Gmail."""
+        
+    except Exception as e:
+        logger.error(f"Draft creation command processing failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return f"Error creating draft: {str(e)}"
