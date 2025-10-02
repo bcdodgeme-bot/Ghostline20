@@ -2623,6 +2623,7 @@ def check_module_health() -> Dict[str, Any]:
     }
 
 #-- Section 14.5: Email Detail and Action Commands - 10/2/25
+#-- Section 14.5: Email Detail and Action Commands - 10/2/25
 def detect_email_detail_command(message: str) -> tuple[bool, str, Optional[int]]:
     """
     Detect email detail/action requests (e.g., "summarize email 4")
@@ -2707,12 +2708,12 @@ async def process_email_detail_command(action_type: str, email_index: int, user_
         elif action_type == 'reply':
             email = await gmail_client.get_email_by_index(email_index)
             if not email:
-                return f"❌ Email #{email_index} not found. Run `google email summary` first."
+                return f"Email #{email_index} not found. Run `google email summary` first."
             
-            return f"""✉️ **Draft Reply to Email #{email_index}**
+            return f"""Draft Reply to Email #{email_index}
 
-**Original From:** {email['from']}
-**Subject:** Re: {email['subject']}
+Original From: {email['from']}
+Subject: Re: {email['subject']}
 
 To draft a reply, tell me what you want to say. For example:
 "Draft a reply saying I'll review this by Friday"
@@ -2723,25 +2724,25 @@ Or I can suggest a response based on the email content."""
         elif action_type == 'read':
             email = await gmail_client.get_email_by_index(email_index)
             if not email:
-                return f"❌ Email #{email_index} not found. Run `google email summary` first."
+                return f"Email #{email_index} not found. Run `google email summary` first."
             
             # Truncate very long bodies
             body_display = email['body']
             if len(body_display) > 3000:
                 body_display = body_display[:3000] + "\n\n[... body truncated, showing first 3000 characters ...]"
             
-            return f"""📧 **Full Email #{email_index}**
+            return f"""Full Email #{email_index}
 
-**From:** {email['from']}
-**To:** {email['to']}
-**Subject:** {email['subject']}
-**Date:** {email['date']}
+From: {email['from']}
+To: {email['to']}
+Subject: {email['subject']}
+Date: {email['date']}
 
-**Body:**
+Body:
 {body_display}
 
 ---
-**Actions:** 
+Actions: 
 - `reply to email {email_index}` - Draft a response
 - `summarize email {email_index}` - Get key points"""
         
@@ -2752,4 +2753,4 @@ Or I can suggest a response based on the email content."""
         logger.error(f"Email detail command failed: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return f"❌ Error processing email command: {str(e)}"
+        return f"Error processing email command: {str(e)}"
