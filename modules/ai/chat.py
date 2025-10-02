@@ -2236,6 +2236,12 @@ async def process_google_command(message: str, user_id: str) -> str:
     """Process Google Workspace commands and return personality-driven responses"""
     try:
         import httpx
+        
+        # ⚡ FIX: Get command_type by calling detect_google_command FIRST
+        is_google_cmd, command_type = detect_google_command(message)
+        
+        if not is_google_cmd:
+            return "Not a valid Google Workspace command. Try `google auth setup` or `google help`"
                 
         # Get base URL for API calls
         base_url = "http://localhost:8000"
