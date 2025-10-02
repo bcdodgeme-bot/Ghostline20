@@ -205,3 +205,15 @@ analytics_client = AnalyticsClient()
 async def fetch_analytics_summary(user_id: str, site_name: str, days: int = 30):
     await analytics_client.initialize(user_id)
     return await analytics_client.fetch_traffic_summary(site_name, days)
+
+async def get_optimal_timing(user_id: str, site_name: str) -> Dict[str, Any]:
+    """Get optimal posting timing - placeholder"""
+    await analytics_client.initialize(user_id)
+    # TODO: Implement optimal timing analysis
+    logger.info(f"Optimal timing for {site_name} - not yet implemented")
+    return {
+        'site_name': site_name,
+        'recommendation': 'Optimal timing analysis not yet implemented',
+        'best_day': 'Monday',
+        'best_hour': 10
+    }
