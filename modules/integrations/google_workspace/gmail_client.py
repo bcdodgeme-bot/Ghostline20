@@ -33,6 +33,7 @@ class GmailClient:
         
         self._user_id = None
         self._user_creds = None
+        self._email_account = None
         logger.info("📧 Gmail client initialized (aiogoogle)")
     
     async def initialize(self, user_id: str, email: Optional[str] = None):
@@ -45,6 +46,13 @@ class GmailClient:
             if not self._user_creds:
                 logger.error(f"❌ No credentials found for user_id={user_id}, email={email}")
                 raise Exception("No valid credentials available")
+            
+            # Store email account for database
+            if email:
+                self._email_account = email
+            else:
+                # Try to get email from creds
+                self._email_account = "default"
             
             logger.info(f"✅ Gmail initialized for {email or 'default account'}")
             
@@ -147,25 +155,48 @@ class GmailClient:
                 except:
                     email_date = datetime.now()
                 
+                # Determine priority from labels
+                labels = message.get('labels', [])
+                priority_level = 'normal'
+                if 'IMPORTANT' in labels:
+                    priority_level = 'high'
+                elif 'STARRED' in labels:
+                    priority_level = 'high'
+                
+                # Determine category from labels
+                category = 'inbox'
+                if 'SENT' in labels:
+                    category = 'sent'
+                elif 'DRAFT' in labels:
+                    category = 'draft'
+                elif 'SPAM' in labels:
+                    category = 'spam'
+                
+                # Check if requires response (heuristic)
+                requires_response = 'UNREAD' in labels and 'INBOX' in labels
+                
                 await conn.execute('''
                     INSERT INTO google_gmail_analysis 
-                    (user_id, message_id, thread_id, subject, sender, recipient, 
-                     email_date, labels, snippet, fetched_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    (user_id, email_account, message_id, thread_id, sender_email, 
+                     subject_line, priority_level, category, requires_response, 
+                     email_date, analyzed_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
                     ON CONFLICT (user_id, message_id) DO UPDATE SET
-                        labels = EXCLUDED.labels,
-                        snippet = EXCLUDED.snippet,
-                        fetched_at = NOW()
+                        priority_level = EXCLUDED.priority_level,
+                        category = EXCLUDED.category,
+                        requires_response = EXCLUDED.requires_response,
+                        analyzed_at = NOW()
                 ''',
                 self._user_id,
+                self._email_account or 'default',
                 message['id'],
                 message['thread_id'],
-                message['subject'],
                 message['from'],
-                message['to'],
-                email_date,
-                message['labels'],
-                message['snippet']
+                message['subject'],
+                priority_level,
+                category,
+                requires_response,
+                email_date
                 )
                 
                 logger.debug(f"💾 Stored email: {message['subject'][:50]}")
@@ -212,16 +243,17 @@ class GmailClient:
                         logger.error(f"⚠️ Failed to fetch from API: {fetch_error}")
                         # Continue anyway - maybe we can still provide partial data
                 
-                # Now query database for summary
+                # Now query database for summary using actual schema columns
                 logger.debug(f"🔍 Querying database for email summary...")
                 
                 summary_data = await conn.fetchrow('''
                     SELECT 
                         COUNT(*) as total_emails,
-                        COUNT(CASE WHEN 'IMPORTANT' = ANY(labels) THEN 1 END) as important,
-                        COUNT(CASE WHEN 'UNREAD' = ANY(labels) THEN 1 END) as unread,
-                        COUNT(CASE WHEN 'INBOX' = ANY(labels) THEN 1 END) as inbox,
-                        COUNT(CASE WHEN 'SENT' = ANY(labels) THEN 1 END) as sent
+                        COUNT(CASE WHEN priority_level = 'high' THEN 1 END) as important,
+                        COUNT(CASE WHEN requires_response = true THEN 1 END) as needs_response,
+                        COUNT(CASE WHEN category = 'inbox' THEN 1 END) as inbox,
+                        COUNT(CASE WHEN category = 'sent' THEN 1 END) as sent,
+                        COUNT(CASE WHEN sentiment = 'negative' THEN 1 END) as negative_sentiment
                     FROM google_gmail_analysis
                     WHERE user_id = $1 
                     AND email_date >= $2
@@ -232,9 +264,10 @@ class GmailClient:
                     return {
                         'total_emails': 0,
                         'important': 0,
-                        'unread': 0,
+                        'needs_response': 0,
                         'inbox': 0,
                         'sent': 0,
+                        'negative_sentiment': 0,
                         'days': days,
                         'note': 'No emails found in the specified period'
                     }
@@ -242,9 +275,10 @@ class GmailClient:
                 summary = {
                     'total_emails': summary_data['total_emails'],
                     'important': summary_data['important'],
-                    'unread': summary_data['unread'],
+                    'needs_response': summary_data['needs_response'],
                     'inbox': summary_data['inbox'],
                     'sent': summary_data['sent'],
+                    'negative_sentiment': summary_data['negative_sentiment'],
                     'days': days
                 }
                 
