@@ -180,7 +180,11 @@ async def get_accounts(user = Depends(get_current_user)):
         
     except Exception as e:
         logger.error(f"Failed to get accounts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception args: {e.args}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__} - {str(e)}")
 
 # ==================== SEARCH CONSOLE ENDPOINTS ====================
 
