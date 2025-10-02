@@ -2236,20 +2236,7 @@ async def process_google_command(message: str, user_id: str) -> str:
     """Process Google Workspace commands and return personality-driven responses"""
     try:
         import httpx
-        
-        # ============================================================
-        # EMAIL DETAIL COMMANDS - CHECK FIRST (NEW 10/2/25)
-        # ============================================================
-        is_email_cmd, action_type, email_num = detect_email_detail_command(message)
-        if is_email_cmd:
-            logger.info(f"📧 Email detail command detected: {action_type} for email #{email_num}")
-            return await process_email_detail_command(action_type, email_num, user_id)
-        
-        is_google, command_type = detect_google_command(message)
-        
-        if not is_google:
-            return "I didn't recognize that as a Google Workspace command. Try `google status` to see what's available!"
-        
+                
         # Get base URL for API calls
         base_url = "http://localhost:8000"
         
