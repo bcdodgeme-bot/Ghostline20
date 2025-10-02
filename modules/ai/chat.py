@@ -2462,16 +2462,33 @@ No emails found in the last 7 days, or Gmail is not yet connected.
 
 Use `google auth setup` to connect your Gmail account."""
                     
-                    return f"""Email Summary (Last 7 Days)
+                    # Build the base summary
+                    response_parts = [
+                        f"""Email Summary (Last 7 Days)
 
 Total Emails: {summary.get('total_emails', 0)}
-Urgent: {summary.get('urgent', 0)}
-High Priority: {summary.get('high_priority', 0)}
+Important: {summary.get('important', 0)}
 Needs Response: {summary.get('needs_response', 0)}
-Business: {summary.get('business', 0)}
-Negative Sentiment: {summary.get('negative_sentiment', 0)}
-
-Use `google email draft` to create responses!"""
+Inbox: {summary.get('inbox', 0)}
+Sent: {summary.get('sent', 0)}
+Negative Sentiment: {summary.get('negative_sentiment', 0)}"""
+                    ]
+                    
+                    # Add emails requiring response if any exist
+                    emails_needing_response = summary.get('emails_requiring_response', [])
+                    if emails_needing_response:
+                        response_parts.append("\n\n📧 **Emails Requiring Response:**\n")
+                        
+                        for i, email in enumerate(emails_needing_response[:5], 1):  # Show max 5
+                            priority_emoji = "🔥" if email.get('priority') == 'high' else "📨"
+                            response_parts.append(f"""{i}. {priority_emoji} **From:** {email['from']}
+   **Subject:** {email['subject']}
+   **Date:** {email['date'].strftime('%b %d, %I:%M %p') if hasattr(email['date'], 'strftime') else email['date']}
+""")
+                    
+                    response_parts.append("\nUse `google email draft` to create responses!")
+                    
+                    return "".join(response_parts)
                     
                 except Exception as e:
                     logger.error(f"Email summary failed: {e}")
