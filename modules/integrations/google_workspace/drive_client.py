@@ -173,14 +173,14 @@ class DriveClient:
         return requests
     
     def _strip_markdown(self, text: str) -> str:
-    """Remove markdown formatting"""
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'__(.+?)__', r'\1', text)
-    text = re.sub(r'_(.+?)_', r'\1', text)
-    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
-    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
-    text = re.sub(r'`(.+?)`', r'\1', text)  # ← This line is probably broken
-    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
-    return text
+        """Remove markdown formatting"""
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+        text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+        text = re.sub(r'`(.+?)`', r'\1', text)  # ← This line is probably broken
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        return text
