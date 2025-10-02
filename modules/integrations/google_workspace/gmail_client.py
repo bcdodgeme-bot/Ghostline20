@@ -148,7 +148,7 @@ class GmailClient:
                     email_date = datetime.now()
                 
                 await conn.execute('''
-                    INSERT INTO gmail_messages 
+                    INSERT INTO google_gmail_analysis 
                     (user_id, message_id, thread_id, subject, sender, recipient, 
                      email_date, labels, snippet, fetched_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
@@ -195,7 +195,7 @@ class GmailClient:
             conn = await db_manager.get_connection()
             try:
                 count = await conn.fetchval('''
-                    SELECT COUNT(*) FROM gmail_messages
+                    SELECT COUNT(*) FROM google_gmail_analysis
                     WHERE user_id = $1 
                     AND email_date >= $2
                 ''', self._user_id, cutoff_date)
@@ -222,7 +222,7 @@ class GmailClient:
                         COUNT(CASE WHEN 'UNREAD' = ANY(labels) THEN 1 END) as unread,
                         COUNT(CASE WHEN 'INBOX' = ANY(labels) THEN 1 END) as inbox,
                         COUNT(CASE WHEN 'SENT' = ANY(labels) THEN 1 END) as sent
-                    FROM gmail_messages
+                    FROM google_gmail_analysis
                     WHERE user_id = $1 
                     AND email_date >= $2
                 ''', self._user_id, cutoff_date)
