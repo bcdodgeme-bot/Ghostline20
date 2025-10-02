@@ -184,3 +184,38 @@ class DriveClient:
         text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
         text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
         return text
+
+async def _store_document_info(self, doc_id: str, title: str, doc_type: str,
+                                  url: str, chat_thread_id: Optional[str],
+                                  content_length: int):
+        """Store in DB"""
+        try:
+            async with db_manager.get_connection() as conn:
+                await conn.execute('''
+                    INSERT INTO google_drive_documents
+                    (user_id, google_doc_id, document_title, document_type, 
+                     document_url, created_from_chat_thread, original_content_length)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ''',
+                self._user_id, doc_id, title, doc_type, url,
+                chat_thread_id, content_length
+                )
+            
+            logger.info(f"✅ Stored document info: {title}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store document info: {e}")
+
+# Global instance
+drive_client = DriveClient()
+
+# Convenience functions
+async def create_google_doc(user_id: str, title: str, content: str,
+                           chat_thread_id: Optional[str] = None):
+    await drive_client.initialize(user_id)
+    return await drive_client.create_document(title, content, chat_thread_id)
+
+async def create_google_sheet(user_id: str, title: str, data: List[List[Any]],
+                             chat_thread_id: Optional[str] = None):
+    await drive_client.initialize(user_id)
+    return await drive_client.create_spreadsheet(title, data, chat_thread_id)
