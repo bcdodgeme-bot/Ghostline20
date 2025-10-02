@@ -168,11 +168,15 @@ async def get_accounts(
     Get list of authenticated Google accounts
     """
     try:
-        if not user:
+        # Allow internal calls with user_id parameter OR authenticated user
+        if not user and not user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        logger.info(f"Getting accounts for user: {user['id']}")
-        accounts = await get_google_accounts(user['id'])
+        # Use user_id parameter if provided (for internal calls), otherwise authenticated user
+        final_user_id = user_id if user_id else user['id']
+        
+        logger.info(f"Getting accounts for user: {final_user_id}")
+        accounts = await get_google_accounts(final_user_id)
         logger.info(f"Retrieved {len(accounts)} accounts")
         
         return {
