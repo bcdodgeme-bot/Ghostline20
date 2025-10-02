@@ -337,7 +337,8 @@ class GoogleAuthManager:
                         'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
                         'expires_at': row['token_expires_at'],
-                        'is_expired': datetime.now(timezone.utc) > row['token_expires_at'] if row['token_expires_at'] else False
+                        'is_expired': (datetime.now(timezone.utc) > row['token_expires_at']
+                                      if row['token_expires_at'] else False
                             else False
                     })
             finally:
