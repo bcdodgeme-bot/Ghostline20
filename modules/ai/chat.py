@@ -2621,3 +2621,135 @@ def check_module_health() -> Dict[str, Any]:
         "module": "google_workspace",
         "status": "operational"
     }
+
+#-- Section 14.5: Email Detail and Action Commands - 10/2/25
+def detect_email_detail_command(message: str) -> tuple[bool, str, Optional[int]]:
+    """
+    Detect email detail/action requests (e.g., "summarize email 4")
+    
+    Returns: (is_email_command, action_type, email_number)
+    action_type: 'summarize', 'reply', 'read'
+    
+    Examples:
+    - "summarize email 4" -> (True, 'summarize', 4)
+    - "reply to email #2" -> (True, 'reply', 2)
+    - "read email 3" -> (True, 'read', 3)
+    """
+    import re
+    message_lower = message.lower()
+    
+    # Pattern 1: "summarize email 4" or "email #4 summary"
+    summarize_patterns = [
+        r'summarize email #?(\d+)',
+        r'email #?(\d+) summary',
+        r'what(?:\'s| is) email #?(\d+) about',
+        r'tell me about email #?(\d+)',
+        r'details (?:on|for|about) email #?(\d+)'
+    ]
+    
+    for pattern in summarize_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return True, 'summarize', int(match.group(1))
+    
+    # Pattern 2: "reply to email 4" or "draft reply to #4"
+    reply_patterns = [
+        r'reply to email #?(\d+)',
+        r'draft (?:a )?reply (?:to|for) #?(\d+)',
+        r'respond to email #?(\d+)',
+        r'answer email #?(\d+)'
+    ]
+    
+    for pattern in reply_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return True, 'reply', int(match.group(1))
+    
+    # Pattern 3: "read email 4" or "show me email #4"
+    read_patterns = [
+        r'read email #?(\d+)',
+        r'show (?:me )?email #?(\d+)',
+        r'open email #?(\d+)',
+        r'view email #?(\d+)'
+    ]
+    
+    for pattern in read_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return True, 'read', int(match.group(1))
+    
+    return False, '', None
+
+async def process_email_detail_command(action_type: str, email_index: int, user_id: str) -> str:
+    """
+    Process email detail/action commands
+    
+    Args:
+        action_type: 'summarize', 'reply', or 'read'
+        email_index: Email number from summary list (1-10)
+        user_id: User ID for authentication
+        
+    Returns:
+        Formatted response with email details or action results
+    """
+    try:
+        from ..integrations.google_workspace.gmail_client import gmail_client
+        
+        # Initialize if needed
+        if not gmail_client._user_id:
+            await gmail_client.initialize(user_id)
+        
+        # SUMMARIZE: Show key points and preview
+        if action_type == 'summarize':
+            return await gmail_client.summarize_email(email_index)
+        
+        # REPLY: Prompt for reply content
+        elif action_type == 'reply':
+            email = await gmail_client.get_email_by_index(email_index)
+            if not email:
+                return f"❌ Email #{email_index} not found. Run `google email summary` first."
+            
+            return f"""✉️ **Draft Reply to Email #{email_index}**
+
+**Original From:** {email['from']}
+**Subject:** Re: {email['subject']}
+
+To draft a reply, tell me what you want to say. For example:
+"Draft a reply saying I'll review this by Friday"
+
+Or I can suggest a response based on the email content."""
+        
+        # READ: Show full email body
+        elif action_type == 'read':
+            email = await gmail_client.get_email_by_index(email_index)
+            if not email:
+                return f"❌ Email #{email_index} not found. Run `google email summary` first."
+            
+            # Truncate very long bodies
+            body_display = email['body']
+            if len(body_display) > 3000:
+                body_display = body_display[:3000] + "\n\n[... body truncated, showing first 3000 characters ...]"
+            
+            return f"""📧 **Full Email #{email_index}**
+
+**From:** {email['from']}
+**To:** {email['to']}
+**Subject:** {email['subject']}
+**Date:** {email['date']}
+
+**Body:**
+{body_display}
+
+---
+**Actions:** 
+- `reply to email {email_index}` - Draft a response
+- `summarize email {email_index}` - Get key points"""
+        
+        else:
+            return f"Unknown email action type: {action_type}"
+        
+    except Exception as e:
+        logger.error(f"Email detail command failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return f"❌ Error processing email command: {str(e)}"

@@ -34,6 +34,7 @@ class GmailClient:
         self._user_id = None
         self._user_creds = None
         self._email_account = None
+        self._last_summary_emails = {}  # NEW: user_id -> {index: message_id} mapping
         logger.info("📧 Gmail client initialized (aiogoogle)")
     
     async def initialize(self, user_id: str, email: Optional[str] = None):
@@ -217,7 +218,7 @@ class GmailClient:
             limit: Maximum number of emails to return
             
         Returns:
-            List of email dictionaries with sender, subject, date
+            List of email dictionaries with sender, subject, date, message_id
         """
         try:
             cutoff_date = datetime.now() - timedelta(days=days)
@@ -226,6 +227,7 @@ class GmailClient:
             try:
                 rows = await conn.fetch('''
                     SELECT 
+                        message_id,
                         sender_email,
                         subject_line,
                         email_date,
@@ -241,6 +243,7 @@ class GmailClient:
                 emails = []
                 for row in rows:
                     emails.append({
+                        'message_id': row['message_id'],
                         'from': row['sender_email'],
                         'subject': row['subject_line'],
                         'date': row['email_date'],
@@ -265,6 +268,7 @@ class GmailClient:
         1. Checks database for recent emails
         2. If database is empty or stale, fetches from API first
         3. Returns summary statistics WITH list of emails requiring response
+        4. Stores index mapping for later email detail requests
         """
         try:
             logger.info(f"📊 Getting email summary: email={email}, days={days}")
@@ -325,6 +329,14 @@ class GmailClient:
                 # Get the actual emails that need responses
                 emails_needing_response = await self.get_emails_requiring_response(days=days, limit=10)
                 
+                # Store email index mapping for later detail requests
+                if emails_needing_response:
+                    self._last_summary_emails[self._user_id] = {
+                        i+1: email['message_id']
+                        for i, email in enumerate(emails_needing_response[:10])
+                    }
+                    logger.debug(f"💾 Stored index mapping for {len(emails_needing_response)} emails")
+                
                 summary = {
                     'total_emails': summary_data['total_emails'],
                     'important': summary_data['important'],
@@ -333,7 +345,7 @@ class GmailClient:
                     'sent': summary_data['sent'],
                     'negative_sentiment': summary_data['negative_sentiment'],
                     'days': days,
-                    'emails_requiring_response': emails_needing_response  # NEW: Actual email details
+                    'emails_requiring_response': emails_needing_response
                 }
                 
                 logger.info(f"✅ Email summary generated: {summary['total_emails']} total emails, {len(emails_needing_response)} need response")
@@ -345,6 +357,186 @@ class GmailClient:
         except Exception as e:
             logger.error(f"❌ Failed to get email summary: {e}", exc_info=True)
             raise
+    
+    async def get_email_by_index(self, email_index: int) -> Optional[Dict[str, Any]]:
+        """
+        Get full email details by summary list index
+        
+        Args:
+            email_index: The number shown in the summary list (1-10)
+            
+        Returns:
+            Full email details or None if not found
+        """
+        try:
+            # Get message_id from stored mapping
+            message_id = self._last_summary_emails.get(self._user_id, {}).get(email_index)
+            
+            if not message_id:
+                logger.warning(f"No email found at index {email_index}. Run 'google email summary' first.")
+                return None
+            
+            return await self.get_email_details(message_id)
+            
+        except Exception as e:
+            logger.error(f"Failed to get email by index: {e}")
+            return None
+    
+    async def get_email_details(self, message_id: str) -> Dict[str, Any]:
+        """
+        Fetch full email content including body
+        
+        Args:
+            message_id: Gmail message ID
+            
+        Returns:
+            Full email details with body text
+        """
+        try:
+            if not self._user_creds:
+                await self.initialize(self._user_id)
+            
+            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
+                gmail_v1 = await aiogoogle.discover('gmail', 'v1')
+                
+                # Get full message including body
+                msg = await aiogoogle.as_user(
+                    gmail_v1.users.messages.get(
+                        userId='me',
+                        id=message_id,
+                        format='full'
+                    )
+                )
+                
+                # Extract headers
+                headers = {
+                    h['name']: h['value']
+                    for h in msg.get('payload', {}).get('headers', [])
+                }
+                
+                # Extract body
+                body_text = self._extract_email_body(msg.get('payload', {}))
+                
+                return {
+                    'message_id': message_id,
+                    'thread_id': msg.get('threadId'),
+                    'from': headers.get('From', 'Unknown'),
+                    'to': headers.get('To', ''),
+                    'subject': headers.get('Subject', '(No Subject)'),
+                    'date': headers.get('Date', ''),
+                    'body': body_text,
+                    'snippet': msg.get('snippet', ''),
+                    'labels': msg.get('labelIds', [])
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get email details: {e}")
+            return None
+    
+    def _extract_email_body(self, payload: Dict) -> str:
+        """
+        Extract text body from email payload
+        
+        Args:
+            payload: Gmail API message payload
+            
+        Returns:
+            Email body as plain text
+        """
+        try:
+            # Check for plain text in body
+            if 'body' in payload and payload['body'].get('data'):
+                body_data = payload['body']['data']
+                body_bytes = base64.urlsafe_b64decode(body_data)
+                return body_bytes.decode('utf-8', errors='ignore')
+            
+            # Check parts for text/plain
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    if part.get('mimeType') == 'text/plain':
+                        if part.get('body', {}).get('data'):
+                            body_data = part['body']['data']
+                            body_bytes = base64.urlsafe_b64decode(body_data)
+                            return body_bytes.decode('utf-8', errors='ignore')
+                    
+                    # Recursive check for nested parts
+                    if 'parts' in part:
+                        nested_body = self._extract_email_body(part)
+                        if nested_body:
+                            return nested_body
+            
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Body extraction failed: {e}")
+            return ""
+    
+    async def summarize_email(self, email_index: int) -> str:
+        """
+        Generate summary of email by index
+        
+        Args:
+            email_index: The number from the summary list
+            
+        Returns:
+            Formatted email summary with key points
+        """
+        try:
+            email = await self.get_email_by_index(email_index)
+            
+            if not email:
+                return f"Email #{email_index} not found. Run `google email summary` first to see the list."
+            
+            # Truncate body if too long
+            body_preview = email['body'][:2000] if len(email['body']) > 2000 else email['body']
+            
+            # Extract key points
+            key_points = self._extract_key_points(body_preview)
+            
+            return f"""**Email #{email_index} Details**
+
+**From:** {email['from']}
+**Subject:** {email['subject']}
+**Date:** {email['date']}
+
+**Key Points:**
+{key_points}
+
+**Body Preview:**
+{body_preview[:500]}...
+
+---
+
+**Actions:**
+- `reply to email {email_index}` - Draft a response
+- `read email {email_index}` - See full email body"""
+            
+        except Exception as e:
+            logger.error(f"Email summary failed: {e}")
+            return f"Failed to summarize email: {str(e)}"
+    
+    def _extract_key_points(self, body_text: str) -> str:
+        """
+        Simple key point extraction from email body
+        
+        Args:
+            body_text: Email body text
+            
+        Returns:
+            Bullet points of key information
+        """
+        # Split into sentences
+        sentences = [s.strip() for s in body_text.split('.') if s.strip()]
+        
+        # Return first 3 meaningful sentences as key points
+        key_points = []
+        for i, sentence in enumerate(sentences[:5], 1):
+            if len(sentence) > 20:  # Skip very short sentences
+                key_points.append(f"• {sentence}")
+                if len(key_points) >= 3:
+                    break
+        
+        return '\n'.join(key_points) if key_points else "• [No clear key points detected]"
     
     async def create_draft(self, email: Optional[str], to: str,
                           subject: str, body: str) -> Dict[str, Any]:
