@@ -160,7 +160,10 @@ async def oauth_callback(
         )
 
 @router.get("/auth/accounts")
-async def get_accounts(user = Depends(get_current_user)):
+async def get_accounts(
+    user_id: Optional[str] = None,
+    user = Depends(get_current_user)
+):
     """
     Get list of authenticated Google accounts
     """

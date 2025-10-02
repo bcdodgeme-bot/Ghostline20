@@ -2278,7 +2278,7 @@ All tokens are encrypted and stored securely."""
             
             elif command_type == 'auth_status':
                 # Check OAuth status
-                response = await client.get(f"{base_url}/google/auth/accounts")
+                response = await client.get(f"{base_url}/google/auth/accounts?user_id={user_id}")
                 data = response.json()
                 
                 if data.get('count', 0) > 0:
