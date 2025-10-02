@@ -39,7 +39,7 @@ class GmailClient:
     async def initialize(self, user_id: str, email: Optional[str] = None):
         """Initialize with aiogoogle credentials"""
         try:
-            logger.debug(f"🔧 Gmail.initialize() called with user_id={user_id}, email={email}")
+            logger.debug(f"📧 Gmail.initialize() called with user_id={user_id}, email={email}")
             self._user_id = user_id
             self._user_creds = await get_aiogoogle_credentials(user_id, email)
             
@@ -68,7 +68,7 @@ class GmailClient:
         """
         try:
             if not self._user_creds:
-                logger.debug(f"🔧 No credentials loaded, initializing for email={email}")
+                logger.debug(f"📧 No credentials loaded, initializing for email={email}")
                 await self.initialize(self._user_id, email)
             
             # Calculate date query
@@ -208,14 +208,63 @@ class GmailClient:
             logger.error(f"❌ Failed to store email data: {e}", exc_info=True)
             # Don't raise - storing is optional, continue even if it fails
     
+    async def get_emails_requiring_response(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get list of emails that require a response
+        
+        Args:
+            days: Number of days to look back
+            limit: Maximum number of emails to return
+            
+        Returns:
+            List of email dictionaries with sender, subject, date
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            
+            conn = await db_manager.get_connection()
+            try:
+                rows = await conn.fetch('''
+                    SELECT 
+                        sender_email,
+                        subject_line,
+                        email_date,
+                        priority_level
+                    FROM google_gmail_analysis
+                    WHERE user_id = $1 
+                    AND email_date >= $2
+                    AND requires_response = true
+                    ORDER BY email_date DESC
+                    LIMIT $3
+                ''', self._user_id, cutoff_date, limit)
+                
+                emails = []
+                for row in rows:
+                    emails.append({
+                        'from': row['sender_email'],
+                        'subject': row['subject_line'],
+                        'date': row['email_date'],
+                        'priority': row['priority_level']
+                    })
+                
+                logger.info(f"📋 Found {len(emails)} emails requiring response")
+                return emails
+                
+            finally:
+                await db_manager.release_connection(conn)
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get emails requiring response: {e}", exc_info=True)
+            return []
+    
     async def get_email_summary(self, email: Optional[str] = None, days: int = 7) -> Dict[str, Any]:
         """
-        Get email summary from database - WITH AUTO-FETCH
+        Get email summary from database - WITH AUTO-FETCH AND DETAILED BREAKDOWN
         
         This method:
         1. Checks database for recent emails
         2. If database is empty or stale, fetches from API first
-        3. Returns summary statistics
+        3. Returns summary statistics WITH list of emails requiring response
         """
         try:
             logger.info(f"📊 Getting email summary: email={email}, days={days}")
@@ -269,8 +318,12 @@ class GmailClient:
                         'sent': 0,
                         'negative_sentiment': 0,
                         'days': days,
+                        'emails_requiring_response': [],
                         'note': 'No emails found in the specified period'
                     }
+                
+                # Get the actual emails that need responses
+                emails_needing_response = await self.get_emails_requiring_response(days=days, limit=10)
                 
                 summary = {
                     'total_emails': summary_data['total_emails'],
@@ -279,10 +332,11 @@ class GmailClient:
                     'inbox': summary_data['inbox'],
                     'sent': summary_data['sent'],
                     'negative_sentiment': summary_data['negative_sentiment'],
-                    'days': days
+                    'days': days,
+                    'emails_requiring_response': emails_needing_response  # NEW: Actual email details
                 }
                 
-                logger.info(f"✅ Email summary generated: {summary['total_emails']} total emails")
+                logger.info(f"✅ Email summary generated: {summary['total_emails']} total emails, {len(emails_needing_response)} need response")
                 return summary
                 
             finally:
@@ -299,14 +353,14 @@ class GmailClient:
             logger.info(f"✉️ Creating draft: to={to}, subject={subject[:50]}")
             
             if not self._user_creds:
-                logger.debug(f"🔧 No credentials loaded, initializing...")
+                logger.debug(f"📧 No credentials loaded, initializing...")
                 await self.initialize(self._user_id, email)
             
             # Create message
             message = f"To: {to}\nSubject: {subject}\n\n{body}"
             encoded_message = base64.urlsafe_b64encode(message.encode()).decode()
             
-            logger.debug(f"📝 Encoded message length: {len(encoded_message)} chars")
+            logger.debug(f"🔍 Encoded message length: {len(encoded_message)} chars")
             
             async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
                 gmail_v1 = await aiogoogle.discover('gmail', 'v1')
@@ -340,12 +394,12 @@ gmail_client = GmailClient()
 # Convenience functions
 async def get_recent_emails(user_id: str, email: Optional[str] = None, days: int = 7):
     """Fetch recent emails from Gmail API"""
-    logger.debug(f"🔧 get_recent_emails() called: user_id={user_id}, email={email}, days={days}")
+    logger.debug(f"📧 get_recent_emails() called: user_id={user_id}, email={email}, days={days}")
     await gmail_client.initialize(user_id, email)
     return await gmail_client.get_recent_messages(email, max_results=20, days=days)
 
 async def get_email_summary(user_id: str, email: Optional[str] = None, days: int = 7):
     """Get email summary with auto-fetch if needed"""
-    logger.debug(f"🔧 get_email_summary() called: user_id={user_id}, email={email}, days={days}")
+    logger.debug(f"📧 get_email_summary() called: user_id={user_id}, email={email}, days={days}")
     await gmail_client.initialize(user_id, email)
     return await gmail_client.get_email_summary(email, days)
