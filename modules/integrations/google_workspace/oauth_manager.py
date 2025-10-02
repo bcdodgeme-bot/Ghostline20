@@ -315,7 +315,6 @@ class GoogleAuthManager:
             List of account info dictionaries
         """
         try:
-            # FIXED: Remove ::text casting - asyncpg returns ARRAY as Python list automatically
             query = '''
                 SELECT email_address, scopes, authenticated_at, token_expires_at, is_active
                 FROM google_oauth_accounts
@@ -329,7 +328,6 @@ class GoogleAuthManager:
                 rows = await conn.fetch(query, user_id)
                 
                 for row in rows:
-                    # FIXED: asyncpg returns ARRAY as Python list - no casting needed
                     scopes = row['scopes'] if row['scopes'] else []
                     
                     accounts.append({
@@ -337,9 +335,7 @@ class GoogleAuthManager:
                         'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
                         'expires_at': row['token_expires_at'],
-                        'is_expired': (datetime.now(timezone.utc) > row['token_expires_at']
-                                      if row['token_expires_at'] else False
-                            else False
+                        'is_expired': (datetime.now(timezone.utc) > row['token_expires_at']) if row['token_expires_at'] else False
                     })
             finally:
                 await db_manager.release_connection(conn)
