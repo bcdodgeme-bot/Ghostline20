@@ -282,7 +282,7 @@ class GoogleAuthManager:
             # Use OAuth credentials for specific email (or auto-detected email)
             if email in self._oauth_credentials_cache:
                 creds = self._oauth_credentials_cache[email]
-                if creds.expired and creds.refresh_token:
+                if creds.expiry and creds.expiry <= datetime.now(timezone.utc) and creds.refresh_token:
                     try:
                         creds.refresh(Request())
                         # Update stored tokens
@@ -337,7 +337,7 @@ class GoogleAuthManager:
                         'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
                         'expires_at': row['token_expires_at'],
-                        'is_expired': datetime.now(timezone.utc) > row['token_expires_at'] if row['token_expires_at']
+                        'is_expired': datetime.now(timezone.utc) > row['token_expires_at'] if row['token_expires_at'] else False
                             else False
                     })
             finally:
