@@ -217,3 +217,17 @@ search_console_client = SearchConsoleClient()
 async def find_keyword_opportunities(user_id: str, site_name: str):
     await search_console_client.initialize(user_id)
     return await search_console_client.identify_keyword_opportunities(site_name)
+
+async def approve_keyword(user_id: str, site_name: str, keyword: str) -> bool:
+    """Approve and add keyword to site table"""
+    await search_console_client.initialize(user_id)
+    # TODO: Implement keyword approval logic
+    logger.info(f"Keyword approval for '{keyword}' on {site_name} - not yet implemented")
+    return True
+
+async def reject_keyword(user_id: str, site_name: str, keyword: str) -> bool:
+    """Reject/ignore keyword opportunity"""
+    await search_console_client.initialize(user_id)
+    # TODO: Implement keyword rejection logic
+    logger.info(f"Keyword rejection for '{keyword}' on {site_name} - not yet implemented")
+    return True
