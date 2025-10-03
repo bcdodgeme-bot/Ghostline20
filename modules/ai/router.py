@@ -411,6 +411,9 @@ Weather data powered by Tomorrow.io"""
             # Get the actual detection results
             is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
             is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
+            is_google_cmd, google_cmd_type = detect_google_command(message_content)
+            
+            logger.info(f"🔍 DEBUG: Command check - email:{is_email_cmd}, draft:{is_draft_cmd}, google:{is_google_cmd}")
             
             if is_email_cmd:
                 logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
@@ -435,6 +438,19 @@ Weather data powered by Tomorrow.io"""
                 import traceback
                 logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                 special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
+                
+        elif is_google_cmd:
+                logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+                try:
+                    logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
+                    special_response = await process_google_command(message_content, user_id)
+                    logger.info("✅ DEBUG: Google Workspace response generated successfully")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
+                    logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                    import traceback
+                    logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+                    special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
         
         # 9b. 🔍 Google Workspace command detection (AFTER email/draft) - 9/30/25
         elif detect_google_command(message_content)[0]:  # [0] gets the boolean from the tuple
