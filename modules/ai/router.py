@@ -403,17 +403,29 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
         
-       # 9a. 📧 Email Detail & Draft Commands - NEW 10/2/25
-       # 9a. 📧 Email Detail & Draft Commands (EIGHTH) - MOVED BEFORE IMAGE - 10/3/25
+       # 9. 🔍 Google Workspace command detection (NINTH) - NEW 9/30/25
+        elif detect_google_command(message_content)[0]:
+            logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+            try:
+                logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
+                special_response = await process_google_command(message_content, user_id)
+                logger.info("✅ DEBUG: Google Workspace response generated successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
+                logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                import traceback
+                logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+                special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
+        
+        # 10. 📧 Email Detail & Draft Commands (TENTH) - NEW 10/2/25
         elif detect_email_detail_command(message_content)[0] or detect_draft_creation_command(message_content)[0]:
             logger.info("📧 DEBUG: Email or draft command detected - determining type...")
             
             # Get the actual detection results
             is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
             is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
-            is_google_cmd, google_cmd_type = detect_google_command(message_content)
             
-            logger.info(f"🔍 DEBUG: Command check - email:{is_email_cmd}, draft:{is_draft_cmd}, google:{is_google_cmd}")
+            logger.info(f"🔍 DEBUG: Command check - email:{is_email_cmd}, draft:{is_draft_cmd}")
             
             if is_email_cmd:
                 logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
@@ -425,11 +437,10 @@ Weather data powered by Tomorrow.io"""
                     import traceback
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                     special_response = f"📧 **Email Detail Error**\n\nError: {str(e)}"
-        
+            
             elif is_draft_cmd:
                 logger.info(f"✉️ DEBUG: Draft creation command detected")
                 try:
-                    # Get conversation history for context
                     history = await memory_manager.get_conversation_history(thread_id, limit=10)
                     special_response = await process_draft_creation_command(history, user_id, draft_instruction)
                     logger.info("✅ DEBUG: Draft created successfully")
@@ -438,21 +449,8 @@ Weather data powered by Tomorrow.io"""
                     import traceback
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                     special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
-                    
-            elif is_google_cmd:
-                    logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
-                    try:
-                        logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
-                        special_response = await process_google_command(message_content, user_id)
-                        logger.info("✅ DEBUG: Google Workspace response generated successfully")
-                    except Exception as e:
-                        logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
-                        logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
-                        import traceback
-                        logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
-                        special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
             
-    # 10. 🏥 Health Check command detection (NINTH)
+    # 11. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:
@@ -476,7 +474,7 @@ All systems operational and ready to assist!"""
                 logger.error(f"❌ DEBUG: Health check processing failed: {e}")
                 special_response = f"🏥 **Health Check Error**\n\nUnable to retrieve system health: {str(e)}"
         
-        # 11. 🧠 Chat/AI function (TENTH - DEFAULT AI PROCESSING)
+        # 12. 🧠 Chat/AI function (TENTH - DEFAULT AI PROCESSING)
         if special_response:
             # Use the special response from one of the integrations
             logger.info(f"✅ DEBUG: Using special integration response (length: {len(special_response)} chars)")
