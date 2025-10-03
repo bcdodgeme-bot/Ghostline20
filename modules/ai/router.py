@@ -426,31 +426,31 @@ Weather data powered by Tomorrow.io"""
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                     special_response = f"📧 **Email Detail Error**\n\nError: {str(e)}"
         
-        elif is_draft_cmd:
-            logger.info(f"✉️ DEBUG: Draft creation command detected")
-            try:
-                # Get conversation history for context
-                history = await memory_manager.get_conversation_history(thread_id, limit=10)
-                special_response = await process_draft_creation_command(history, user_id, draft_instruction)
-                logger.info("✅ DEBUG: Draft created successfully")
-            except Exception as e:
-                logger.error(f"❌ DEBUG: Draft creation failed: {e}")
-                import traceback
-                logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
-                special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
-                
-        elif is_google_cmd:
-                logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+            elif is_draft_cmd:
+                logger.info(f"✉️ DEBUG: Draft creation command detected")
                 try:
-                    logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
-                    special_response = await process_google_command(message_content, user_id)
-                    logger.info("✅ DEBUG: Google Workspace response generated successfully")
+                    # Get conversation history for context
+                    history = await memory_manager.get_conversation_history(thread_id, limit=10)
+                    special_response = await process_draft_creation_command(history, user_id, draft_instruction)
+                    logger.info("✅ DEBUG: Draft created successfully")
                 except Exception as e:
-                    logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
-                    logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                    logger.error(f"❌ DEBUG: Draft creation failed: {e}")
                     import traceback
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
-                    special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
+                    special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
+                    
+            elif is_google_cmd:
+                    logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
+                    try:
+                        logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
+                        special_response = await process_google_command(message_content, user_id)
+                        logger.info("✅ DEBUG: Google Workspace response generated successfully")
+                    except Exception as e:
+                        logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
+                        logger.error(f"❌ DEBUG: Full exception details: {repr(e)}")
+                        import traceback
+                        logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+                        special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
             
     # 10. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
