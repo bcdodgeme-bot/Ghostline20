@@ -29,6 +29,7 @@ class CalendarClient:
         
         self._user_id = None
         self._user_creds = None
+        self._client_creds = None  # ADD THIS LINE
         self._calendars_cache = []
         logger.info("📅 Calendar client initialized (aiogoogle)")
     
@@ -37,11 +38,21 @@ class CalendarClient:
         try:
             logger.debug(f"🔧 Calendar.initialize() called with user_id={user_id}")
             self._user_id = user_id
+            
+            # Get BOTH user creds and client creds
             self._user_creds = await get_aiogoogle_credentials(user_id, None)
             
             if not self._user_creds:
                 logger.error(f"❌ No credentials found for user_id={user_id}")
                 raise Exception("No valid credentials")
+            
+            # CRITICAL FIX: Load client credentials
+            from .oauth_manager import google_auth_manager
+            self._client_creds = google_auth_manager.get_client_credentials()
+            
+            if not self._client_creds:
+                logger.error(f"❌ No client credentials available")
+                raise Exception("No OAuth app credentials configured")
             
             logger.info(f"✅ Calendar initialized for user {user_id}")
             
@@ -62,7 +73,7 @@ class CalendarClient:
             
             logger.info("📅 Fetching calendar list from Google API...")
             
-            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
+            async with Aiogoogle(user_creds=self._user_creds, client_creds=self._client_creds) as aiogoogle:
                 calendar_v3 = await aiogoogle.discover('calendar', 'v3')
                 
                 logger.debug(f"🔍 Calling Calendar API: calendarList.list")
@@ -121,7 +132,7 @@ class CalendarClient:
             
             logger.info(f"📅 Fetching events from {calendar_id}: {time_min.date()} to {time_max.date()}")
             
-            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
+            async with Aiogoogle(user_creds=self._user_creds, client_creds=self._client_creds) as aiogoogle:
                 calendar_v3 = await aiogoogle.discover('calendar', 'v3')
                 
                 logger.debug(f"🔍 Calling Calendar API: events.list")
