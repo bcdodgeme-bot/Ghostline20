@@ -6,7 +6,7 @@ Multi-Account Email Intelligence with True Async Support
 
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import base64
 
 logger = logging.getLogger(__name__)
@@ -295,6 +295,7 @@ class GmailClient:
                 ''', self._user_id, cutoff_date)
 
                 # If no data OR latest email is older than 1 hour, fetch fresh
+                from datetime import timezone
                 needs_refresh = (count == 0) or (latest_email and datetime.now() - latest_email > timedelta(hours=1))
 
                 logger.debug(f"🔍 Refresh check: count={count}, latest={latest_email}, needs_refresh={needs_refresh}")
