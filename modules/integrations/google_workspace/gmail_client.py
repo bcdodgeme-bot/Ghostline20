@@ -283,12 +283,24 @@ class GmailClient:
                     WHERE user_id = $1 
                     AND email_date >= $2
                 ''', self._user_id, cutoff_date)
-                
+
                 logger.debug(f"📊 Found {count} emails in database for last {days} days")
-                
-                # If no data or stale data, fetch from API first
-                if count == 0:
-                    logger.info(f"🔄 No recent data in DB, fetching from Gmail API...")
+
+                # Check if we need to fetch fresh data
+                # Get the most recent email date in database
+                latest_email = await conn.fetchval('''
+                    SELECT MAX(email_date) FROM google_gmail_analysis
+                    WHERE user_id = $1 
+                    AND email_date >= $2
+                ''', self._user_id, cutoff_date)
+
+                # If no data OR latest email is older than 1 hour, fetch fresh
+                needs_refresh = (count == 0) or (latest_email and datetime.now() - latest_email > timedelta(hours=1))
+
+                logger.debug(f"🔍 Refresh check: count={count}, latest={latest_email}, needs_refresh={needs_refresh}")
+
+                if needs_refresh:
+                    logger.info(f"🔄 Fetching fresh data from Gmail API...")
                     try:
                         await self.get_recent_messages(email, max_results=50, days=days)
                         logger.info(f"✅ Fresh data fetched from API")
