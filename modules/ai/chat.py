@@ -2706,20 +2706,74 @@ async def process_email_detail_command(action_type: str, email_index: int, user_
             return await gmail_client.summarize_email(email_index)
         
         # REPLY: Prompt for reply content
+        # REPLY: Generate AI suggestion AND create draft
         elif action_type == 'reply':
             email = await gmail_client.get_email_by_index(email_index)
             if not email:
                 return f"Email #{email_index} not found. Run `google email summary` first."
             
-            return f"""Draft Reply to Email #{email_index}
+            # Extract sender email from "Name <email>" format
+            import re
+            sender_match = re.search(r'<(.+?)>', email['from'])
+            sender_email = sender_match.group(1) if sender_match else email['from']
+            
+            # Generate AI-suggested reply using OpenRouter
+            from ..ai.openrouter_client import get_openrouter_client
+            openrouter = await get_openrouter_client()
+            
+            ai_response = await openrouter.chat_completion(
+                messages=[{
+                    "role": "system",
+                    "content": f"Generate a professional email reply to this message. Keep it concise and appropriate. Original email:\n\nFrom: {email['from']}\nSubject: {email['subject']}\nDate: {email['date']}\n\nBody:\n{email['body'][:1000]}"
+                }, {
+                    "role": "user",
+                    "content": "Generate a suggested reply to this email."
+                }],
+                model="anthropic/claude-3.5-sonnet:beta",
+                max_tokens=500
+            )
+            
+            suggested_reply = ai_response['choices'][0]['message']['content']
+            
+            # Create the draft
+            try:
+                draft_result = await gmail_client.create_draft(
+                    email=None,
+                    to=sender_email,
+                    subject=f"Re: {email['subject']}",
+                    body=suggested_reply
+                )
+                
+                return f"""✅ **Draft Reply Created for Email #{email_index}**
 
-Original From: {email['from']}
-Subject: Re: {email['subject']}
+        **To:** {sender_email}
+        **Subject:** Re: {email['subject']}
 
-To draft a reply, tell me what you want to say. For example:
-"Draft a reply saying I'll review this by Friday"
+        **Draft Content:**
+        {suggested_reply}
 
-Or I can suggest a response based on the email content."""
+        ---
+        **Draft ID:** {draft_result['id']}
+
+        The draft has been saved to your Gmail drafts. You can review and edit it before sending!
+
+        Commands:
+        - Open Gmail to send the draft
+        - `reply to email {email_index}` to regenerate with different content"""
+            
+            except Exception as draft_error:
+                logger.error(f"Failed to create draft: {draft_error}")
+                return f"""**Suggested Reply for Email #{email_index}**
+
+        **To:** {sender_email}
+        **Subject:** Re: {email['subject']}
+
+        {suggested_reply}
+
+        ---
+        ⚠️ Could not save to Gmail drafts: {str(draft_error)}
+
+        You can copy this text and create the draft manually."""
         
         # READ: Show full email body
         elif action_type == 'read':
