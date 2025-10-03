@@ -2531,6 +2531,186 @@ Commands:
 Connected Accounts: Check with `google auth accounts`"""
             
             # ============================================================
+            # DRIVE COMMANDS
+            # ============================================================
+            
+            elif command_type == 'drive_create_doc':
+                # Parse title from message
+                import re
+                match = re.search(r'create doc(?:ument)?\s+(.+)', message.lower())
+                if not match:
+                    return """📄 **Create Google Doc**
+
+Usage: `google drive create doc [title]`
+
+Example: `google drive create doc Meeting Notes`
+
+I'll create a new Google Doc with that title!"""
+                
+                title = match.group(1).strip()
+                
+                try:
+                    from ..integrations.google_workspace.drive_client import create_google_doc
+                    doc = await create_google_doc(user_id, title, "Document created from Syntax Prime chat")
+                    
+                    return f"""📄 **Document Created!**
+
+**Title:** {doc['title']}
+**Type:** Google Doc
+**URL:** {doc['url']}
+
+Your document is ready! Click the link above to open it in Google Docs."""
+                    
+                except Exception as e:
+                    logger.error(f"Drive create doc failed: {e}")
+                    return f"❌ **Drive Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
+            elif command_type == 'drive_create_sheet':
+                # Parse title from message
+                import re
+                match = re.search(r'create sheet\s+(.+)', message.lower())
+                if not match:
+                    return """📊 **Create Google Sheet**
+
+Usage: `google drive create sheet [title]`
+
+Example: `google drive create sheet Budget 2025`
+
+I'll create a new Google Sheet with that title!"""
+                
+                title = match.group(1).strip()
+                
+                try:
+                    from ..integrations.google_workspace.drive_client import create_google_sheet
+                    sheet = await create_google_sheet(user_id, title, [["Created from Syntax Prime"]])
+                    
+                    return f"""📊 **Spreadsheet Created!**
+
+**Title:** {sheet['title']}
+**Type:** Google Sheet
+**URL:** {sheet['url']}
+
+Your spreadsheet is ready! Click the link above to open it in Google Sheets."""
+                    
+                except Exception as e:
+                    logger.error(f"Drive create sheet failed: {e}")
+                    return f"❌ **Drive Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
+            elif command_type == 'drive_recent':
+                return "📁 This feature hasn't been built yet. Use `google drive create doc [title]` or `google drive create sheet [title]` for document creation."
+            
+            elif command_type == 'drive_help':
+                return """📁 **Google Drive Commands**
+
+**Working Commands:**
+   - `google drive create doc [title]` - Create new Google Doc
+   - `google drive create sheet [title]` - Create new spreadsheet
+
+Use `google auth status` to check your connection!"""
+
+            # ============================================================
+            # CALENDAR COMMANDS
+            # ============================================================
+            
+            elif command_type == 'calendar_today':
+                try:
+                    from ..integrations.google_workspace.calendar_client import get_today_schedule
+                    events = await get_today_schedule(user_id)
+                    
+                    if not events:
+                        return "📅 **Today's Calendar**\n\nNo events scheduled for today. Enjoy your free time!"
+                    
+                    response = f"📅 **Today's Calendar** ({len(events)} events)\n\n"
+                    for event in events:
+                        start = event.get('start', {})
+                        time_str = start.get('dateTime', start.get('date', 'Unknown'))[:16].replace('T', ' ')
+                        cal_name = event.get('calendar_name', 'Unknown')
+                        response += f"**{time_str}** - {event['summary']}\n"
+                        response += f"   📍 {cal_name}\n\n"
+                    
+                    return response
+                    
+                except Exception as e:
+                    logger.error(f"Calendar today failed: {e}")
+                    return f"❌ **Calendar Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
+            elif command_type == 'calendar_week':
+                try:
+                    from ..integrations.google_workspace.calendar_client import get_week_schedule
+                    events = await get_week_schedule(user_id)
+                    
+                    if not events:
+                        return "📅 **This Week's Calendar**\n\nNo events scheduled this week. Time to plan something!"
+                    
+                    # Group events by day
+                    from datetime import datetime
+                    events_by_day = {}
+                    for event in events:
+                        start = event.get('start', {})
+                        date_str = start.get('dateTime', start.get('date', ''))[:10]
+                        if date_str not in events_by_day:
+                            events_by_day[date_str] = []
+                        events_by_day[date_str].append(event)
+                    
+                    response = f"📅 **This Week's Calendar** ({len(events)} events)\n\n"
+                    
+                    for date_str in sorted(events_by_day.keys()):
+                        day_events = events_by_day[date_str]
+                        date_obj = datetime.fromisoformat(date_str)
+                        day_name = date_obj.strftime('%A, %B %d')
+                        
+                        response += f"**{day_name}** ({len(day_events)} events)\n"
+                        for event in day_events[:5]:  # Limit to 5 per day
+                            start = event.get('start', {})
+                            time_str = start.get('dateTime', start.get('date', ''))[:16].replace('T', ' at ')
+                            response += f"  • {event['summary']} - {time_str}\n"
+                        
+                        if len(day_events) > 5:
+                            response += f"  • ... and {len(day_events) - 5} more\n"
+                        response += "\n"
+                    
+                    return response
+                    
+                except Exception as e:
+                    logger.error(f"Calendar week failed: {e}")
+                    return f"❌ **Calendar Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
+            elif command_type == 'calendar_feeds':
+                try:
+                    from ..integrations.google_workspace.calendar_client import get_calendar_feeds
+                    calendars = await get_calendar_feeds(user_id)
+                    
+                    if not calendars:
+                        return "📅 **Calendar Feeds**\n\nNo calendars found. Check your Google Calendar connection."
+                    
+                    response = f"📅 **Your Calendar Feeds** ({len(calendars)} calendars)\n\n"
+                    
+                    for cal in calendars:
+                        primary = " (Primary)" if cal.get('primary') else ""
+                        selected = "✓" if cal.get('selected') else "○"
+                        response += f"{selected} **{cal['summary']}**{primary}\n"
+                        response += f"   Access: {cal.get('access_role', 'unknown')}\n\n"
+                    
+                    return response
+                    
+                except Exception as e:
+                    logger.error(f"Calendar feeds failed: {e}")
+                    return f"❌ **Calendar Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
+            elif command_type == 'calendar_windows':
+                return "📅 This feature hasn't been built yet. Use `google calendar week` to view your schedule."
+            
+            elif command_type == 'calendar_help':
+                return """📅 **Google Calendar Commands**
+
+**Working Commands:**
+   - `google calendar today` - Today's schedule
+   - `google calendar week` - This week's events
+   - `google calendar feeds` - List all your calendars
+
+Use `google auth status` to check your connection!"""
+            
+            # ============================================================
             # STATUS & HELP COMMANDS
             # ============================================================
             

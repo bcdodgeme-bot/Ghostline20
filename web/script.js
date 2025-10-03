@@ -1176,10 +1176,10 @@ class SyntaxPrimeChat {
             });
 
             // Voice synthesis for AI response - Date: 9/28/25
-            if (this.voiceEnabled && assistantMessage) {
-                console.log(`🎤 Starting voice synthesis for response ${response.message_id}`);
-                await this.synthesizeVoice(response.response, response.message_id);
-            }
+            //if (this.voiceEnabled && assistantMessage) {
+            //    console.log(`🎤 Starting voice synthesis for response ${response.message_id}`);
+            //    await this.synthesizeVoice(response.response, response.message_id);
+            //}
 
             // Image generation if requested - Date: 9/28/25
             if (imagePrompt && this.imageEnabled && assistantMessage) {
