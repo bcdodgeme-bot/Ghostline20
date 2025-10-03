@@ -404,7 +404,10 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
         
        # 9a. 📧 Email Detail & Draft Commands - NEW 10/2/25
-       # 8. 📧 Email Detail & Draft Commands (EIGHTH) - MOVED BEFORE IMAGE - 10/3/25
+       # 9a. 📧 Email Detail & Draft Commands (EIGHTH) - MOVED BEFORE IMAGE - 10/3/25
+       is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
+       is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
+        
         elif is_email_cmd:
             logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
             try:
