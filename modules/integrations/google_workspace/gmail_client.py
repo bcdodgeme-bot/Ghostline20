@@ -296,7 +296,7 @@ class GmailClient:
 
                 # If no data OR latest email is older than 1 hour, fetch fresh
                 from datetime import timezone
-                needs_refresh = (count == 0) or (latest_email and datetime.now() - latest_email > timedelta(hours=1))
+                needs_refresh = (count == 0) or (latest_email and datetime.now(timezone.utc) - latest_email > timedelta(hours=1))
 
                 logger.debug(f"🔍 Refresh check: count={count}, latest={latest_email}, needs_refresh={needs_refresh}")
 
