@@ -406,22 +406,22 @@ Weather data powered by Tomorrow.io"""
        # 9a. 📧 Email Detail & Draft Commands - NEW 10/2/25
        # 9a. 📧 Email Detail & Draft Commands (EIGHTH) - MOVED BEFORE IMAGE - 10/3/25
         elif detect_email_detail_command(message_content)[0] or detect_draft_creation_command(message_content)[0]:
-        logger.info("📧 DEBUG: Email or draft command detected - determining type...")
-        
-        # Get the actual detection results
-        is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
-        is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
-        
-        if is_email_cmd:
-            logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
-            try:
-                special_response = await process_email_detail_command(action_type, email_num, user_id)
-                logger.info("✅ DEBUG: Email detail response generated successfully")
-            except Exception as e:
-                logger.error(f"❌ DEBUG: Email detail processing failed: {e}")
-                import traceback
-                logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
-                special_response = f"📧 **Email Detail Error**\n\nError: {str(e)}"
+            logger.info("📧 DEBUG: Email or draft command detected - determining type...")
+            
+            # Get the actual detection results
+            is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
+            is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
+            
+            if is_email_cmd:
+                logger.info(f"📧 DEBUG: Email detail command detected: {action_type} for email #{email_num}")
+                try:
+                    special_response = await process_email_detail_command(action_type, email_num, user_id)
+                    logger.info("✅ DEBUG: Email detail response generated successfully")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: Email detail processing failed: {e}")
+                    import traceback
+                    logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+                    special_response = f"📧 **Email Detail Error**\n\nError: {str(e)}"
         
         elif is_draft_cmd:
             logger.info(f"✉️ DEBUG: Draft creation command detected")
