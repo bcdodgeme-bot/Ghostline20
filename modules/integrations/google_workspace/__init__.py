@@ -69,10 +69,12 @@ OAUTH_SCOPES = [
     'https://www.googleapis.com/auth/analytics.readonly',
     'https://www.googleapis.com/auth/webmasters.readonly',
     'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile'
 ]
-
 # Processing configuration
 POLL_INTERVAL_SECONDS = 7200  # 2 hours (not every 3 minutes like V1!)
 MAX_KEYWORD_OPPORTUNITIES_PER_SITE = 50  # Limit opportunities to prevent overwhelm
