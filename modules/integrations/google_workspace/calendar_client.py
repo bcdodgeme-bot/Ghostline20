@@ -48,7 +48,10 @@ class CalendarClient:
             
             # CRITICAL FIX: Load client credentials
             from .oauth_manager import google_auth_manager
-            self._client_creds = google_auth_manager.get_client_credentials()
+            self._client_creds = {
+                'client_id': google_auth_manager.client_id,
+                'client_secret': google_auth_manager.client_secret
+            }
             
             if not self._client_creds:
                 logger.error(f"❌ No client credentials available")
