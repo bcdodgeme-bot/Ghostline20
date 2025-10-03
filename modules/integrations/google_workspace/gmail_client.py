@@ -376,13 +376,14 @@ class GmailClient:
                 logger.warning(f"No email found at index {email_index}. Run 'google email summary' first.")
                 return None
             
+            # FIX #1: Fetch the actual email details using the message_id
             return await self.get_email_details(message_id)
             
         except Exception as e:
             logger.error(f"Failed to get email by index: {e}")
             return None
     
-    async def get_email_details(self, message_id: str) -> Dict[str, Any]:
+    async def get_email_details(self, message_id: str) -> Optional[Dict[str, Any]]:
         """
         Fetch full email content including body
         
@@ -554,7 +555,15 @@ class GmailClient:
             
             logger.debug(f"🔍 Encoded message length: {len(encoded_message)} chars")
             
-            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
+            # FIX #2: Need client_creds for token refresh
+            from .oauth_manager import google_auth_manager
+            
+            client_creds = {
+                'client_id': google_auth_manager.client_id,
+                'client_secret': google_auth_manager.client_secret
+            }
+            
+            async with Aiogoogle(user_creds=self._user_creds, client_creds=client_creds) as aiogoogle:
                 gmail_v1 = await aiogoogle.discover('gmail', 'v1')
                 
                 logger.debug(f"🔍 Calling Gmail API: users.drafts.create")

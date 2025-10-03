@@ -2480,7 +2480,7 @@ Negative Sentiment: {summary.get('negative_sentiment', 0)}"""
                     if emails_needing_response:
                         response_parts.append("\n\n📧 **Emails Requiring Response:**\n")
                         
-                        for i, email in enumerate(emails_needing_response[:5], 1):  # Show max 5
+                        for i, email in enumerate(emails_needing_response[:10], 1):  # Show max 10
                             priority_emoji = "🔥" if email.get('priority') == 'high' else "📨"
                             response_parts.append(f"""{i}. {priority_emoji} **From:** {email['from']}
    **Subject:** {email['subject']}
