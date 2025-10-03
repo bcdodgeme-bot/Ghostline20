@@ -408,7 +408,7 @@ Weather data powered by Tomorrow.io"""
             logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
             try:
                 logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
-                special_response = await process_google_command(message_content, user_id)
+                special_response = await process_google_command(message_content, user_id, thread_id)
                 logger.info("✅ DEBUG: Google Workspace response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")

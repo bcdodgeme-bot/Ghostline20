@@ -2185,14 +2185,16 @@ def detect_google_command(message: str) -> tuple[bool, str]:
         return True, 'optimal_timing'
     
     elif 'drive' in message_lower:
-        if 'create' in message_lower and 'doc' in message_lower:
-            return True, 'drive_create_doc'
-        elif 'create' in message_lower and 'sheet' in message_lower:
-            return True, 'drive_create_sheet'
-        elif 'recent' in message_lower:
-            return True, 'drive_recent'
-        else:
-            return True, 'drive_help'
+            if 'copy' in message_lower or 'save' in message_lower or 'move' in message_lower:
+                return True, 'drive_copy'
+            elif 'create' in message_lower and 'doc' in message_lower:
+                return True, 'drive_create_doc'
+            elif 'create' in message_lower and 'sheet' in message_lower:
+                return True, 'drive_create_sheet'
+            elif 'recent' in message_lower:
+                return True, 'drive_recent'
+            else:
+                return True, 'drive_help'
     
     elif 'email' in message_lower or 'gmail' in message_lower:
         if 'summary' in message_lower:
@@ -2232,7 +2234,7 @@ def detect_google_command(message: str) -> tuple[bool, str]:
     else:
         return True, 'general_help'
 
-async def process_google_command(message: str, user_id: str) -> str:
+async def process_google_command(message: str, user_id: str, thread_id: Optional[str] = None) -> str:
     """Process Google Workspace commands and return personality-driven responses"""
     try:
         import httpx
@@ -2596,8 +2598,121 @@ Your spreadsheet is ready! Click the link above to open it in Google Sheets."""
                     logger.error(f"Drive create sheet failed: {e}")
                     return f"❌ **Drive Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
             
+            elif command_type == 'drive_copy':
+                # Parse title and message count
+                import re
+                
+                # Extract title if provided (after "as")
+                title_match = re.search(r'(?:as|titled?)\s+(.+?)(?:\s*$)', message, re.IGNORECASE)
+                title = title_match.group(1).strip() if title_match else None
+                
+                # Extract number of messages if specified
+                num_match = re.search(r'last\s+(\d+)\s+messages?', message.lower())
+                num_messages = int(num_match.group(1)) if num_match else 1
+                
+                # If no title provided, ask for one
+                if not title:
+                    return """📄 **Copy to Google Drive**
+
+            Please provide a title for the document:
+
+            Usage: `copy that to drive as [title]`
+
+            Examples:
+            - `copy that to drive as Marketing Report`
+            - `copy last 3 messages to drive as Meeting Notes`
+
+            I'll grab the conversation content and create a formatted Google Doc!"""
+                
+                # Get conversation history
+                try:
+                    from ..ai.conversation_manager import get_memory_manager
+                    memory = await get_memory_manager()
+                    
+                    if not thread_id:
+                        return "❌ No conversation thread found. Start a conversation first, then use `copy that to drive as [title]`"
+                    
+                    # Get recent messages from this thread
+                    messages = await memory.get_messages(thread_id, limit=num_messages * 2)  # Get extras to filter
+                    
+                    if not messages:
+                        return "❌ No messages found in this conversation to copy."
+                    
+                    # Build document content from messages
+                    content_parts = []
+                    message_count = 0
+                    
+                    for msg in reversed(messages):  # Reverse to get chronological order
+                        if message_count >= num_messages:
+                            break
+                            
+                        role = msg.get('role', 'unknown')
+                        text = msg.get('content', '')
+                        
+                        if role == 'user':
+                            content_parts.append(f"**User:**\n{text}\n\n")
+                            message_count += 1
+                        elif role == 'assistant':
+                            content_parts.append(f"**Assistant:**\n{text}\n\n")
+                            message_count += 1
+                    
+                    if not content_parts:
+                        return "❌ No conversation content found to copy."
+                    
+                    # Combine into document
+                    document_content = f"# {title}\n\n" + "".join(content_parts)
+                    
+                    # Create the Google Doc with full markdown formatting
+                    from ..integrations.google_workspace.drive_client import create_google_doc
+                    doc = await create_google_doc(user_id, title, document_content, thread_id)
+                    
+                    messages_copied = "message" if num_messages == 1 else f"{num_messages} messages"
+                    
+                    return f"""📄 **Copied to Google Drive!**
+
+            **Title:** {doc['title']}
+            **Content:** Last {messages_copied}
+            **URL:** {doc['url']}
+
+            Your conversation has been saved as a Google Doc with full formatting!
+            Click the link above to open and edit it."""
+                    
+                except Exception as e:
+                    logger.error(f"Drive copy failed: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    return f"❌ **Drive Copy Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
+            
             elif command_type == 'drive_recent':
-                return "📁 This feature hasn't been built yet. Use `google drive create doc [title]` or `google drive create sheet [title]` for document creation."
+                try:
+                    from ..integrations.google_workspace.drive_client import list_recent_docs
+                    docs = await list_recent_docs(user_id, limit=10)
+                    
+                    if not docs:
+                        return """📁 **Recent Google Drive Documents**
+
+            No documents created yet through Syntax Prime.
+
+            Use these commands to create your first document:
+            - `google drive create doc [title]`
+            - `google drive create sheet [title]`
+            - `copy that to drive as [title]`"""
+                    
+                    response = f"📁 **Recent Google Drive Documents** ({len(docs)} documents)\n\n"
+                    
+                    for i, doc in enumerate(docs, 1):
+                        doc_type = "📄 Doc" if doc['type'] == 'document' else "📊 Sheet"
+                        created = doc['created'].strftime('%b %d, %I:%M %p') if hasattr(doc['created'], 'strftime') else str(doc['created'])
+                        
+                        response += f"{i}. {doc_type} **{doc['title']}**\n"
+                        response += f"   Created: {created}\n"
+                        response += f"   {doc['url']}\n\n"
+                    
+                    return response
+                    
+                except Exception as e:
+                    logger.error(f"Drive recent failed: {e}")
+                    return f"❌ **Drive Error:** {str(e)}\n\nMake sure you're connected with `google auth status`"
             
             elif command_type == 'drive_help':
                 return """📁 **Google Drive Commands**
@@ -2605,6 +2720,9 @@ Your spreadsheet is ready! Click the link above to open it in Google Sheets."""
 **Working Commands:**
    - `google drive create doc [title]` - Create new Google Doc
    - `google drive create sheet [title]` - Create new spreadsheet
+   - `copy that to drive as [title]` - Save conversation to Drive
+   - `copy last [N] messages to drive as [title]` - Save multiple messages
+   - `google drive recent` - View recently created documents
 
 Use `google auth status` to check your connection!"""
 
