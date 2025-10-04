@@ -2144,7 +2144,8 @@ def detect_google_command(message: str) -> tuple[bool, str]:
             'google keywords', 'google analytics', 'google drive', 'google email',
             'google gmail', 'google calendar', 'google suggest', 'google patterns',
             'google predict', 'google intelligence', 'google optimal',
-            'copy to drive', 'save to google doc', 'move to drive'
+            'copy to drive', 'save to google doc', 'move to drive',  # ← Already added
+            'copy that to drive', 'save that to drive',  # ← ADD THESE
     ]
     
     message_lower = message.lower()
