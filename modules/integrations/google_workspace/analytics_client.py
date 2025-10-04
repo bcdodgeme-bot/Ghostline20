@@ -35,6 +35,9 @@ class AnalyticsClient:
         if not ANALYTICS_AVAILABLE:
             raise RuntimeError("google-analytics-data required - run: pip install google-analytics-data")
     
+        self._user_id = user_id
+        self._credentials = None
+    
     async def initialize(self, user_id: str):
         """Initialize with Google credentials"""
         try:
