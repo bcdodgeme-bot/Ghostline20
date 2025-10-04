@@ -1,7 +1,7 @@
 # modules/integrations/google_workspace/analytics_client.py
 """
-Google Analytics Client - REFACTORED FOR AIOGOOGLE
-True async API calls for traffic analysis
+Google Analytics Client - Using Official Google Analytics Data API
+Real GA4 data fetching with proper authentication
 """
 
 import json
@@ -11,16 +11,22 @@ from typing import Any
 
 from . import SUPPORTED_SITES
 from ...core.database import db_manager
-from .oauth_manager import get_aiogoogle_credentials
+from .oauth_manager import get_google_credentials
 
 logger = logging.getLogger(__name__)
 
 try:
-    from aiogoogle import Aiogoogle
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import (
+        RunReportRequest,
+        DateRange,
+        Dimension,
+        Metric
+    )
     ANALYTICS_AVAILABLE = True
 except ImportError:
     ANALYTICS_AVAILABLE = False
-    logger.warning("aiogoogle not installed")
+    logger.warning("google-analytics-data not installed - run: pip install google-analytics-data")
 
 
 class AnalyticsClient:
@@ -28,19 +34,19 @@ class AnalyticsClient:
     
     def __init__(self, user_id: str = None):
         if not ANALYTICS_AVAILABLE:
-            raise RuntimeError("aiogoogle required")
+            raise RuntimeError("google-analytics-data required - run: pip install google-analytics-data")
         
         self._user_id = user_id
-        self._user_creds = None
+        self._credentials = None
         logger.info(f"Analytics client initialized for user {user_id}")
     
     async def initialize(self, user_id: str):
-        """Initialize with aiogoogle credentials"""
+        """Initialize with Google credentials"""
         try:
             self._user_id = user_id
-            self._user_creds = await get_aiogoogle_credentials(user_id, None)
+            self._credentials = await get_google_credentials(user_id, None)
             
-            if not self._user_creds:
+            if not self._credentials:
                 logger.error(f"No credentials found for user_id={user_id}")
                 raise Exception("No valid credentials available")
             
@@ -315,11 +321,12 @@ class AnalyticsClient:
     async def fetch_traffic_summary(self, site_name: str, days: int = 30):
         """
         Fetch traffic summary from Google Analytics Data API (GA4)
+        Using official google-analytics-data library
         """
         try:
             logger.info(f"Fetching GA4 data for {site_name}, last {days} days")
             
-            if not self._user_creds:
+            if not self._credentials:
                 await self.initialize(self._user_id)
             
             site_config = SUPPORTED_SITES.get(site_name)
@@ -334,54 +341,51 @@ class AnalyticsClient:
             
             logger.info(f"Fetching Analytics for property {property_id}: {start_date} to {end_date}")
             
-            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
-                analyticsdata = await aiogoogle.discover('analyticsdata', 'v1beta')
-                
-                # Make the API request
-                response = await aiogoogle.as_user(
-                    analyticsdata.properties.runReport(
-                        property=f'properties/{property_id}',
-                        json={
-                            'dateRanges': [{
-                                'startDate': start_date.isoformat(),
-                                'endDate': end_date.isoformat()
-                            }],
-                            'metrics': [
-                                {'name': 'activeUsers'},
-                                {'name': 'newUsers'},
-                                {'name': 'sessions'},
-                                {'name': 'screenPageViews'},
-                                {'name': 'averageSessionDuration'},
-                                {'name': 'bounceRate'},
-                                {'name': 'engagementRate'}
-                            ],
-                            'dimensions': [
-                                {'name': 'deviceCategory'}
-                            ]
-                        }
-                    )
-                )
-                
-                logger.info(f"GA4 API response received")
-                
-                # Parse response and build summary structure
-                summary = self._parse_ga4_response(response, start_date, end_date)
-                
-                # Store the data
-                await self._store_analytics_data(site_name, summary)
-                
-                logger.info(f"Successfully fetched and stored GA4 data for {site_name}")
-                
+            # Create client with credentials
+            client = BetaAnalyticsDataClient(credentials=self._credentials)
+            
+            # Build the request
+            request = RunReportRequest(
+                property=f'properties/{property_id}',
+                date_ranges=[DateRange(
+                    start_date=start_date.strftime('%Y-%m-%d'),
+                    end_date=end_date.strftime('%Y-%m-%d')
+                )],
+                metrics=[
+                    Metric(name='activeUsers'),
+                    Metric(name='newUsers'),
+                    Metric(name='sessions'),
+                    Metric(name='screenPageViews'),
+                    Metric(name='averageSessionDuration'),
+                    Metric(name='bounceRate'),
+                    Metric(name='engagementRate')
+                ],
+                dimensions=[
+                    Dimension(name='deviceCategory')
+                ]
+            )
+            
+            # Make the API call
+            response = client.run_report(request)
+            
+            logger.info(f"GA4 API response received with {len(response.rows)} rows")
+            
+            # Parse response and build summary structure
+            summary = self._parse_ga4_response(response, start_date, end_date)
+            
+            # Store the data
+            await self._store_analytics_data(site_name, summary)
+            
+            logger.info(f"Successfully fetched and stored GA4 data for {site_name}")
+            
         except Exception as e:
             logger.error(f"Failed to fetch GA4 data: {e}", exc_info=True)
             raise
     
-    def _parse_ga4_response(self, response: dict, start_date, end_date) -> dict[str, Any]:
+    def _parse_ga4_response(self, response, start_date, end_date) -> dict[str, Any]:
         """Parse GA4 API response into our summary structure"""
         try:
-            rows = response.get('rows', [])
-            
-            if not rows:
+            if not response.rows:
                 logger.warning("No data in GA4 response")
                 return self._empty_summary(start_date, end_date)
             
@@ -396,28 +400,29 @@ class AnalyticsClient:
             
             devices = []
             
-            for row in rows:
-                metric_values = row.get('metricValues', [])
-                dimension_values = row.get('dimensionValues', [])
+            for row in response.rows:
+                # Get metric values
+                metric_values = row.metric_values
                 
                 if len(metric_values) >= 7:
-                    total_users += int(metric_values[0].get('value', 0))
-                    new_users += int(metric_values[1].get('value', 0))
-                    sessions += int(metric_values[2].get('value', 0))
-                    pageviews += int(metric_values[3].get('value', 0))
-                    total_duration += float(metric_values[4].get('value', 0))
-                    bounce_rate = float(metric_values[5].get('value', 0))
-                    engagement_rate = float(metric_values[6].get('value', 0))
+                    total_users += int(metric_values[0].value) if metric_values[0].value else 0
+                    new_users += int(metric_values[1].value) if metric_values[1].value else 0
+                    sessions += int(metric_values[2].value) if metric_values[2].value else 0
+                    pageviews += int(metric_values[3].value) if metric_values[3].value else 0
+                    total_duration += float(metric_values[4].value) if metric_values[4].value else 0
+                    bounce_rate = float(metric_values[5].value) if metric_values[5].value else 0
+                    engagement_rate = float(metric_values[6].value) if metric_values[6].value else 0
                 
-                if dimension_values:
-                    device = dimension_values[0].get('value', 'unknown')
+                # Get device dimension
+                if row.dimension_values:
+                    device = row.dimension_values[0].value
                     devices.append({
                         'device': device,
-                        'sessions': int(metric_values[2].get('value', 0)) if len(metric_values) > 2 else 0
+                        'sessions': int(metric_values[2].value) if len(metric_values) > 2 and metric_values[2].value else 0
                     })
             
-            avg_duration = total_duration / len(rows) if rows else 0
-            returning_users = total_users - new_users
+            avg_duration = total_duration / len(response.rows) if response.rows else 0
+            returning_users = total_users - new_users if total_users > new_users else 0
             
             summary = {
                 'date_range': {

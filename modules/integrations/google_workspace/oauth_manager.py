@@ -487,6 +487,9 @@ class GoogleAuthManager:
                 credentials = Credentials(
                     token=access_token,
                     refresh_token=refresh_token,
+                    token_uri=self.token_url,           # ← ADD THIS
+                    client_id=self.client_id,           # ← ADD THIS
+                    client_secret=self.client_secret
                     client_id=self.client_id,
                     client_secret=self.client_secret,
                     scopes=self.oauth_scopes,
