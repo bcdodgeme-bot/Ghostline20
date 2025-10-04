@@ -43,7 +43,7 @@ class AnalyticsClient:
         """Initialize with Google credentials"""
         try:
             self._user_id = user_id
-            self._credentials = await get_google_credentials(user_id, None)
+            self._credentials = await google_auth_manager.get_analytics_credentials(user_id, None)
             
             if not self._credentials:
                 logger.error(f"No credentials found for user_id={user_id}")
