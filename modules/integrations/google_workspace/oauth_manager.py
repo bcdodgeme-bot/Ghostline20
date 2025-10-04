@@ -417,7 +417,7 @@ class GoogleAuthManager:
             
             # Calculate expiration time
             # Calculate expiration time (timezone-aware)
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_data.get('expires_in', 3600))
+            expires_at = datetime.now() + timedelta(seconds=token_data.get('expires_in', 3600))
             
             query = '''
                 INSERT INTO google_oauth_accounts
@@ -494,7 +494,7 @@ class GoogleAuthManager:
                     client_id=self.client_id,           # ← ADD THIS
                     client_secret=self.client_secret,
                     scopes=self.oauth_scopes,
-                    expiry=row['token_expires_at'].replace(tzinfo=timezone.utc) if row['token_expires_at'] else None  
+                    expiry=row['token_expires_at']  # Keep it naive to match Google's library expectations
                 )
                 
                 # Cache for future use
