@@ -6,8 +6,9 @@ True async API calls for traffic analysis
 
 import json
 from datetime import datetime, timedelta
+from typing import Any
 
-async def _store_analytics_data(self, site_name: str, summary: Dict[str, Any]):
+async def _store_analytics_data(self, site_name: str, summary: dict[str, Any]):
     """
     Store analytics data in the existing JSONB table structure
     
