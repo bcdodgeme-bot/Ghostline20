@@ -42,12 +42,49 @@ class AnalyticsClient:
         """Initialize with Google credentials"""
         try:
             self._user_id = user_id
-            self._credentials = await google_auth_manager.get_analytics_credentials(user_id, None)
+        
+            # Load credentials DIRECTLY for Analytics, bypassing all shared code
+            from .oauth_manager import google_auth_manager
             
-            if not self._credentials:
-                logger.error(f"No credentials found for user_id={user_id}")
-                raise Exception("No valid credentials available")
+            query = '''
+                SELECT access_token_encrypted, refresh_token_encrypted, token_expires_at
+                FROM google_oauth_accounts
+                WHERE user_id = $1 AND is_active = TRUE
+                ORDER BY CASE WHEN email_address LIKE '%@bcdodge.me' THEN 0 ELSE 1 END
+                LIMIT 1
+            '''
             
+            conn = await db_manager.get_connection()
+            try:
+                row = await conn.fetchrow(query, user_id)
+                
+                if not row:
+                    raise Exception("No credentials found")
+                
+                from ...core.crypto import decrypt_token
+                from google.oauth2.credentials import Credentials
+                from datetime import timezone
+                
+                access_token = decrypt_token(row['access_token_encrypted'])
+                refresh_token = decrypt_token(row['refresh_token_encrypted'])
+                
+                # Force timezone-aware expiry for Analytics
+                expiry = row['token_expires_at']
+                if expiry and not expiry.tzinfo:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                
+                self._credentials = Credentials(
+                    token=access_token,
+                    refresh_token=refresh_token,
+                    token_uri=google_auth_manager.token_url,
+                    client_id=google_auth_manager.client_id,
+                    client_secret=google_auth_manager.client_secret,
+                    scopes=google_auth_manager.oauth_scopes,
+                    expiry=expiry
+                )
+            finally:
+                await db_manager.release_connection(conn)
+                
             logger.info(f"Analytics initialized for user {user_id}")
             
         except Exception as e:
