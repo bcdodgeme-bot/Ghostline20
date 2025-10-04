@@ -309,6 +309,33 @@ class GoogleAuthManager:
             logger.error(f"Failed to get credentials: {e}")
             return None
     
+    async def get_analytics_credentials(self, user_id: str, email: Optional[str] = None):
+        """
+        Get credentials specifically for Analytics API with proper timezone handling
+        """
+        # Get credentials the normal way
+        creds = await self.get_valid_credentials(user_id, email)
+        
+        if not creds:
+            return None
+        
+        # CRITICAL FIX: Ensure expiry is timezone-aware for Analytics
+        # (Analytics uses synchronous google-analytics-data library which is stricter)
+        if creds.expiry and creds.expiry.tzinfo is None:
+            # Create new credentials with timezone-aware expiry
+            from google.oauth2.credentials import Credentials
+            creds = Credentials(
+                token=creds.token,
+                refresh_token=creds.refresh_token,
+                token_uri=creds.token_uri,
+                client_id=creds.client_id,
+                client_secret=creds.client_secret,
+                scopes=creds.scopes,
+                expiry=creds.expiry.replace(tzinfo=timezone.utc)
+            )
+        
+        return creds
+    
     async def get_authenticated_accounts(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Get list of authenticated Google accounts

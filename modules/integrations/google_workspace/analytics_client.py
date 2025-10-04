@@ -11,8 +11,7 @@ from typing import Any
 
 from . import SUPPORTED_SITES
 from ...core.database import db_manager
-from .oauth_manager import get_google_credentials
-
+from .oauth_manager import get_google_credentials, google_auth_manager
 logger = logging.getLogger(__name__)
 
 try:
@@ -37,7 +36,7 @@ class AnalyticsClient:
             raise RuntimeError("google-analytics-data required - run: pip install google-analytics-data")
         
         self._user_id = user_id
-        self._credentials = None
+        self._credentials = await google_auth_manager.get_analytics_credentials(user_id, None)
         logger.info(f"Analytics client initialized for user {user_id}")
     
     async def initialize(self, user_id: str):
