@@ -286,6 +286,10 @@ class GoogleAuthManager:
                 if creds.expiry and creds.expiry <= datetime.now(timezone.utc) and creds.refresh_token:
                     try:
                         creds.refresh(Request())
+                        # FIX: Google's refresh gives us naive datetime - add timezone immediately
+                        if creds.expiry and creds.expiry.tzinfo is None:
+                            creds._expiry = creds.expiry.replace(tzinfo=timezone.utc)
+                            
                         # Update stored tokens
                         await self._update_oauth_tokens(user_id, email, creds)
                         return creds
