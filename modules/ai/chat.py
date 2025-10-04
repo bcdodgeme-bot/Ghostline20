@@ -2140,10 +2140,11 @@ def detect_pattern_fatigue_command(message: str) -> bool:
 def detect_google_command(message: str) -> tuple[bool, str]:
     """Detect Google Workspace commands and determine command type"""
     google_keywords = [
-        'google auth', 'google status', 'google sites', 'google accounts',
-        'google keywords', 'google analytics', 'google drive', 'google email',
-        'google gmail', 'google calendar', 'google suggest', 'google patterns',
-        'google predict', 'google intelligence', 'google optimal'
+            'google auth', 'google status', 'google sites', 'google accounts',
+            'google keywords', 'google analytics', 'google drive', 'google email',
+            'google gmail', 'google calendar', 'google suggest', 'google patterns',
+            'google predict', 'google intelligence', 'google optimal',
+            'copy to drive', 'save to google doc', 'move to drive'
     ]
     
     message_lower = message.lower()

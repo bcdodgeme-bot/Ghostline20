@@ -176,8 +176,7 @@ class DriveClient:
         List recently created documents from database
         """
         try:
-            conn = await db_manager.get_connection()
-            async with conn:
+            async with (await db_manager.get_connection()) as conn:
                 rows = await conn.fetch('''
                     SELECT 
                         google_doc_id,
