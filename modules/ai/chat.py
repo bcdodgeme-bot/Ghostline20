@@ -2415,7 +2415,7 @@ Please specify which site you want to check:
 Or use `google analytics all` for an overview."""
                 
                 try:
-                    response = await client.get(f"{base_url}/google/analytics/summary?site_name={site_name}")
+                    response = await client.get(f"{base_url}/google/analytics/summary?site_name={site_name}&user_id={user_id}")
                     data = response.json()
                     
                     stats = data.get('summary', {})

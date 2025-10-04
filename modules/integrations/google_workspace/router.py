@@ -256,19 +256,22 @@ async def make_keyword_decision(
 async def get_analytics_summary(
     site_name: str,
     days: int = 30,
+    user_id: Optional[str] = None,  # ← ADD THIS
     user = Depends(get_current_user)
 ):
-    """
-    Get analytics summary for a site
-    """
+    """Get analytics summary for a site"""
     try:
-        if not user:
+        # Allow internal calls with user_id parameter OR authenticated user
+        if not user and not user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # Use user_id parameter if provided (for internal calls), otherwise authenticated user
+        final_user_id = user_id if user_id else user['id']
         
         if site_name not in SUPPORTED_SITES:
             raise HTTPException(status_code=400, detail=f"Site not supported")
         
-        summary = await fetch_analytics_summary(user['id'], site_name, days)
+        summary = await fetch_analytics_summary(final_user_id, site_name, days)
         
         return {
             "success": True,
