@@ -2420,21 +2420,48 @@ Or use `google analytics all` for an overview."""
                     
                     stats = data.get('summary', {})
                     
-                    return f"""Analytics Summary: {site_name}
-Last 30 Days
+                    # Build epic analytics display
+                    result = f"""🎯 **Analytics Summary: {site_name}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 **TRAFFIC OVERVIEW** (Last 30 Days)
 
-👥 **Visitors:** {stats.get('sessions', 0):,}
-📄 **Page Views:** {stats.get('pageviews', 0):,}
+👥 **Visitors:** {stats.get('total_visitors', 0):,} total
+   ├─ 🆕 New: {stats.get('new_users', 0):,} ({(stats.get('new_users', 0) / stats.get('total_visitors', 1) * 100):.1f}%)
+   └─ 🔄 Returning: {stats.get('returning_users', 0):,} ({(stats.get('returning_users', 0) / stats.get('total_visitors', 1) * 100):.1f}%)
+
+📄 **Page Views:** {stats.get('total_pageviews', 0):,}
+💬 **Sessions:** {stats.get('total_sessions', 0):,}
 ⏱️ **Avg. Session:** {stats.get('avg_session_duration', 0):.1f}s
+🎯 **Engagement Rate:** {stats.get('engagement_rate', 0):.1f}%
 📊 **Bounce Rate:** {stats.get('bounce_rate', 0):.1f}%
+"""
 
-**Top Pages:**
-{chr(10).join([f"  {i+1}. {page}" for i, page in enumerate(stats.get('top_pages', [])[:5])])}
-
-**Traffic Sources:**
-{chr(10).join([f"  • {source}: {count}" for source, count in stats.get('traffic_sources', {}).items()])}
-
-Use `google analytics all` to compare across all sites!"""
+                    # Add device breakdown if available
+                    devices = stats.get('devices', [])
+                    if devices:
+                        result += "\n📱 **DEVICES:**\n"
+                        for device in devices[:3]:
+                            device_name = device.get('device', 'unknown')
+                            device_sessions = device.get('sessions', 0)
+                            result += f"   • {device_name.title()}: {device_sessions:,} sessions\n"
+                    
+                    # Add top pages if available
+                    top_pages = stats.get('top_pages', [])
+                    if top_pages:
+                        result += "\n🔥 **TOP PAGES:**\n"
+                        for i, page in enumerate(top_pages[:5], 1):
+                            result += f"   {i}. {page}\n"
+                    
+                    # Add traffic sources if available
+                    traffic_sources = stats.get('traffic_sources', {})
+                    if traffic_sources:
+                        result += "\n🚀 **TRAFFIC SOURCES:**\n"
+                        for source, count in list(traffic_sources.items())[:5]:
+                            result += f"   • {source.title()}: {count:,}\n"
+                    
+                    result += "\n💡 Use `google analytics all` to compare across all sites!"
+                    
+                    return result
                     
                 except Exception as e:
                     logger.error(f"Analytics command failed: {e}")
