@@ -143,7 +143,7 @@ async def _store_analytics_data(self, site_name: str, summary: dict[str, Any]):
 
 
 # Also update the retrieval function to read JSONB data
-async def get_analytics_summary(self, site_name: str, days: int = 30) -> Dict[str, Any]:
+async def get_analytics_summary(self, site_name: str, days: int = 30) -> dict[str, Any]:
     """
     Get analytics summary from JSONB columns
     """
