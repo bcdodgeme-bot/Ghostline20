@@ -455,7 +455,6 @@ class GoogleAuthManager:
                 client_secret=self.client_secret,
                 scopes=self.oauth_scopes,
                 expiry=datetime.fromisoformat(token_data['expires_at']).replace(tzinfo=timezone.utc) if token_data.get('expires_at') else None  # ← ADD
-)
             )
             
             self._oauth_credentials_cache[user_email] = credentials
