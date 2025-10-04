@@ -107,7 +107,8 @@ class AnalyticsClient:
                 'fetched_at': summary.get('fetched_at', datetime.now().isoformat())
             }
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute('''
                     INSERT INTO google_analytics_data
                     (
@@ -148,8 +149,10 @@ class AnalyticsClient:
                 json.dumps(content_performance),
                 json.dumps(traffic_patterns)
                 )
-            
-            logger.info(f"Stored comprehensive analytics for {site_name}: {metrics['total_users']} users")
+                
+                logger.info(f"Stored comprehensive analytics for {site_name}: {metrics['total_users']} users")
+            finally:
+                await db_manager.release_connection(conn)
             
         except Exception as e:
             logger.error(f"Failed to store analytics: {e}", exc_info=True)
@@ -164,7 +167,8 @@ class AnalyticsClient:
             
             cutoff_date = datetime.now().date() - timedelta(days=days)
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 latest_data = await conn.fetchrow('''
                     SELECT 
                         date_range_start,
@@ -273,6 +277,8 @@ class AnalyticsClient:
                 
                 logger.info(f"Analytics summary: {summary['total_visitors']} visitors, {summary['total_pageviews']} pageviews")
                 return summary
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"Failed to get analytics summary: {e}", exc_info=True)
