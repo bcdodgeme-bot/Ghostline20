@@ -11,16 +11,44 @@ from typing import Any
 
 from . import SUPPORTED_SITES
 from ...core.database import db_manager
+from .oauth_manager import get_aiogoogle_credentials
 
 logger = logging.getLogger(__name__)
+
+try:
+    from aiogoogle import Aiogoogle
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
+    logger.warning("aiogoogle not installed")
 
 
 class AnalyticsClient:
     """Google Analytics GA4 client with JSONB storage"""
     
     def __init__(self, user_id: str = None):
+        if not ANALYTICS_AVAILABLE:
+            raise RuntimeError("aiogoogle required")
+        
         self._user_id = user_id
+        self._user_creds = None
         logger.info(f"Analytics client initialized for user {user_id}")
+    
+    async def initialize(self, user_id: str):
+        """Initialize with aiogoogle credentials"""
+        try:
+            self._user_id = user_id
+            self._user_creds = await get_aiogoogle_credentials(user_id, None)
+            
+            if not self._user_creds:
+                logger.error(f"No credentials found for user_id={user_id}")
+                raise Exception("No valid credentials available")
+            
+            logger.info(f"Analytics initialized for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Analytics initialization failed: {e}", exc_info=True)
+            raise
     
     async def _store_analytics_data(self, site_name: str, summary: dict[str, Any]):
         """
@@ -286,12 +314,177 @@ class AnalyticsClient:
     
     async def fetch_traffic_summary(self, site_name: str, days: int = 30):
         """
-        Fetch traffic summary from Google Analytics API
-        This is a placeholder - needs actual GA4 API implementation
+        Fetch traffic summary from Google Analytics Data API (GA4)
         """
-        logger.warning(f"fetch_traffic_summary not yet implemented for {site_name}")
-        # TODO: Implement actual GA4 API calls here
-        pass
+        try:
+            logger.info(f"Fetching GA4 data for {site_name}, last {days} days")
+            
+            if not self._user_creds:
+                await self.initialize(self._user_id)
+            
+            site_config = SUPPORTED_SITES.get(site_name)
+            if not site_config:
+                raise Exception(f"Unknown site: {site_name}")
+            
+            property_id = site_config['analytics_view_id']
+            
+            # Calculate date range
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=days)
+            
+            logger.info(f"Fetching Analytics for property {property_id}: {start_date} to {end_date}")
+            
+            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
+                analyticsdata = await aiogoogle.discover('analyticsdata', 'v1beta')
+                
+                # Make the API request
+                response = await aiogoogle.as_user(
+                    analyticsdata.properties.runReport(
+                        property=f'properties/{property_id}',
+                        json={
+                            'dateRanges': [{
+                                'startDate': start_date.isoformat(),
+                                'endDate': end_date.isoformat()
+                            }],
+                            'metrics': [
+                                {'name': 'activeUsers'},
+                                {'name': 'newUsers'},
+                                {'name': 'sessions'},
+                                {'name': 'screenPageViews'},
+                                {'name': 'averageSessionDuration'},
+                                {'name': 'bounceRate'},
+                                {'name': 'engagementRate'}
+                            ],
+                            'dimensions': [
+                                {'name': 'deviceCategory'}
+                            ]
+                        }
+                    )
+                )
+                
+                logger.info(f"GA4 API response received")
+                
+                # Parse response and build summary structure
+                summary = self._parse_ga4_response(response, start_date, end_date)
+                
+                # Store the data
+                await self._store_analytics_data(site_name, summary)
+                
+                logger.info(f"Successfully fetched and stored GA4 data for {site_name}")
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch GA4 data: {e}", exc_info=True)
+            raise
+    
+    def _parse_ga4_response(self, response: dict, start_date, end_date) -> dict[str, Any]:
+        """Parse GA4 API response into our summary structure"""
+        try:
+            rows = response.get('rows', [])
+            
+            if not rows:
+                logger.warning("No data in GA4 response")
+                return self._empty_summary(start_date, end_date)
+            
+            # Aggregate metrics
+            total_users = 0
+            new_users = 0
+            sessions = 0
+            pageviews = 0
+            total_duration = 0
+            bounce_rate = 0
+            engagement_rate = 0
+            
+            devices = []
+            
+            for row in rows:
+                metric_values = row.get('metricValues', [])
+                dimension_values = row.get('dimensionValues', [])
+                
+                if len(metric_values) >= 7:
+                    total_users += int(metric_values[0].get('value', 0))
+                    new_users += int(metric_values[1].get('value', 0))
+                    sessions += int(metric_values[2].get('value', 0))
+                    pageviews += int(metric_values[3].get('value', 0))
+                    total_duration += float(metric_values[4].get('value', 0))
+                    bounce_rate = float(metric_values[5].get('value', 0))
+                    engagement_rate = float(metric_values[6].get('value', 0))
+                
+                if dimension_values:
+                    device = dimension_values[0].get('value', 'unknown')
+                    devices.append({
+                        'device': device,
+                        'sessions': int(metric_values[2].get('value', 0)) if len(metric_values) > 2 else 0
+                    })
+            
+            avg_duration = total_duration / len(rows) if rows else 0
+            returning_users = total_users - new_users
+            
+            summary = {
+                'date_range': {
+                    'start': start_date,
+                    'end': end_date
+                },
+                'overview': {
+                    'total_users': total_users,
+                    'new_users': new_users,
+                    'returning_users': returning_users,
+                    'sessions': sessions,
+                    'pageviews': pageviews,
+                    'avg_session_duration': avg_duration,
+                    'bounce_rate': bounce_rate,
+                    'engagement_rate': engagement_rate,
+                    'avg_sessions_per_user': sessions / total_users if total_users > 0 else 0,
+                    'avg_pages_per_session': pageviews / sessions if sessions > 0 else 0,
+                    'total_engagement_time': total_duration
+                },
+                'devices': devices,
+                'geography': [],
+                'demographics': [],
+                'landing_pages': [],
+                'pages': [],
+                'events': [],
+                'sources': [],
+                'api_version': 'GA4',
+                'fetched_at': datetime.now().isoformat()
+            }
+            
+            logger.info(f"Parsed GA4 data: {total_users} users, {sessions} sessions, {pageviews} pageviews")
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to parse GA4 response: {e}", exc_info=True)
+            return self._empty_summary(start_date, end_date)
+    
+    def _empty_summary(self, start_date, end_date) -> dict[str, Any]:
+        """Return empty summary structure"""
+        return {
+            'date_range': {
+                'start': start_date,
+                'end': end_date
+            },
+            'overview': {
+                'total_users': 0,
+                'new_users': 0,
+                'returning_users': 0,
+                'sessions': 0,
+                'pageviews': 0,
+                'avg_session_duration': 0,
+                'bounce_rate': 0,
+                'engagement_rate': 0,
+                'avg_sessions_per_user': 0,
+                'avg_pages_per_session': 0,
+                'total_engagement_time': 0
+            },
+            'devices': [],
+            'geography': [],
+            'demographics': [],
+            'landing_pages': [],
+            'pages': [],
+            'events': [],
+            'sources': [],
+            'api_version': 'GA4',
+            'fetched_at': datetime.now().isoformat()
+        }
 
 
 # Module-level instance and helper functions for router
