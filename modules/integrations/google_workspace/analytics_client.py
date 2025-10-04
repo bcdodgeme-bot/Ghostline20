@@ -282,10 +282,10 @@ class AnalyticsClient:
                     }
                 
                 # Parse JSONB data
-                metrics = latest_data['metrics']
-                dimensions = latest_data['dimensions']
-                content = latest_data['content_performance']
-                traffic = latest_data['traffic_patterns']
+                metrics = json.loads(latest_data['metrics']) if isinstance(latest_data['metrics'], str) else latest_data['metrics']
+                dimensions = json.loads(latest_data['dimensions']) if isinstance(latest_data['dimensions'], str) else latest_data['dimensions']
+                content = json.loads(latest_data['content_performance']) if isinstance(latest_data['content_performance'], str) else latest_data['content_performance']
+                traffic = json.loads(latest_data['traffic_patterns']) if isinstance(latest_data['traffic_patterns'], str) else latest_data['traffic_patterns']
                 
                 # Build response in the format the chat interface expects
                 summary = {
