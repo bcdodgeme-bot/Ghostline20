@@ -527,7 +527,7 @@ class GoogleAuthManager:
         """Update stored OAuth tokens after refresh"""
         try:
             encrypted_access_token = encrypt_token(credentials.token)
-            expires_at = credentials.expiry
+            expires_at = credentials.expiry.replace(tzinfo=timezone.utc) if credentials.expiry else None
             
             query = '''
                 UPDATE google_oauth_accounts
