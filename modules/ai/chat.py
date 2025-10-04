@@ -2629,7 +2629,7 @@ Your spreadsheet is ready! Click the link above to open it in Google Sheets."""
                 # Get conversation history
                 try:
                     from ..ai.conversation_manager import get_memory_manager
-                    memory = await get_memory_manager()
+                    memory = await get_memory_manager(user_id)
                     
                     if not thread_id:
                         return "❌ No conversation thread found. Start a conversation first, then use `copy that to drive as [title]`"
