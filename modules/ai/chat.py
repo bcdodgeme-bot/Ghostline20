@@ -2635,7 +2635,7 @@ Your spreadsheet is ready! Click the link above to open it in Google Sheets."""
                         return "❌ No conversation thread found. Start a conversation first, then use `copy that to drive as [title]`"
                     
                     # Get recent messages from this thread
-                    messages = await memory.get_messages(thread_id, limit=num_messages * 2)  # Get extras to filter
+                    messages = await memory.get_conversation_history(thread_id, limit=num_messages * 2)  # Get extras to filter
                     
                     if not messages:
                         return "❌ No messages found in this conversation to copy."
