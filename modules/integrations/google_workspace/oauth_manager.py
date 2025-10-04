@@ -455,7 +455,7 @@ class GoogleAuthManager:
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 scopes=self.oauth_scopes,
-                expiry=(datetime.now(timezone.utc) + timedelta(seconds=token_data.get('expires_in', 3600))) if token_data.get('expires_in') else None
+                expiry=expires_at  # Use the same naive datetime we stored in the database
             )
             
             self._oauth_credentials_cache[user_email] = credentials
