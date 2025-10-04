@@ -280,7 +280,7 @@ async def get_analytics_summary(
     except GoogleTokenExpiredError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get analytics summary: {e}")
+        logger.error(f"Failed to get analytics summary: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/analytics/timing")
