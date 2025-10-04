@@ -262,7 +262,7 @@ class GoogleAuthManager:
                     SELECT email_address
                     FROM google_oauth_accounts
                     WHERE user_id = $1 AND is_active = TRUE
-                    ORDER BY authenticated_at DESC
+                    ORDER BY CASE WHEN email_address LIKE '%@bcdodge.me' THEN 0 ELSE 1 END, authenticated_at DESC
                     LIMIT 1
                 '''
                 
@@ -491,7 +491,7 @@ class GoogleAuthManager:
                     client_id=self.client_id,           # ← ADD THIS
                     client_secret=self.client_secret,
                     scopes=self.oauth_scopes,
-                    expiry=row['token_expires_at']
+                    expiry=row['token_expires_at'].replace(tzinfo=timezone.utc) if row['token_expires_at'] else None  
                 )
                 
                 # Cache for future use
