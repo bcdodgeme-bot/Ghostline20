@@ -2368,6 +2368,8 @@ Found {len(opportunities)} new opportunities:
                         result += f"""{i}. **{opp['keyword']}**
    📊 Impressions: {opp['impressions']} | Clicks: {opp['clicks']}
    📍 Position: {opp['position']:.1f} | Type: {opp['opportunity_type']}
+   🌐 Page: {opp.get('page', 'N/A')}
+   🌍 Country: {opp.get('country', 'N/A')} | 📱 Device: {opp.get('device', 'N/A')}
    
 """
                     

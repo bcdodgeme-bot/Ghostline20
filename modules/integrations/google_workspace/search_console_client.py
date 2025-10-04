@@ -141,7 +141,7 @@ class SearchConsoleClient:
                         json={
                             'startDate': start_date.isoformat(),
                             'endDate': end_date.isoformat(),
-                            'dimensions': ['query'],
+                            'dimensions': ['query', 'page', 'country', 'device'],
                             'rowLimit': 1000
                         }
                     )
@@ -184,6 +184,9 @@ class SearchConsoleClient:
                 stored_count = 0
                 for idx, row in enumerate(rows):
                     query = row.get('keys', [''])[0]
+                    page = row.get('keys', [''])[1] if len(row.get('keys', [])) > 1 else ''
+                    country = row.get('keys', [''])[2] if len(row.get('keys', [])) > 2 else ''
+                    device = row.get('keys', [''])[3] if len(row.get('keys', [])) > 3 else ''
                     clicks = row.get('clicks', 0)
                     impressions = row.get('impressions', 0)
                     ctr = row.get('ctr', 0.0)
@@ -191,16 +194,16 @@ class SearchConsoleClient:
                     
                     await conn.execute('''
                         INSERT INTO google_search_console_data
-                        (user_id, site_name, site_url, query, clicks, impressions, ctr, position, date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        ON CONFLICT (user_id, site_name, query, date) DO UPDATE SET
+                        (user_id, site_name, site_url, query, page, country, device, clicks, impressions, ctr, position, date)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        ON CONFLICT (user_id, site_name, query, page, country, device, date) DO UPDATE SET
                             clicks = EXCLUDED.clicks,
                             impressions = EXCLUDED.impressions,
                             ctr = EXCLUDED.ctr,
                             position = EXCLUDED.position,
                             updated_at = NOW()
                     ''',
-                    self._user_id, site_name, site_url, query,
+                    self._user_id, site_name, site_url, query, page, country, device,
                     clicks, impressions, ctr, position,
                     datetime.now().date()
                     )
@@ -243,6 +246,9 @@ class SearchConsoleClient:
                 opportunities = await conn.fetch(f'''
                     SELECT 
                         gsc.query as keyword,
+                        gsc.page,
+                        gsc.country,
+                        gsc.device,
                         gsc.clicks,
                         gsc.impressions,
                         gsc.ctr,
@@ -272,6 +278,9 @@ class SearchConsoleClient:
                     
                     opportunity_data = {
                         'keyword': opp['keyword'],
+                        'page': opp.get('page', ''),
+                        'country': opp.get('country', ''),
+                        'device': opp.get('device', ''),
                         'clicks': opp['clicks'],
                         'impressions': opp['impressions'],
                         'ctr': float(opp['ctr']),

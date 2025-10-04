@@ -2,6 +2,7 @@
 # Complete Ghostline Personality System with Database-Informed Authenticity
 # Sectioned for easy editing and maintenance
 # UPDATED: Now includes Pattern Fatigue "Stop Being Annoying" system
+# FIXED: Async event loop conflict resolved - proper async/await implementation
 
 import random
 import re
@@ -84,15 +85,15 @@ class GhostlinePersonalities:
         """Return random personality ID"""
         return random.choice(list(self.personalities.keys()))
     
-    def process_response(self, response: str, personality_id: str, user_id: str = None) -> str:
-        """Apply personality-specific post-processing"""
+    async def process_response(self, response: str, personality_id: str, user_id: str = None) -> str:
+        """Apply personality-specific post-processing - NOW PROPERLY ASYNC"""
         config = self.get_personality_config(personality_id)
         processor = config.get('post_processor')
         
         if processor:
             # Pass user_id to processors that support it (like SyntaxPrime)
             if personality_id == 'syntaxprime' and user_id:
-                return processor(response, user_id)
+                return await processor(response, user_id)
             else:
                 return processor(response)
         return response
@@ -240,40 +241,29 @@ Remember: You're the concentrated essence of helpfulness - all the care, half th
 
 #-------------------------------------------------------------------
 # SECTION 6: POST-PROCESSING FILTERS
-# UPDATED: SyntaxPrime now includes pattern fatigue filtering
+# FIXED: SyntaxPrime now properly async - no more event loop conflicts!
 #-------------------------------------------------------------------
 
-    def _syntaxprime_pattern_aware_filter(self, response: str, user_id: str = None) -> str:
-        """Enhanced SyntaxPrime filter with pattern fatigue detection"""
+    async def _syntaxprime_pattern_aware_filter(self, response: str, user_id: str = None) -> str:
+        """Enhanced SyntaxPrime filter with pattern fatigue detection - PROPERLY ASYNC"""
         
         # If pattern fatigue system is available and we have a user_id, apply filtering
         if PATTERN_FATIGUE_AVAILABLE and user_id:
             try:
                 fatigue_tracker = get_pattern_fatigue_tracker()
                 
-                # Apply pattern fatigue filtering
-                import asyncio
-                
-                # Create event loop if needed
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Apply filtering
-                filtered_response = loop.run_until_complete(
-                    fatigue_tracker.filter_response(response, user_id)
-                )
+                # ✅ PROPERLY AWAIT - NO EVENT LOOP CONFLICTS!
+                filtered_response = await fatigue_tracker.filter_response(response, user_id)
                 
                 # If response was filtered, log it
                 if filtered_response != response:
-                    logger.info(f"Pattern fatigue filter applied for user {user_id}")
+                    logger.info(f"✅ Pattern fatigue filter applied for user {user_id}")
+                    logger.debug(f"Original length: {len(response)}, Filtered length: {len(filtered_response)}")
                 
                 return filtered_response
                 
             except Exception as e:
-                logger.warning(f"Pattern fatigue filtering failed: {e}")
+                logger.error(f"❌ Pattern fatigue filtering failed: {e}", exc_info=True)
                 # Fall back to original response if filtering fails
                 return response
         
@@ -546,7 +536,7 @@ async def handle_pattern_complaint(user_id: str, pattern_type: str, complaint_te
 
 #-------------------------------------------------------------------
 # SECTION 8: INTEGRATION CLASS FOR FLASK APP
-# UPDATED: Now supports pattern fatigue filtering
+# UPDATED: Now properly async
 #-------------------------------------------------------------------
 
 class PersonalityIntegration:
@@ -562,9 +552,9 @@ class PersonalityIntegration:
         config = self.personality_system.get_personality_config(personality_id)
         return config['system_prompt']
     
-    def process_personality_response(self, raw_response: str, personality_id: str, user_id: str = None) -> str:
-        """Apply post-processing after getting response from OpenRouter"""
-        return self.personality_system.process_response(raw_response, personality_id, user_id)
+    async def process_personality_response(self, raw_response: str, personality_id: str, user_id: str = None) -> str:
+        """Apply post-processing after getting response from OpenRouter - NOW PROPERLY ASYNC"""
+        return await self.personality_system.process_response(raw_response, personality_id, user_id)
     
     def integrate_with_openrouter(self,
                                 messages: list,
@@ -600,8 +590,8 @@ class PersonalityIntegration:
 # SECTION 9: TESTING AND VALIDATION
 #-------------------------------------------------------------------
 
-def test_personality_system():
-    """Test all personalities for proper functionality"""
+async def test_personality_system():
+    """Test all personalities for proper functionality - NOW ASYNC"""
     print("=== GHOSTLINE PERSONALITY SYSTEM TEST ===\n")
     
     personalities = GhostlinePersonalities()
@@ -633,10 +623,10 @@ def test_personality_system():
     for personality, test_response in test_responses.items():
         if personality in personalities.personalities:
             if personality == 'syntaxprime':
-                # Test with dummy user ID for SyntaxPrime
-                processed = personalities.process_response(test_response, personality, "test-user-123")
+                # Test with dummy user ID for SyntaxPrime - NOW PROPERLY AWAITED
+                processed = await personalities.process_response(test_response, personality, "test-user-123")
             else:
-                processed = personalities.process_response(test_response, personality)
+                processed = await personalities.process_response(test_response, personality)
             print(f"\n{personality.upper()} FILTER:")
             print(f"Input:  {test_response[:60]}...")
             print(f"Output: {processed[:60]}...")
@@ -680,11 +670,12 @@ personality_integration = PersonalityIntegration()
 
 if __name__ == "__main__":
     # Run tests if executed directly
-    test_personality_system()
+    import asyncio
+    asyncio.run(test_personality_system())
 
 #-------------------------------------------------------------------
 # SECTION 11: DYNAMIC PERSONALITY LEARNING INTEGRATION
-# (keeping existing learning code unchanged)
+# (keeping existing learning code, updated to async)
 #-------------------------------------------------------------------
 
 class LearningPersonalityIntegration(PersonalityIntegration):
@@ -740,14 +731,14 @@ class LearningPersonalityIntegration(PersonalityIntegration):
                     print(f"🚀 Enhanced {personality_id} with feedback learning")
                     return enhanced_prompt
                 else:
-                    print(f"🔍 No learning enhancements available for {personality_id}")
+                    print(f"📋 No learning enhancements available for {personality_id}")
                     return base_prompt
                     
             except Exception as e:
                 print(f"⚠️ Learning enhancement failed for {personality_id}: {e}")
                 return base_prompt
         else:
-            print(f"🔋 Using base personality for {personality_id} (no learning engine)")
+            print(f"📋 Using base personality for {personality_id} (no learning engine)")
             return base_prompt
     
     def integrate_with_openrouter_enhanced(self,
@@ -854,18 +845,18 @@ def upgrade_personality_system_with_learning():
         print(f"⚠️ Failed to upgrade personality system: {e}")
         return False
 
-def test_learning_personality_system():
+async def test_learning_personality_system():
     """
-    Test the learning-enhanced personality system
+    Test the learning-enhanced personality system - NOW ASYNC
     """
     print("=== LEARNING PERSONALITY SYSTEM TEST ===")
     
     learning_integration = LearningPersonalityIntegration()
     
     # Test enhanced prompts for each personality
-    personalities = ['syntaxprime', 'syntaxbot', 'nilexe', 'ggpt']
+    personalities_list = ['syntaxprime', 'syntaxbot', 'nilexe', 'ggpt']
     
-    for personality in personalities:
+    for personality in personalities_list:
         print(f"\n🎭 Testing {personality}...")
         
         # Get base prompt
@@ -908,4 +899,4 @@ __all__.extend([
 try:
     upgrade_personality_system_with_learning()
 except Exception as e:
-    print(f"🔍 Keeping basic personality system: {e}")
+    print(f"📋 Keeping basic personality system: {e}")
