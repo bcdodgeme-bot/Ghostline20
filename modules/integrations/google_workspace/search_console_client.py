@@ -10,6 +10,7 @@ import logging
 import aiohttp
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
+from urllib.parse import quote
 
 from . import SUPPORTED_SITES
 from ...core.database import db_manager
@@ -174,7 +175,8 @@ class SearchConsoleClient:
             logger.info(f"Date range: {start_date} to {end_date}")
             
             # Build the API request
-            api_url = f"{SEARCH_CONSOLE_API_BASE}/sites/{site_url}/searchAnalytics/query"
+            encoded_site_url = quote(site_url, safe='')
+            api_url = f"{SEARCH_CONSOLE_API_BASE}/sites/{encoded_site_url}/searchAnalytics/query"
             logger.info(f"API URL: {api_url}")
             
             headers = {
