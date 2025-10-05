@@ -194,23 +194,43 @@ async def get_accounts(
         raise HTTPException(status_code=500, detail=f"Error: {type(e).__name__} - {str(e)}")
 
 # ==================== SEARCH CONSOLE ENDPOINTS ====================
-
 @router.get("/keywords/opportunities")
 async def get_keyword_opportunities(
     site_name: str,
     user = Depends(get_current_user)
 ):
-    """
-    Get keyword opportunities for a site from Search Console
-    """
+    """Get keyword opportunities for a site from Search Console"""
+    
+    # EMERGENCY DEBUG - This should appear even if everything else fails
+    print("=" * 80)
+    print("ROUTER ENDPOINT CALLED")
+    print(f"site_name: {site_name}")
+    print(f"user: {user}")
+    print("=" * 80)
+    
     try:
+        logger.info("ROUTER: Starting get_keyword_opportunities")
+        
         if not user:
+            logger.error("ROUTER: No user")
             raise HTTPException(status_code=401, detail="Authentication required")
         
+        logger.info(f"ROUTER: User ID: {user['id']}")
+        
         if site_name not in SUPPORTED_SITES:
-            raise HTTPException(status_code=400, detail=f"Site not supported. Supported sites: {list(SUPPORTED_SITES.keys())}")
+            logger.error(f"ROUTER: Invalid site: {site_name}")
+            raise HTTPException(status_code=400, detail=f"Site not supported")
+        
+        logger.info(f"ROUTER: Calling find_keyword_opportunities")
+        
+        # This is where it's probably failing
+        from .search_console_client import find_keyword_opportunities
+        
+        logger.info("ROUTER: Import successful")
         
         opportunities = await find_keyword_opportunities(user['id'], site_name)
+        
+        logger.info(f"ROUTER: Got {len(opportunities)} opportunities")
         
         return {
             "success": True,
@@ -219,14 +239,18 @@ async def get_keyword_opportunities(
             "count": len(opportunities)
         }
         
-    except GoogleTokenExpiredError as e:
-        logger.error(f"Google token expired: {e}", exc_info=True)
-        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get keyword opportunities: {e}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Exception args: {e.args}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"ROUTER EXCEPTION: {type(e).__name__}")
+        logger.error(f"ROUTER EXCEPTION: {str(e)}")
+        logger.error(f"ROUTER EXCEPTION: {repr(e)}")
+        
+        import traceback
+        full_trace = traceback.format_exc()
+        logger.error(f"ROUTER TRACEBACK:\n{full_trace}")
+        print(f"ROUTER ERROR:\n{full_trace}")  # Also print to stdout
+        
+        error_detail = str(e) if str(e) else f"{type(e).__name__} with no message"
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.post("/keywords/decision")
 async def make_keyword_decision(
