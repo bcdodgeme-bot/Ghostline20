@@ -220,9 +220,12 @@ async def get_keyword_opportunities(
         }
         
     except GoogleTokenExpiredError as e:
+        logger.error(f"Google token expired: {e}", exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to get keyword opportunities: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception args: {e.args}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/keywords/decision")
