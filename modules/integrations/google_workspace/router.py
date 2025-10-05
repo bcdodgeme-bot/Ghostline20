@@ -197,25 +197,21 @@ async def get_accounts(
 @router.get("/keywords/opportunities")
 async def get_keyword_opportunities(
     site_name: str,
+    user_id: Optional[str] = None,
     user = Depends(get_current_user)
 ):
     """Get keyword opportunities for a site from Search Console"""
     
-    # EMERGENCY DEBUG - This should appear even if everything else fails
-    print("=" * 80)
-    print("ROUTER ENDPOINT CALLED")
-    print(f"site_name: {site_name}")
-    print(f"user: {user}")
-    print("=" * 80)
-    
     try:
         logger.info("ROUTER: Starting get_keyword_opportunities")
         
-        if not user:
-            logger.error("ROUTER: No user")
+        # Allow user_id parameter OR authenticated user (same pattern as auth endpoints)
+        if not user and not user_id:
+            logger.error("ROUTER: No user and no user_id")
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        logger.info(f"ROUTER: User ID: {user['id']}")
+        final_user_id = user_id if user_id else user['id']
+        logger.info(f"ROUTER: User ID: {final_user_id}")
         
         if site_name not in SUPPORTED_SITES:
             logger.error(f"ROUTER: Invalid site: {site_name}")
@@ -223,12 +219,11 @@ async def get_keyword_opportunities(
         
         logger.info(f"ROUTER: Calling find_keyword_opportunities")
         
-        # This is where it's probably failing
         from .search_console_client import find_keyword_opportunities
         
         logger.info("ROUTER: Import successful")
         
-        opportunities = await find_keyword_opportunities(user['id'], site_name)
+        opportunities = await find_keyword_opportunities(final_user_id, site_name)
         
         logger.info(f"ROUTER: Got {len(opportunities)} opportunities")
         
@@ -242,12 +237,9 @@ async def get_keyword_opportunities(
     except Exception as e:
         logger.error(f"ROUTER EXCEPTION: {type(e).__name__}")
         logger.error(f"ROUTER EXCEPTION: {str(e)}")
-        logger.error(f"ROUTER EXCEPTION: {repr(e)}")
         
         import traceback
-        full_trace = traceback.format_exc()
-        logger.error(f"ROUTER TRACEBACK:\n{full_trace}")
-        print(f"ROUTER ERROR:\n{full_trace}")  # Also print to stdout
+        logger.error(f"ROUTER TRACEBACK:\n{traceback.format_exc()}")
         
         error_detail = str(e) if str(e) else f"{type(e).__name__} with no message"
         raise HTTPException(status_code=500, detail=error_detail)

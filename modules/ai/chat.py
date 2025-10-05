@@ -2343,7 +2343,7 @@ Please specify which site you want to check:
 - `google keywords damn_it_carl`"""
                 
                 try:
-                    response = await client.get(f"{base_url}/google/keywords/opportunities?site_name={site_name}")
+                    response = await client.get(f"{base_url}/google/keywords/opportunities?site_name={site_name}&user_id={user_id}")
                     data = response.json()
                     
                     opportunities = data.get('opportunities', [])
