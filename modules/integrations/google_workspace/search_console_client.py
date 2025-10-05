@@ -30,40 +30,59 @@ class SearchConsoleClient:
     async def initialize(self, user_id: str):
         """Initialize with Google credentials from database"""
         try:
+            logger.info(f"=" * 70)
+            logger.info(f"SEARCH CONSOLE INIT DEBUG START")
+            logger.info(f"User ID: {user_id}")
+        
             self._user_id = user_id
             
             # Load access token directly from database (same as Analytics)
             query = '''
-                SELECT access_token_encrypted, token_expires_at
+                SELECT access_token_encrypted, token_expires_at, email_address
                 FROM google_oauth_accounts
                 WHERE user_id = $1 AND is_active = TRUE
                 ORDER BY CASE WHEN email_address LIKE '%@bcdodge.me' THEN 0 ELSE 1 END
                 LIMIT 1
             '''
             
+            logger.info(f"Querying database for OAuth tokens...")
             conn = await db_manager.get_connection()
             try:
                 row = await conn.fetchrow(query, user_id)
                 
                 if not row:
+                    logger.error(f"NO CREDENTIALS FOUND IN DATABASE for user {user_id}")
                     raise Exception("No credentials found")
                 
+                logger.info(f"Found credentials for: {row['email_address']}")
+                logger.info(f"Token expires: {row['token_expires_at']}")
+                
                 from ...core.crypto import decrypt_token
+                logger.info(f"Decrypting token...")
                 self._access_token = decrypt_token(row['access_token_encrypted'])
+                logger.info(f"Token decrypted - length: {len(self._access_token)}")
                 
                 # Check if token is expired
                 if row['token_expires_at']:
                     from datetime import timezone
                     if datetime.now(timezone.utc) >= row['token_expires_at']:
-                        logger.warning("Access token expired, needs refresh")
+                        logger.error("TOKEN IS EXPIRED")
                         raise Exception("Token expired - please re-authenticate")
+                    else:
+                        logger.info(f"Token is valid (not expired)")
             finally:
                 await db_manager.release_connection(conn)
                 
-            logger.info(f"✅ Search Console initialized for user {user_id}")
+            logger.info(f"Search Console initialized successfully")
+            logger.info(f"=" * 70)
             
         except Exception as e:
-            logger.error(f"❌ Search Console initialization failed: {e}", exc_info=True)
+            logger.error(f"=" * 70)
+            logger.error(f"SEARCH CONSOLE INIT FAILED")
+            logger.error(f"Error: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            logger.error(f"=" * 70)
             raise
     
     async def get_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
@@ -133,29 +152,31 @@ class SearchConsoleClient:
         Fetch Search Console data from Google API using direct REST calls
         """
         try:
-            logger.info(f"🌐 fetch_search_data_for_site() called: site={site_name}, days={days}")
+            logger.info(f"=" * 70)
+            logger.info(f"FETCH SEARCH DATA DEBUG START")
+            logger.info(f"Site: {site_name}, Days: {days}")
             
             if not self._access_token:
-                logger.debug(f"🔧 No access token loaded, initializing...")
+                logger.error(f"No access token - calling initialize")
                 await self.initialize(self._user_id)
             
             site_config = SUPPORTED_SITES.get(site_name)
             if not site_config:
-                logger.error(f"❌ Unknown site: {site_name}")
-                logger.debug(f"📋 Available sites: {list(SUPPORTED_SITES.keys())}")
+                logger.error(f"Unknown site: {site_name}")
+                logger.error(f"Available: {list(SUPPORTED_SITES.keys())}")
                 raise Exception(f"Unknown site: {site_name}")
             
             site_url = site_config['search_console_url']
-            logger.debug(f"🔍 Using site URL: {site_url}")
+            logger.info(f"Site URL: {site_url}")
             
             # Calculate date range
             end_date = datetime.now().date()
             start_date = end_date - timedelta(days=days)
-            
-            logger.info(f"📅 Fetching Search Console for {site_name}: {start_date} to {end_date}")
+            logger.info(f"Date range: {start_date} to {end_date}")
             
             # Build the API request
             api_url = f"{SEARCH_CONSOLE_API_BASE}/sites/{site_url}/searchAnalytics/query"
+            logger.info(f"API URL: {api_url}")
             
             headers = {
                 "Authorization": f"Bearer {self._access_token}",
@@ -166,64 +187,73 @@ class SearchConsoleClient:
                 "startDate": start_date.isoformat(),
                 "endDate": end_date.isoformat(),
                 "dimensions": ["query"],
-                "rowLimit": 25000,  # Maximum allowed
+                "rowLimit": 25000,
                 "startRow": 0
             }
             
-            logger.debug(f"🔍 Calling Search Console API: {api_url}")
-            logger.debug(f"📦 Request body: {json.dumps(request_body, indent=2)}")
+            logger.info(f"Making API request...")
             
             # Make the API call using aiohttp
             async with aiohttp.ClientSession() as session:
-                async with session.post(api_url, headers=headers, json=request_body) as response:
+                async with session.post(api_url, headers=headers, json=request_body, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    logger.info(f"API Response Status: {response.status}")
+                    
                     if response.status == 200:
                         data = await response.json()
                         rows = data.get('rows', [])
                         
-                        logger.info(f"✅ Retrieved {len(rows)} queries from Search Console API")
+                        logger.info(f"SUCCESS - Retrieved {len(rows)} queries")
                         
                         if not rows:
-                            logger.warning(f"⚠️ No Search Console data returned for {site_name}")
+                            logger.warning(f"No data returned (empty result)")
+                            logger.info(f"=" * 70)
                             return []
                         
-                        # Log sample data
+                        # Log sample
                         if len(rows) > 0:
                             sample = rows[0]
-                            logger.debug(f"📊 Sample query: {sample.get('keys', [''])[0]} - "
-                                       f"clicks={sample.get('clicks', 0)}, "
-                                       f"impressions={sample.get('impressions', 0)}, "
-                                       f"position={sample.get('position', 0)}")
+                            logger.info(f"Sample: {sample.get('keys', [''])[0]} - clicks={sample.get('clicks', 0)}, impressions={sample.get('impressions', 0)}")
                         
                         # Store data in database
                         await self._store_search_data(site_name, site_url, rows)
                         
-                        logger.info(f"✅ Retrieved and stored {len(rows)} queries for {site_name}")
-                        
+                        logger.info(f"=" * 70)
                         return rows
                     
                     elif response.status == 401:
                         error_text = await response.text()
-                        logger.error(f"❌ Authentication failed: {error_text}")
+                        logger.error(f"API ERROR 401 - Authentication failed")
+                        logger.error(f"Response: {error_text[:500]}")
+                        logger.error(f"=" * 70)
                         raise Exception("Authentication failed - token may be expired")
                     
                     elif response.status == 403:
                         error_text = await response.text()
-                        logger.error(f"❌ Permission denied: {error_text}")
+                        logger.error(f"API ERROR 403 - Permission denied")
+                        logger.error(f"Response: {error_text[:500]}")
+                        logger.error(f"=" * 70)
                         raise Exception(f"Permission denied for site: {site_url}")
                     
                     else:
                         error_text = await response.text()
-                        logger.error(f"❌ API error {response.status}: {error_text}")
-                        raise Exception(f"Search Console API error: {response.status}")
-                
+                        logger.error(f"API ERROR {response.status}")
+                        logger.error(f"Response: {error_text[:500]}")
+                        logger.error(f"=" * 70)
+                        raise Exception(f"Search Console API error {response.status}: {error_text[:200]}")
+            
         except Exception as e:
-            logger.error(f"❌ Search Console fetch failed for {site_name}: {e}", exc_info=True)
+            logger.error(f"=" * 70)
+            logger.error(f"FETCH FAILED")
+            logger.error(f"Error: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            logger.error(f"=" * 70)
             raise
     
     async def _store_search_data(self, site_name: str, site_url: str, rows: List[Dict]):
         """Store Search Console data in database"""
         try:
-            logger.debug(f"💾 Storing {len(rows)} queries for {site_name}...")
+            logger.info(f"💾 Storing {len(rows)} queries for {site_name}...")
             
             conn = await db_manager.get_connection()
             try:
@@ -262,7 +292,7 @@ class SearchConsoleClient:
                     
                     # Log progress every 100 queries
                     if stored_count % 100 == 0:
-                        logger.debug(f"💾 Stored {stored_count}/{len(rows)} queries...")
+                        logger.info(f"💾 Stored {stored_count}/{len(rows)} queries...")
                 
                 logger.info(f"✅ Stored {stored_count} queries for {site_name}")
                 
@@ -359,7 +389,6 @@ class SearchConsoleClient:
         else:
             opportunity_type = 'long_term'
         
-        logger.debug(f"🏷️ Classified '{data['keyword']}' as {opportunity_type}")
         return opportunity_type
     
     def _estimate_impact(self, data: Dict[str, Any]) -> str:
@@ -374,7 +403,6 @@ class SearchConsoleClient:
         else:
             impact = 'low'
         
-        logger.debug(f"📊 Estimated impact for '{data['keyword']}': {impact}")
         return impact
 
 
