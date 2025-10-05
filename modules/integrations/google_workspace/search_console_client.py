@@ -1,54 +1,69 @@
 # modules/integrations/google_workspace/search_console_client.py
 """
-Search Console Client - REFACTORED FOR AIOGOOGLE
-Keyword opportunity detection with true async
+Search Console Client - Direct REST API Implementation
+Real Search Console data fetching using aiohttp with proper async authentication
+COMPLETELY ABANDONED aiogoogle library - using direct REST API calls like Analytics
 """
 
+import json
 import logging
-from typing import Dict, List, Optional, Any
+import aiohttp
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+
+from . import SUPPORTED_SITES
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
-try:
-    from aiogoogle import Aiogoogle
-    SEARCH_CONSOLE_AVAILABLE = True
-except ImportError:
-    SEARCH_CONSOLE_AVAILABLE = False
-    logger.warning("⚠️ aiogoogle not installed")
+SEARCH_CONSOLE_API_BASE = "https://searchconsole.googleapis.com/webmasters/v3"
 
-from . import SUPPORTED_SITES
-from .oauth_manager import get_aiogoogle_credentials, GoogleTokenExpiredError
-from ...core.database import db_manager
 
 class SearchConsoleClient:
-    """Search Console with TRUE async"""
+    """Google Search Console client using direct REST API calls"""
     
     def __init__(self):
-        if not SEARCH_CONSOLE_AVAILABLE:
-            raise RuntimeError("aiogoogle required")
-        
         self._user_id = None
-        self._user_creds = None
-        logger.info("🔍 Search Console initialized (aiogoogle)")
+        self._access_token = None
+        logger.info("🔍 Search Console initialized (REST API)")
     
     async def initialize(self, user_id: str):
+        """Initialize with Google credentials from database"""
         try:
-            logger.debug(f"🔧 SearchConsole.initialize() called with user_id={user_id}")
             self._user_id = user_id
             
-            logger.debug(f"🔑 Fetching credentials for user_id={user_id}")
-            self._user_creds = await get_aiogoogle_credentials(user_id, 'carl@bcdodge.me')
+            # Load access token directly from database (same as Analytics)
+            query = '''
+                SELECT access_token_encrypted, token_expires_at
+                FROM google_oauth_accounts
+                WHERE user_id = $1 AND is_active = TRUE
+                ORDER BY CASE WHEN email_address LIKE '%@bcdodge.me' THEN 0 ELSE 1 END
+                LIMIT 1
+            '''
             
-            if not self._user_creds:
-                logger.error(f"❌ No credentials found for user_id={user_id}")
-                raise Exception("No valid credentials")
-            
-            logger.debug(f"✅ Credentials fetched successfully")
+            conn = await db_manager.get_connection()
+            try:
+                row = await conn.fetchrow(query, user_id)
+                
+                if not row:
+                    raise Exception("No credentials found")
+                
+                from ...core.crypto import decrypt_token
+                self._access_token = decrypt_token(row['access_token_encrypted'])
+                
+                # Check if token is expired
+                if row['token_expires_at']:
+                    from datetime import timezone
+                    if datetime.now(timezone.utc) >= row['token_expires_at']:
+                        logger.warning("Access token expired, needs refresh")
+                        raise Exception("Token expired - please re-authenticate")
+            finally:
+                await db_manager.release_connection(conn)
+                
             logger.info(f"✅ Search Console initialized for user {user_id}")
             
         except Exception as e:
-            logger.error(f"❌ Search Console init failed: {e}", exc_info=True)
+            logger.error(f"❌ Search Console initialization failed: {e}", exc_info=True)
             raise
     
     async def get_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
@@ -63,8 +78,12 @@ class SearchConsoleClient:
         try:
             logger.info(f"🎯 Getting keyword opportunities for {site_name}")
             
+            if not self._user_id:
+                raise Exception("Client not initialized")
+            
             # Check if we have recent data in database
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 latest_data = await conn.fetchrow('''
                     SELECT MAX(date) as latest_date, COUNT(*) as total_queries
                     FROM google_search_console_data
@@ -96,25 +115,28 @@ class SearchConsoleClient:
                         logger.error(f"⚠️ Failed to fetch from API: {fetch_error}", exc_info=True)
                         # Continue anyway - maybe we can still provide partial data
                 
-                # Now identify opportunities from database
-                logger.debug(f"🔍 Identifying keyword opportunities from database...")
-                opportunities = await self.identify_keyword_opportunities(site_name)
-                
-                return opportunities
+            finally:
+                await db_manager.release_connection(conn)
+            
+            # Now identify opportunities from database
+            logger.debug(f"🔍 Identifying keyword opportunities from database...")
+            opportunities = await self.identify_keyword_opportunities(site_name)
+            
+            return opportunities
                 
         except Exception as e:
             logger.error(f"❌ Failed to get keyword opportunities: {e}", exc_info=True)
             raise
     
-    async def fetch_search_data_for_site(self, site_name: str, days: int = 7) -> List[Dict[str, Any]]:
+    async def fetch_search_data_for_site(self, site_name: str, days: int = 30) -> List[Dict[str, Any]]:
         """
-        Fetch Search Console data from Google API - TRULY ASYNC
+        Fetch Search Console data from Google API using direct REST calls
         """
         try:
             logger.info(f"🌐 fetch_search_data_for_site() called: site={site_name}, days={days}")
             
-            if not self._user_creds:
-                logger.debug(f"🔧 No credentials loaded, initializing...")
+            if not self._access_token:
+                logger.debug(f"🔧 No access token loaded, initializing...")
                 await self.initialize(self._user_id)
             
             site_config = SUPPORTED_SITES.get(site_name)
@@ -122,10 +144,7 @@ class SearchConsoleClient:
                 logger.error(f"❌ Unknown site: {site_name}")
                 logger.debug(f"📋 Available sites: {list(SUPPORTED_SITES.keys())}")
                 raise Exception(f"Unknown site: {site_name}")
-
-            logger.debug(f"📊 Site config keys: {list(site_config.keys())}")
-            logger.debug(f"📊 Full site config: {site_config}")
-
+            
             site_url = site_config['search_console_url']
             logger.debug(f"🔍 Using site URL: {site_url}")
             
@@ -135,47 +154,67 @@ class SearchConsoleClient:
             
             logger.info(f"📅 Fetching Search Console for {site_name}: {start_date} to {end_date}")
             
-            async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
-                search_console = await aiogoogle.discover('searchconsole', 'v1')
-                
-                logger.debug(f"🔍 Calling Search Console API: searchanalytics.query")
-                
-                # THIS IS TRULY ASYNC
-                response = await aiogoogle.as_user(
-                    search_console.searchanalytics.query(
-                        siteUrl=site_url,
-                        json={
-                            'startDate': start_date.isoformat(),
-                            'endDate': end_date.isoformat(),
-                            'dimensions': ['query', 'page', 'country', 'device'],
-                            'rowLimit': 1000
-                        }
-                    )
-                )
-                
-                logger.debug(f"📦 Search Console API response received")
-                
-                rows = response.get('rows', [])
-                logger.info(f"🔍 Retrieved {len(rows)} queries from Search Console API")
-                
-                if not rows:
-                    logger.warning(f"⚠️ No Search Console data returned for {site_name}")
-                    return []
-                
-                # Log sample data
-                if len(rows) > 0:
-                    sample = rows[0]
-                    logger.debug(f"📊 Sample query: {sample.get('keys', [''])[0]} - "
-                               f"clicks={sample.get('clicks', 0)}, "
-                               f"impressions={sample.get('impressions', 0)}, "
-                               f"position={sample.get('position', 0)}")
-                
-                # Store data in database
-                await self._store_search_data(site_name, site_url, rows)
-                
-                logger.info(f"✅ Retrieved and stored {len(rows)} queries for {site_name}")
-                
-                return rows
+            # Build the API request
+            api_url = f"{SEARCH_CONSOLE_API_BASE}/sites/{site_url}/searchAnalytics/query"
+            
+            headers = {
+                "Authorization": f"Bearer {self._access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            request_body = {
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat(),
+                "dimensions": ["query"],
+                "rowLimit": 25000,  # Maximum allowed
+                "startRow": 0
+            }
+            
+            logger.debug(f"🔍 Calling Search Console API: {api_url}")
+            logger.debug(f"📦 Request body: {json.dumps(request_body, indent=2)}")
+            
+            # Make the API call using aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, headers=headers, json=request_body) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        rows = data.get('rows', [])
+                        
+                        logger.info(f"✅ Retrieved {len(rows)} queries from Search Console API")
+                        
+                        if not rows:
+                            logger.warning(f"⚠️ No Search Console data returned for {site_name}")
+                            return []
+                        
+                        # Log sample data
+                        if len(rows) > 0:
+                            sample = rows[0]
+                            logger.debug(f"📊 Sample query: {sample.get('keys', [''])[0]} - "
+                                       f"clicks={sample.get('clicks', 0)}, "
+                                       f"impressions={sample.get('impressions', 0)}, "
+                                       f"position={sample.get('position', 0)}")
+                        
+                        # Store data in database
+                        await self._store_search_data(site_name, site_url, rows)
+                        
+                        logger.info(f"✅ Retrieved and stored {len(rows)} queries for {site_name}")
+                        
+                        return rows
+                    
+                    elif response.status == 401:
+                        error_text = await response.text()
+                        logger.error(f"❌ Authentication failed: {error_text}")
+                        raise Exception("Authentication failed - token may be expired")
+                    
+                    elif response.status == 403:
+                        error_text = await response.text()
+                        logger.error(f"❌ Permission denied: {error_text}")
+                        raise Exception(f"Permission denied for site: {site_url}")
+                    
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ API error {response.status}: {error_text}")
+                        raise Exception(f"Search Console API error: {response.status}")
                 
         except Exception as e:
             logger.error(f"❌ Search Console fetch failed for {site_name}: {e}", exc_info=True)
@@ -186,30 +225,35 @@ class SearchConsoleClient:
         try:
             logger.debug(f"💾 Storing {len(rows)} queries for {site_name}...")
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 stored_count = 0
                 for idx, row in enumerate(rows):
-                    query = row.get('keys', [''])[0]
-                    page = row.get('keys', [''])[1] if len(row.get('keys', [])) > 1 else ''
-                    country = row.get('keys', [''])[2] if len(row.get('keys', [])) > 2 else ''
-                    device = row.get('keys', [''])[3] if len(row.get('keys', [])) > 3 else ''
+                    # Extract data from API response
+                    keys = row.get('keys', [])
+                    query = keys[0] if len(keys) > 0 else ''
+                    
+                    if not query:
+                        continue
+                    
                     clicks = row.get('clicks', 0)
                     impressions = row.get('impressions', 0)
                     ctr = row.get('ctr', 0.0)
                     position = row.get('position', 0.0)
                     
+                    # Insert/update in database
                     await conn.execute('''
                         INSERT INTO google_search_console_data
-                        (user_id, site_name, site_url, query, page, country, device, clicks, impressions, ctr, position, date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                        ON CONFLICT (user_id, site_name, query, page, country, device, date) DO UPDATE SET
+                        (user_id, site_name, site_url, query, clicks, impressions, ctr, position, date)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT (user_id, site_name, query, date) DO UPDATE SET
                             clicks = EXCLUDED.clicks,
                             impressions = EXCLUDED.impressions,
                             ctr = EXCLUDED.ctr,
                             position = EXCLUDED.position,
                             updated_at = NOW()
                     ''',
-                    self._user_id, site_name, site_url, query, page, country, device,
+                    self._user_id, site_name, site_url, query,
                     clicks, impressions, ctr, position,
                     datetime.now().date()
                     )
@@ -219,8 +263,11 @@ class SearchConsoleClient:
                     # Log progress every 100 queries
                     if stored_count % 100 == 0:
                         logger.debug(f"💾 Stored {stored_count}/{len(rows)} queries...")
-            
-            logger.info(f"✅ Stored {stored_count} queries for {site_name}")
+                
+                logger.info(f"✅ Stored {stored_count} queries for {site_name}")
+                
+            finally:
+                await db_manager.release_connection(conn)
             
         except Exception as e:
             logger.error(f"❌ Failed to store Search Console data: {e}", exc_info=True)
@@ -246,15 +293,14 @@ class SearchConsoleClient:
             keyword_table = site_config['keyword_table']
             logger.debug(f"📊 Using keyword table: {keyword_table}")
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 logger.debug(f"🔍 Querying database for opportunities...")
                 
+                # Find keywords NOT in the site's keyword table with good metrics
                 opportunities = await conn.fetch(f'''
                     SELECT 
                         gsc.query as keyword,
-                        gsc.page,
-                        gsc.country,
-                        gsc.device,
                         gsc.clicks,
                         gsc.impressions,
                         gsc.ctr,
@@ -262,53 +308,40 @@ class SearchConsoleClient:
                         gsc.date
                     FROM google_search_console_data gsc
                     WHERE gsc.user_id = $1
-                        AND gsc.site_name = $2
-                        AND gsc.impressions >= 100
-                        AND gsc.position BETWEEN 11 AND 30
-                        AND gsc.user_decision IS NULL
-                        AND NOT EXISTS (
-                            SELECT 1 FROM {keyword_table} kt
-                            WHERE LOWER(kt.keyword) = LOWER(gsc.query)
-                        )
+                    AND gsc.site_name = $2
+                    AND gsc.impressions >= 100
+                    AND gsc.position BETWEEN 11 AND 30
+                    AND NOT EXISTS (
+                        SELECT 1 FROM {keyword_table} kw
+                        WHERE LOWER(kw.keyword) = LOWER(gsc.query)
+                    )
                     ORDER BY gsc.impressions DESC, gsc.position ASC
                     LIMIT 50
                 ''', self._user_id, site_name)
                 
-                logger.debug(f"📊 Found {len(opportunities)} raw opportunities")
+                logger.debug(f"📊 Found {len(opportunities)} opportunities")
                 
-                opportunity_list = []
-                for idx, opp in enumerate(opportunities):
-                    opp_dict = dict(opp)
-                    opp_type = self._classify_opportunity(opp_dict)
-                    opp_impact = self._estimate_impact(opp_dict)
-                    
+                # Format results
+                results = []
+                for opp in opportunities:
                     opportunity_data = {
                         'keyword': opp['keyword'],
-                        'page': opp.get('page', ''),
-                        'country': opp.get('country', ''),
-                        'device': opp.get('device', ''),
+                        'site_name': site_name,
                         'clicks': opp['clicks'],
                         'impressions': opp['impressions'],
-                        'ctr': float(opp['ctr']),
-                        'position': float(opp['position']),
-                        'date': opp['date'],
-                        'site_name': site_name,
-                        'opportunity_type': opp_type,
-                        'potential_impact': opp_impact
+                        'ctr': round(opp['ctr'] * 100, 2),  # Convert to percentage
+                        'position': round(opp['position'], 1),
+                        'date': opp['date'].isoformat() if opp['date'] else None,
+                        'opportunity_type': self._classify_opportunity(opp),
+                        'potential_impact': self._estimate_impact(opp)
                     }
-                    
-                    opportunity_list.append(opportunity_data)
-                    
-                    # Log first few opportunities
-                    if idx < 3:
-                        logger.debug(f"  🎯 Opportunity {idx+1}: {opp['keyword']} - "
-                                   f"pos={opp['position']:.1f}, "
-                                   f"impr={opp['impressions']}, "
-                                   f"type={opp_type}, "
-                                   f"impact={opp_impact}")
+                    results.append(opportunity_data)
                 
-                logger.info(f"🎯 Found {len(opportunity_list)} keyword opportunities for {site_name}")
-                return opportunity_list
+                logger.info(f"✅ Identified {len(results)} keyword opportunities for {site_name}")
+                return results
+                
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to identify opportunities: {e}", exc_info=True)
@@ -344,10 +377,11 @@ class SearchConsoleClient:
         logger.debug(f"📊 Estimated impact for '{data['keyword']}': {impact}")
         return impact
 
+
 # Global instance
 search_console_client = SearchConsoleClient()
 
-# Convenience function
+# Convenience functions
 async def find_keyword_opportunities(user_id: str, site_name: str):
     """Get keyword opportunities with auto-fetch if needed"""
     logger.debug(f"🔧 find_keyword_opportunities() called: user_id={user_id}, site={site_name}")
