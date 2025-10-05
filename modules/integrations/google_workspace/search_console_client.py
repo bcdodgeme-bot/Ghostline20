@@ -120,7 +120,7 @@ class SearchConsoleClient:
                 logger.debug(f"📋 Available sites: {list(SUPPORTED_SITES.keys())}")
                 raise Exception(f"Unknown site: {site_name}")
             
-            site_url = site_config['url']
+            site_url = site_config['search_console_url']
             logger.debug(f"🔍 Using site URL: {site_url}")
             
             # Calculate date range
