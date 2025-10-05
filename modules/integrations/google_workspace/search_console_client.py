@@ -36,12 +36,15 @@ class SearchConsoleClient:
         try:
             logger.debug(f"🔧 SearchConsole.initialize() called with user_id={user_id}")
             self._user_id = user_id
-            self._user_creds = await get_aiogoogle_credentials(user_id, None)
+            
+            logger.debug(f"🔑 Fetching credentials for user_id={user_id}")
+            self._user_creds = await get_aiogoogle_credentials(user_id, 'carl@bcdodge.me')
             
             if not self._user_creds:
                 logger.error(f"❌ No credentials found for user_id={user_id}")
                 raise Exception("No valid credentials")
             
+            logger.debug(f"✅ Credentials fetched successfully")
             logger.info(f"✅ Search Console initialized for user {user_id}")
             
         except Exception as e:
