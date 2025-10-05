@@ -586,8 +586,12 @@ class GoogleAuthManager:
             """
             from aiogoogle.auth.creds import UserCreds
             
+            logger.info(f"🔑 get_aiogoogle_creds called: user_id={user_id}, email={email}")
+            
             # Get regular credentials first
             credentials = await self.get_valid_credentials(user_id, email)
+            
+            logger.info(f"🔑 get_valid_credentials returned: {credentials is not None}")
             
             if not credentials:
                 return None
