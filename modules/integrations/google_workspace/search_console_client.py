@@ -119,7 +119,10 @@ class SearchConsoleClient:
                 logger.error(f"❌ Unknown site: {site_name}")
                 logger.debug(f"📋 Available sites: {list(SUPPORTED_SITES.keys())}")
                 raise Exception(f"Unknown site: {site_name}")
-            
+
+            logger.debug(f"📊 Site config keys: {list(site_config.keys())}")
+            logger.debug(f"📊 Full site config: {site_config}")
+
             site_url = site_config['search_console_url']
             logger.debug(f"🔍 Using site URL: {site_url}")
             
