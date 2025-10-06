@@ -275,9 +275,9 @@ class SearchConsoleClient:
                     # Insert/update in database
                     await conn.execute('''
                         INSERT INTO google_search_console_data
-                        (user_id, site_name, site_url, query, clicks, impressions, ctr, position, date)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        ON CONFLICT (user_id, site_name, query, date) DO UPDATE SET
+                        (user_id, site_name, site_url, query, page, country, device, clicks, impressions, ctr, position, date)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        ON CONFLICT (user_id, site_name, query, page, country, device, date) DO UPDATE SET
                             clicks = EXCLUDED.clicks,
                             impressions = EXCLUDED.impressions,
                             ctr = EXCLUDED.ctr,
@@ -285,6 +285,7 @@ class SearchConsoleClient:
                             updated_at = NOW()
                     ''',
                     self._user_id, site_name, site_url, query,
+                    None, None, None,
                     clicks, impressions, ctr, position,
                     datetime.now().date()
                     )
