@@ -306,7 +306,6 @@ class SearchConsoleClient:
             raise
     
     async def identify_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
-    async def identify_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
         """
         Find keyword opportunities by querying database
         
@@ -376,7 +375,7 @@ class SearchConsoleClient:
                         'site_name': site_name,
                         'clicks': opp['clicks'],
                         'impressions': opp['impressions'],
-                        'ctr': round(opp['ctr'] * 100, 2),  # Convert to percentage
+                        'ctr': round(opp['ctr'] * 100, 2),
                         'position': round(opp['position'], 1),
                         'date': opp['date'].isoformat() if opp['date'] else None,
                         'opportunity_type': opp['opportunity_type'],
@@ -386,40 +385,23 @@ class SearchConsoleClient:
                 
                 logger.info(f"✅ Identified {len(results)} keyword opportunities for {site_name}")
                 return results
-            
-        finally:
-            await db_manager.release_connection(conn)
-            
-    except Exception as e:
-        logger.error(f"❌ Failed to identify opportunities: {e}", exc_info=True)
-        return []
-    
-    def _classify_opportunity(self, data: Dict[str, Any]) -> str:
-        """Classify the type of keyword opportunity"""
-        position = float(data['position'])
-        impressions = data['impressions']
-        
-        if position <= 15 and impressions >= 500:
-            opportunity_type = 'quick_win'
-        elif position <= 20 and impressions >= 200:
-            opportunity_type = 'content_boost'
-        else:
-            opportunity_type = 'long_term'
-        
-        return opportunity_type
+                
+            finally:
+                await db_manager.release_connection(conn)
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to identify opportunities: {e}", exc_info=True)
+            return []
     
     def _estimate_impact(self, data: Dict[str, Any]) -> str:
         """Estimate potential impact based on position and impressions"""
         impressions = data['impressions']
         position = float(data['position'])
         
-        # Quick wins have highest impact
         if position <= 10:
             return 'high'
-        # High impressions at any position = medium impact
         elif impressions >= 10:
             return 'medium'
-        # Everything else is low but still worth tracking
         else:
             return 'low'
 
