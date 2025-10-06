@@ -306,13 +306,14 @@ class SearchConsoleClient:
             raise
     
     async def identify_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
+    async def identify_keyword_opportunities(self, site_name: str) -> List[Dict[str, Any]]:
         """
         Find keyword opportunities by querying database
         
-        Looks for keywords with:
-        - High impressions (100+)
-        - Positions 11-30 (page 2-3)
-        - Not already being tracked
+        Tiered approach:
+        - Quick Wins: Position 4-10, any impressions
+        - High Potential: Position 11-30, 10+ impressions  
+        - Long Tail: Position 31-100, 1+ impressions
         """
         try:
             logger.info(f"🎯 identify_keyword_opportunities() called for {site_name}")
@@ -329,7 +330,7 @@ class SearchConsoleClient:
             try:
                 logger.info("🔍 Querying database for opportunities...")
                 
-                # Find keywords NOT in the site's keyword table with good metrics
+                # Find keywords NOT in the site's keyword table with ANY visibility
                 opportunities = await conn.fetch(f'''
                     SELECT 
                         gsc.query as keyword,
@@ -337,17 +338,31 @@ class SearchConsoleClient:
                         gsc.impressions,
                         gsc.ctr,
                         gsc.position,
-                        gsc.date
+                        gsc.date,
+                        CASE
+                            WHEN gsc.position BETWEEN 4 AND 10 THEN 'quick_win'
+                            WHEN gsc.position BETWEEN 11 AND 30 AND gsc.impressions >= 10 THEN 'high_potential'
+                            WHEN gsc.position BETWEEN 31 AND 100 AND gsc.impressions >= 1 THEN 'long_tail'
+                            ELSE 'monitor'
+                        END as opportunity_type
                     FROM google_search_console_data gsc
                     WHERE gsc.user_id = $1
                     AND gsc.site_name = $2
-                    AND gsc.impressions >= 100
-                    AND gsc.position BETWEEN 11 AND 30
+                    AND gsc.impressions >= 1
+                    AND gsc.position <= 100
                     AND NOT EXISTS (
                         SELECT 1 FROM {keyword_table} kw
                         WHERE LOWER(kw.keyword) = LOWER(gsc.query)
                     )
-                    ORDER BY gsc.impressions DESC, gsc.position ASC
+                    ORDER BY 
+                        CASE 
+                            WHEN gsc.position BETWEEN 4 AND 10 THEN 1
+                            WHEN gsc.position BETWEEN 11 AND 30 AND gsc.impressions >= 10 THEN 2
+                            WHEN gsc.position BETWEEN 31 AND 100 AND gsc.impressions >= 1 THEN 3
+                            ELSE 4
+                        END,
+                        gsc.impressions DESC, 
+                        gsc.position ASC
                     LIMIT 50
                 ''', self._user_id, site_name)
                 
@@ -364,20 +379,20 @@ class SearchConsoleClient:
                         'ctr': round(opp['ctr'] * 100, 2),  # Convert to percentage
                         'position': round(opp['position'], 1),
                         'date': opp['date'].isoformat() if opp['date'] else None,
-                        'opportunity_type': self._classify_opportunity(opp),
+                        'opportunity_type': opp['opportunity_type'],
                         'potential_impact': self._estimate_impact(opp)
                     }
                     results.append(opportunity_data)
                 
                 logger.info(f"✅ Identified {len(results)} keyword opportunities for {site_name}")
                 return results
-                
-            finally:
-                await db_manager.release_connection(conn)
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to identify opportunities: {e}", exc_info=True)
-            return []
+            
+        finally:
+            await db_manager.release_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to identify opportunities: {e}", exc_info=True)
+        return []
     
     def _classify_opportunity(self, data: Dict[str, Any]) -> str:
         """Classify the type of keyword opportunity"""
@@ -394,18 +409,19 @@ class SearchConsoleClient:
         return opportunity_type
     
     def _estimate_impact(self, data: Dict[str, Any]) -> str:
-        """Estimate potential impact"""
+        """Estimate potential impact based on position and impressions"""
         impressions = data['impressions']
         position = float(data['position'])
         
-        if impressions >= 1000 and position <= 20:
-            impact = 'high'
-        elif impressions >= 500 and position <= 25:
-            impact = 'medium'
+        # Quick wins have highest impact
+        if position <= 10:
+            return 'high'
+        # High impressions at any position = medium impact
+        elif impressions >= 10:
+            return 'medium'
+        # Everything else is low but still worth tracking
         else:
-            impact = 'low'
-        
-        return impact
+            return 'low'
 
 
 # Global instance
