@@ -82,7 +82,7 @@ class PrayerNotificationHandler:
         query = """
         SELECT fajr_time, dhuhr_time, asr_time, maghrib_time, isha_time
         FROM prayer_times_cache
-        WHERE user_id = $1 AND prayer_date = CURRENT_DATE
+        WHERE user_id = $1 AND date = CURRENT_DATE
         """
         
         result = await self.db.fetch_one(query, self.user_id)
