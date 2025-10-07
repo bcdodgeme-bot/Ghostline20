@@ -1143,8 +1143,10 @@ class SyntaxPrimeChat {
             
             // Add uploaded files if any
             if (this.uploadedFiles && this.uploadedFiles.length > 0) {
-                for (const file of this.uploadedFiles) {
-                    formData.append('files', file.file);
+                console.log('📎 Adding files to FormData:', this.uploadedFiles.length);
+                for (const fileObj of this.uploadedFiles) {
+                    console.log('  File:', fileObj.file?.name, 'Type:', fileObj.file?.type);
+                    formData.append('files', fileObj.file);
                 }
             }
 
