@@ -114,7 +114,7 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
             return {"error": "Weather API key not configured"}
             
         # Default location if not provided
-        location = location or "27519"  # Default to Cary, NC
+        location = location or "22031"  # Default to Cary, NC
         
         params = {
             "location": location,
