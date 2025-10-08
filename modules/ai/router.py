@@ -110,13 +110,40 @@ async def chat_with_ai(
             
             # Add file context to the message
             file_context = "\n\n**Uploaded Files:**\n"
+            image_attachments = []  # Store base64 image data for vision
+            
             for file_info in processed_files:
                 file_context += f"\n📎 **{file_info['filename']}**\n"
                 if file_info['analysis'].get('description'):
                     file_context += f"   {file_info['analysis']['description']}\n"
+                    
+                if file_info['file_type'] in ['.png', '.jpg', '.jpeg', '.gif']:
+                    try:
+                        # Read the image file and encode as base64
+                        with open(file_info['file_path'], 'rb') as img_file:
+                            import base64
+                            img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+                            
+                            # Determine media type
+                            media_type_map = {
+                                '.png': 'image/png',
+                                '.jpg': 'image/jpeg',
+                                '.jpeg': 'image/jpeg',
+                                '.gif': 'image/gif'
+                            }
+                            
+                            image_attachments.append({
+                                'filename': file_info['filename'],
+                                'type': file_info['file_type'],
+                                'base64': img_base64,
+                                'media_type': media_type_map.get(file_info['file_type'], 'image/png')
+                            })
+                logger.info(f"📸 Prepared image for vision: {file_info['filename']}")
         except Exception as e:
-            logger.error(f"❌ File processing failed: {e}")
-            file_context = f"\n\n⚠️ Note: Some files could not be processed: {str(e)}"
+                        logger.error(f"Failed to encode image {file_info['filename']}: {e}")
+                        
+            if len(image_attachments) > 0:
+                logger.info(f"📸 Total images ready for vision analysis: {len(image_attachments)}")
     
     # Combine message with file context
     full_message = message + file_context
@@ -583,17 +610,64 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 logger.info(f"✅ DEBUG: AI messages array built: {len(ai_messages)} total messages")
                 
                 # Add current message
-                ai_messages.append({
-                    "role": "user",
-                    "content": message_content
-                })
+                # Add user message with vision support if images are present
+                if 'image_attachments' in locals() and len(image_attachments) > 0:
+                    # Vision-enabled message format (array of content blocks)
+                    logger.info(f"📸 Building vision message with {len(image_attachments)} images")
+                
+                logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
+                try:
+                    ai_response = await openrouter_client.chat_completion(
+                        messages=ai_messages,
+                        model="anthropic/claude-3.5-sonnet:beta",
+                        max_tokens=4000,
+                        temperature=0.7
+                    )
+                    logger.info("✅ DEBUG: OpenRouter response received")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
+                    raise
+                    
+                    content_blocks = [
+                        {
+                            "type": "text",
+                            "text": message_content
+                        }
+                    ]
+                    
+                    # Add each image as a content block
+                    for img in image_attachments:
+                        content_blocks.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{img['media_type']};base64,{img['base64']}"
+                            }
+                        })
+                        logger.info(f"📸 Added to vision request: {img['filename']}")
+                    
+                    ai_messages.append({
+                        "role": "user",
+                        "content": content_blocks  # Array format for vision
+                    })
+                else:
+                    # Text-only message (original format)
+                    ai_messages.append({
+                        "role": "user",
+                        "content": message_content
+                    })
+                
+                # Force vision-capable model if images are present
+                model_override = None
+                if 'image_attachments' in locals() and len(image_attachments) > 0:
+                    model_override = "anthropic/claude-3.5-sonnet"  # Force Claude for vision
+                    logger.info(f"📸 Using vision model: {model_override}")
                 
                 # Get AI response
                 logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
                 try:
                     ai_response = await openrouter_client.chat_completion(
                         messages=ai_messages,
-                        model="anthropic/claude-3.5-sonnet:beta",
+                        model=model_override,
                         max_tokens=4000,
                         temperature=0.7
                     )
