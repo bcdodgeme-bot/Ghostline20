@@ -1143,12 +1143,19 @@ class SyntaxPrimeChat {
             
             // Add uploaded files if any
             if (this.uploadedFiles && this.uploadedFiles.length > 0) {
-                console.log('📎 Adding files to FormData:', this.uploadedFiles.length);
-                for (const fileObj of this.uploadedFiles) {
-                    console.log('  File:', fileObj.file?.name, 'Type:', fileObj.file?.type);
-                    formData.append('files', fileObj.file);
-                }
-            }
+                            console.log('📎 Adding files to FormData:', this.uploadedFiles.length);
+                            for (const fileObj of this.uploadedFiles) {
+                                // Verify we have a valid File object
+                                if (fileObj.file && fileObj.file instanceof File) {
+                                    console.log('  ✅ Adding file:', fileObj.file.name, 'Type:', fileObj.file.type, 'Size:', fileObj.file.size);
+                                    formData.append('files', fileObj.file, fileObj.file.name);
+                                } else {
+                                    console.error('  ❌ Invalid file object:', fileObj);
+                                }
+                            }
+                        } else {
+                            console.log('📎 No files to upload');
+                        }
 
             console.log(`📤 Sending API request (ID: ${messageId}) with FormData`);
 
