@@ -88,6 +88,9 @@ async def chat_with_ai(
     # Process uploaded files if any
     file_context = ""
     
+    # Import file processing function at the top to avoid scope issues
+    from .chat import process_uploaded_files
+    
     # 🚨 CRITICAL DEBUG: Log what FastAPI received
     logger.info(f"🔍 FILE DEBUG: files parameter type: {type(files)}")
     logger.info(f"🔍 FILE DEBUG: files parameter value: {files}")
