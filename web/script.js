@@ -1124,7 +1124,7 @@ class SyntaxPrimeChat {
         // Clear input
         messageInput.value = '';
         this.updateCharCount();
-        this.clearUploadedFiles();
+        //this.clearUploadedFiles();
 
         try {
             // Show typing indicator
@@ -1141,8 +1141,8 @@ class SyntaxPrimeChat {
             
             formData.append('include_knowledge', 'true');
             
-            // Add uploaded files if any
-            if (this.uploadedFiles && this.uploadedFiles.length > 0) {
+            // Add uploaded files if any - FIXED: Must verify File objects exist
+                        if (this.uploadedFiles && this.uploadedFiles.length > 0) {
                             console.log('📎 Adding files to FormData:', this.uploadedFiles.length);
                             for (const fileObj of this.uploadedFiles) {
                                 // Verify we have a valid File object
@@ -1153,6 +1153,9 @@ class SyntaxPrimeChat {
                                     console.error('  ❌ Invalid file object:', fileObj);
                                 }
                             }
+                            
+                            // NOW clear the uploaded files after adding to FormData
+                            this.clearUploadedFiles();
                         } else {
                             console.log('📎 No files to upload');
                         }
