@@ -87,9 +87,19 @@ async def chat_with_ai(
     """
     # Process uploaded files if any
     file_context = ""
+    
+    # 🚨 CRITICAL DEBUG: Log what FastAPI received
+    logger.info(f"🔍 FILE DEBUG: files parameter type: {type(files)}")
+    logger.info(f"🔍 FILE DEBUG: files parameter value: {files}")
+    logger.info(f"🔍 FILE DEBUG: files length: {len(files) if files else 'None'}")
+    
+    if files:
+        logger.info(f"🔍 FILE DEBUG: Iterating through {len(files)} file objects...")
+        for idx, file in enumerate(files):
+            logger.info(f"🔍 FILE DEBUG [{idx}]: filename={file.filename}, content_type={file.content_type}, size={file.size if hasattr(file, 'size') else 'unknown'}")
+    
     if files and len(files) > 0:
-        logger.info(f"📎 Processing {len(files)} uploaded files")
-        from .chat import process_uploaded_files
+        logger.info(f"📎 Processing {len(files)} uploaded files")    
         
         try:
             processed_files = await process_uploaded_files(files)

@@ -81,3 +81,9 @@ aiogoogle
 
 # Cryptography for token encryption (Fort Knox security)
 cryptography>=41.0.0
+
+# Word document processing
+python-docx>=0.8.11
+
+# Excel file processing
+openpyxl>=3.1.0

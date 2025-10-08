@@ -30,6 +30,18 @@ import numpy as np
 from io import BytesIO
 import base64
 
+# Word document processing
+from docx import Document
+
+# Excel file processing
+import openpyxl
+from openpyxl.utils import get_column_letter
+
+# Python file processing
+import ast
+import tokenize
+from io import StringIO
+
 # Add to the existing imports section:
 from .pattern_fatigue import get_pattern_fatigue_tracker, handle_duplicate_complaint, handle_time_joke_complaint
 
@@ -42,8 +54,8 @@ logger = logging.getLogger(__name__)
 
 # File upload configuration
 UPLOAD_DIR = Path("/home/app/uploads/chat_files")
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.txt', '.md', '.csv'}
+MAX_FILE_SIZE = 25 * 1024 * 1024  # 10MB
+ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.txt', '.md', '.csv', '.doc', '.docx', '.xls', '.xlsx', '.py'}
 
 def ensure_upload_dir():
     """Ensure upload directory exists with proper error handling"""
@@ -1090,6 +1102,12 @@ async def analyze_file_content(file_path: Path, file_type: str) -> Dict:
             analysis.update(await analyze_text_file(file_path))
         elif file_type == '.csv':
             analysis.update(await analyze_csv_file(file_path))
+        elif file_type in ['.doc', '.docx']:
+            analysis.update(await analyze_docx_file(file_path))
+        elif file_type in ['.xls', '.xlsx']:
+            analysis.update(await analyze_excel_file(file_path))
+        elif file_type == '.py':
+            analysis.update(await analyze_python_file(file_path))
         else:
             analysis['description'] = f"Unsupported file type: {file_type}"
             
@@ -1192,6 +1210,161 @@ async def analyze_csv_file(file_path: Path) -> Dict:
         return {
             'type': 'csv',
             'description': f'CSV analysis failed: {e}',
+            'extracted_text': ''
+        }
+        
+async def analyze_docx_file(file_path: Path) -> Dict:
+    """Analyze Word document file (.docx)"""
+    try:
+        doc = Document(file_path)
+        
+        # Extract text content
+        text_content = ""
+        for paragraph in doc.paragraphs:
+            text_content += paragraph.text + "\n"
+        
+        # Count paragraphs, tables, images
+        paragraph_count = len(doc.paragraphs)
+        table_count = len(doc.tables)
+        
+        # Extract table data
+        table_text = ""
+        for table in doc.tables[:3]:  # First 3 tables
+            for row in table.rows:
+                for cell in row.cells:
+                    table_text += cell.text + " | "
+                table_text += "\n"
+        
+        word_count = len(text_content.split())
+        
+        return {
+            'type': 'document',
+            'description': f'Word document with {paragraph_count} paragraphs, {table_count} tables, {word_count} words',
+            'extracted_text': (text_content + "\n\n" + table_text)[:3000],  # First 3000 chars
+            'metadata': {
+                'paragraph_count': paragraph_count,
+                'table_count': table_count,
+                'word_count': word_count
+            }
+        }
+    except Exception as e:
+        logger.error(f"Word document analysis failed: {e}")
+        return {
+            'type': 'document',
+            'description': f'Word document analysis failed: {e}',
+            'extracted_text': ''
+        }
+        
+async def analyze_excel_file(file_path: Path) -> Dict:
+    """Analyze Excel file (.xlsx, .xls)"""
+    try:
+        # Load workbook
+        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        
+        sheet_names = workbook.sheetnames
+        sheet_count = len(sheet_names)
+        
+        # Analyze first sheet
+        first_sheet = workbook.active
+        row_count = first_sheet.max_row
+        col_count = first_sheet.max_column
+        
+        # Extract sample data (first 10 rows)
+        extracted_text = f"Sheet: {first_sheet.title}\n\n"
+        for row_idx, row in enumerate(first_sheet.iter_rows(max_row=10, values_only=True), 1):
+            row_data = [str(cell) if cell is not None else '' for cell in row]
+            extracted_text += " | ".join(row_data) + "\n"
+            if row_idx >= 10:
+                break
+        
+        # Get all sheet summaries
+        sheet_summaries = []
+        for sheet_name in sheet_names[:5]:  # First 5 sheets
+            sheet = workbook[sheet_name]
+            sheet_summaries.append(f"{sheet_name}: {sheet.max_row} rows × {sheet.max_column} cols")
+        
+        return {
+            'type': 'spreadsheet',
+            'description': f'Excel file with {sheet_count} sheets, {row_count} rows × {col_count} columns in active sheet',
+            'extracted_text': extracted_text[:3000],
+            'metadata': {
+                'sheet_count': sheet_count,
+                'sheet_names': sheet_names[:10],  # First 10 sheet names
+                'active_sheet': first_sheet.title,
+                'row_count': row_count,
+                'column_count': col_count,
+                'sheet_summaries': sheet_summaries
+            }
+        }
+    except Exception as e:
+        logger.error(f"Excel file analysis failed: {e}")
+        return {
+            'type': 'spreadsheet',
+            'description': f'Excel analysis failed: {e}',
+            'extracted_text': ''
+        }
+        
+async def analyze_python_file(file_path: Path) -> Dict:
+    """Analyze Python source code file"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            source_code = f.read()
+        
+        # Parse AST for code analysis
+        try:
+            tree = ast.parse(source_code)
+            
+            # Count different code elements
+            functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+            classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+            imports = []
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports.extend([alias.name for alias in node.names])
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        imports.append(node.module)
+            
+            function_count = len(functions)
+            class_count = len(classes)
+            import_count = len(set(imports))
+            
+        except SyntaxError:
+            function_count = class_count = import_count = 0
+            functions = classes = imports = []
+        
+        # Count lines
+        lines = source_code.splitlines()
+        line_count = len(lines)
+        code_lines = [line for line in lines if line.strip() and not line.strip().startswith('#')]
+        comment_lines = [line for line in lines if line.strip().startswith('#')]
+        
+        # Extract docstrings and top comments
+        extracted_text = source_code[:2000]  # First 2000 chars
+        
+        return {
+            'type': 'code',
+            'description': f'Python file with {function_count} functions, {class_count} classes, {line_count} lines',
+            'extracted_text': extracted_text,
+            'metadata': {
+                'language': 'python',
+                'line_count': line_count,
+                'code_lines': len(code_lines),
+                'comment_lines': len(comment_lines),
+                'function_count': function_count,
+                'class_count': class_count,
+                'import_count': import_count,
+                'functions': functions[:10],  # First 10 function names
+                'classes': classes[:10],  # First 10 class names
+                'imports': list(set(imports))[:15]  # First 15 unique imports
+            }
+        }
+    except Exception as e:
+        logger.error(f"Python file analysis failed: {e}")
+        return {
+            'type': 'code',
+            'description': f'Python file analysis failed: {e}',
             'extracted_text': ''
         }
 
