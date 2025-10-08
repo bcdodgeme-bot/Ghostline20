@@ -1051,6 +1051,9 @@ async def process_uploaded_files(files) -> List[Dict]:
     
     processed_files = []
     
+    # Ensure upload directory exists
+    ensure_upload_dir()
+    
     for file in files:
         if not file.filename:
             continue
