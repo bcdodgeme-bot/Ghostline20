@@ -138,6 +138,8 @@ async def chat_with_ai(
                                 'base64': img_base64,
                                 'media_type': media_type_map.get(file_info['file_type'], 'image/png')
                             })
+        
+        try:
                 logger.info(f"📸 Prepared image for vision: {file_info['filename']}")
         except Exception as e:
                         logger.error(f"Failed to encode image {file_info['filename']}: {e}")
