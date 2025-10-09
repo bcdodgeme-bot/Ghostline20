@@ -619,19 +619,6 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 if 'image_attachments' in locals() and len(image_attachments) > 0:
                     # Vision-enabled message format (array of content blocks)
                     logger.info(f"📸 Building vision message with {len(image_attachments)} images")
-                
-                logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
-                try:
-                    ai_response = await openrouter_client.chat_completion(
-                        messages=ai_messages,
-                        model="anthropic/claude-3.5-sonnet:beta",
-                        max_tokens=4000,
-                        temperature=0.7
-                    )
-                    logger.info("✅ DEBUG: OpenRouter response received")
-                except Exception as e:
-                    logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
-                    raise
                     
                     content_blocks = [
                         {
@@ -654,12 +641,31 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         "role": "user",
                         "content": content_blocks  # Array format for vision
                     })
+                    
+                    # Force vision-capable model
+                    model_override = "anthropic/claude-3.5-sonnet"
+                    logger.info(f"📸 Using vision model: {model_override}")
                 else:
                     # Text-only message (original format)
                     ai_messages.append({
                         "role": "user",
                         "content": message_content
                     })
+                    model_override = None
+                
+                # Get AI response (ONLY ONCE, AFTER message is added)
+                logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
+                try:
+                    ai_response = await openrouter_client.chat_completion(
+                        messages=ai_messages,
+                        model=model_override,
+                        max_tokens=4000,
+                        temperature=0.7
+                    )
+                    logger.info("✅ DEBUG: OpenRouter response received")
+                except Exception as e:
+                    logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
+                    raise
                 
                 # Force vision-capable model if images are present
                 model_override = None
