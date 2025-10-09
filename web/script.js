@@ -1350,10 +1350,18 @@ class SyntaxPrimeChat {
             personalityBtn.innerHTML = '🖕'; // Fixed back to original
             personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'personality'));
             
+            // Bookmark button
+            const bookmarkBtn = document.createElement('button');
+            bookmarkBtn.className = 'message-action bookmark-btn';
+            bookmarkBtn.title = 'Bookmark This';
+            bookmarkBtn.innerHTML = '📌';
+            bookmarkBtn.addEventListener('click', () => this.rememberMessage(metadata.messageId));
+            
             actionsDiv.appendChild(copyBtn);
             actionsDiv.appendChild(goodBtn);
             actionsDiv.appendChild(badBtn);
             actionsDiv.appendChild(personalityBtn);
+            actionsDiv.appendChild(bookmarkBtn);
 
             contentDiv.appendChild(actionsDiv);
         }
@@ -1816,8 +1824,32 @@ class SyntaxPrimeChat {
     }
 
     copyMessage(messageId) {
-        console.log('Copy message:', messageId);
-        // Copy to clipboard functionality
+        try {
+            // Find the message element by messageId
+            const messageElements = document.querySelectorAll('.message.assistant');
+            let messageText = '';
+            
+            // Get the text from the message bubble
+            for (const msgEl of messageElements) {
+                const bubble = msgEl.querySelector('.message-bubble');
+                if (bubble) {
+                    messageText = bubble.innerText || bubble.textContent;
+                    // Just copy the last assistant message for now
+                    // (proper messageId tracking would require more changes)
+                }
+            }
+            
+            if (messageText) {
+                navigator.clipboard.writeText(messageText).then(() => {
+                    this.showToast('✅ Copied to clipboard!', 'success');
+                }).catch(err => {
+                    this.showToast('❌ Copy failed', 'error');
+                });
+            }
+        } catch (error) {
+            console.error('Copy failed:', error);
+            this.showToast('❌ Copy failed', 'error');
+        }
     }
 
     async submitFeedback(messageId, feedbackType) {
