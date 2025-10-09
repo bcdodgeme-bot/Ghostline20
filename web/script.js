@@ -1335,21 +1335,21 @@ class SyntaxPrimeChat {
             goodBtn.className = 'message-action feedback-good';
             goodBtn.title = 'Good Answer';
             goodBtn.innerHTML = '👍';
-            goodBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good_answer'));
+            goodBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good'));
 
             const badBtn = document.createElement('button');
             badBtn.className = 'message-action feedback-bad';
             badBtn.title = 'Bad Answer';
             badBtn.innerHTML = '👎';
-            badBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'bad_answer'));
+            badBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'bad'));
 
             // FIXED: Personality feedback button - Date: 9/28/25
             const personalityBtn = document.createElement('button');
             personalityBtn.className = 'message-action feedback-personality';
             personalityBtn.title = 'Good Personality';
             personalityBtn.innerHTML = '🖕'; // Fixed back to original
-            personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'good_personality'));
-
+            personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'personality'));
+            
             actionsDiv.appendChild(copyBtn);
             actionsDiv.appendChild(goodBtn);
             actionsDiv.appendChild(badBtn);
