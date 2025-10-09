@@ -1607,27 +1607,97 @@ class SyntaxPrimeChat {
         console.log('Personalities loaded');
     }
 
-    loadConversations() {
-        const conversationsList = document.getElementById('conversationsList');
-        if (conversationsList) {
-            setTimeout(() => {
-                conversationsList.innerHTML = `
-                    <div class="conversation-item">
-                        <div class="conversation-title">Previous Chat</div>
-                        <div class="conversation-preview">How do I fix JavaScript errors?</div>
-                        <div class="conversation-time">2 hours ago</div>
-                    </div>
-                    <div class="conversation-item">
-                        <div class="conversation-title">API Debugging</div>
-                        <div class="conversation-preview">Help with API integration...</div>
-                        <div class="conversation-time">Yesterday</div>
-                    </div>
-                `;
-            }, 1000);
+    async loadConversations() {
+        try {
+            const response = await this.apiCall('/ai/conversations?limit=50', 'GET');
+            
+            if (response && response.conversations) {
+                this.renderConversations(response.conversations);
+            }
+        } catch (error) {
+            console.error('Failed to load conversations:', error);
         }
-        console.log('Conversations loaded');
     }
 
+    renderConversations(conversations) {
+        const sidebar = document.querySelector('.conversations-list');
+        
+        if (!sidebar) {
+            console.error('Conversations sidebar not found');
+            return;
+        }
+        
+        if (conversations.length === 0) {
+            sidebar.innerHTML = '<div class="no-conversations">No conversations yet</div>';
+            return;
+        }
+        
+        sidebar.innerHTML = conversations.map(conv => `
+            <div class="conversation-item ${conv.thread_id === this.currentThreadId ? 'active' : ''}" 
+                 data-thread-id="${conv.thread_id}" 
+                 onclick="window.syntaxPrimeChat.loadThread('${conv.thread_id}')">
+                <div class="conversation-title">${conv.title || 'Untitled'}</div>
+                <div class="conversation-meta">
+                    <span>${conv.message_count || 0} messages</span>
+                    <span>${this.formatDate(conv.last_message_at)}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async loadThread(threadId) {
+        try {
+            this.currentThreadId = threadId;
+            
+            // Get messages for this thread
+            const response = await this.apiCall(`/ai/conversations/${threadId}`, 'GET');
+            
+            if (!response || !response.messages) {
+                this.showToast('❌ Failed to load conversation', 'error');
+                return;
+            }
+            
+            // Clear current messages
+            const messagesContainer = document.getElementById('chatMessages');
+            const welcomeMessage = messagesContainer.querySelector('.welcome-message');
+            if (welcomeMessage) welcomeMessage.remove();
+            
+            messagesContainer.innerHTML = '';
+            
+            // Render message history
+            response.messages.forEach(msg => {
+                this.addMessage(msg.role, msg.content, {
+                    messageId: msg.id,
+                    timestamp: msg.timestamp,
+                    personality: msg.model_used
+                });
+            });
+            
+            // Update sidebar to show active conversation
+            const convResponse = await this.apiCall('/ai/conversations?limit=50', 'GET');
+            if (convResponse && convResponse.conversations) {
+                this.renderConversations(convResponse.conversations);
+            }
+            
+        } catch (error) {
+            console.error('Error loading thread:', error);
+            this.showToast('❌ Failed to load conversation', 'error');
+        }
+    }
+    
+    formatDate(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        const now = new Date();
+        const diff = now - date;
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        
+        if (days === 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        if (days < 7) return `${days} days ago`;
+        return date.toLocaleDateString();
+    }
+    
     setupDragAndDrop() {
         const dragOverlay = document.getElementById('dragOverlay');
         
@@ -1714,14 +1784,35 @@ class SyntaxPrimeChat {
         }
     }
 
-    saveBookmark() {
+    async saveBookmark() {
         const bookmarkName = document.getElementById('bookmarkName').value.trim();
         if (!bookmarkName) return;
         
-        console.log('Saving bookmark:', bookmarkName);
-        
-        this.hideModal(document.getElementById('bookmarkModal'));
-        document.getElementById('bookmarkName').value = '';
+        try {
+            // Need to track which message is being bookmarked
+            if (!this.bookmarkToCreate) {
+                this.showToast('❌ No message selected to bookmark', 'error');
+                return;
+            }
+            
+            const response = await this.apiCall('/ai/bookmarks', 'POST', {
+                message_id: this.bookmarkToCreate.messageId,
+                bookmark_name: bookmarkName,
+                thread_id: this.currentThreadId
+            });
+            
+            if (response && response.success) {
+                this.showToast('✅ Bookmark saved!', 'success');
+            }
+            
+            this.hideModal(document.getElementById('bookmarkModal'));
+            document.getElementById('bookmarkName').value = '';
+            this.bookmarkToCreate = null;
+            
+        } catch (error) {
+            console.error('Error saving bookmark:', error);
+            this.showToast('❌ Failed to save bookmark', 'error');
+        }
     }
 
     copyMessage(messageId) {
@@ -1729,13 +1820,32 @@ class SyntaxPrimeChat {
         // Copy to clipboard functionality
     }
 
-    submitFeedback(messageId, feedbackType) {
-        console.log('Feedback submitted:', messageId, feedbackType);
-        // Submit feedback to API
+    async submitFeedback(messageId, feedbackType) {
+        try {
+            console.log('Feedback submitted:', messageId, feedbackType);
+            
+            const response = await this.apiCall('/ai/feedback', 'POST', {
+                message_id: messageId,
+                feedback_type: feedbackType
+            });
+            
+            if (response && response.message) {
+                this.showToast(response.message, 'success');
+            }
+        } catch (error) {
+            console.error('Error submitting feedback:', error);
+            this.showToast('❌ Failed to submit feedback', 'error');
+        }
     }
 
     rememberMessage(messageId) {
         console.log('Remember message:', messageId);
+        
+        // Store which message we're bookmarking
+        this.bookmarkToCreate = {
+            messageId: messageId
+        };
+        
         this.showBookmarkModal();
     }
 }

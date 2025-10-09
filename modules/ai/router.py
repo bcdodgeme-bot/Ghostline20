@@ -878,6 +878,45 @@ async def get_personalities():
         ],
         "default_personality": "syntaxprime"
     }
+    
+@router.post("/bookmarks")
+async def create_bookmark(
+    message_id: str = Form(...),
+    bookmark_name: str = Form(...),
+    thread_id: str = Form(None),
+    user_id: str = Depends(get_current_user_id)
+):
+    """Save a message as a bookmark"""
+    try:
+        from ..core.database import db_manager
+        
+        bookmark_id = str(uuid.uuid4())
+        
+        insert_query = """
+        INSERT INTO user_bookmarks 
+        (id, user_id, message_id, thread_id, bookmark_name, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        RETURNING id;
+        """
+        
+        result = await db_manager.fetch_one(
+            insert_query,
+            bookmark_id,
+            user_id,
+            message_id,
+            thread_id,
+            bookmark_name
+        )
+        
+        return {
+            "success": True,
+            "bookmark_id": result['id'],
+            "message": f"✅ Bookmarked as '{bookmark_name}'"
+        }
+        
+    except Exception as e:
+        logger.error(f"Bookmark creation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/conversations")
 async def get_conversations(limit: int = 50):
