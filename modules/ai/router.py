@@ -167,7 +167,7 @@ async def chat_with_ai(
         try:
             from .chat import (
                  get_current_datetime_context,
-                 detect_weather_request, get_weather_for_user,
+                 detect_weather_request, get_weather_for_user,get_weather_forecast_for_user, 
                  detect_prayer_command, process_prayer_command,
                  detect_prayer_notification_command, process_prayer_notification_command,
                  detect_location_command, process_location_command,
