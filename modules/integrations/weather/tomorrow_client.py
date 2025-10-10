@@ -48,8 +48,8 @@ class TomorrowClient:
         location = location or self.default_location
         await self._rate_limit()
         
-        fields = ["temperature", "temperatureApparent", "pressureSurfaceLevel", 
-                 "uvIndex", "humidity", "windSpeed", "visibility", "weatherCode", 
+        fields = ["temperature", "temperatureApparent", "pressureSurfaceLevel",
+                 "uvIndex", "humidity", "windSpeed", "visibility", "weatherCode",
                  "precipitationProbability"]
         
         params = {
@@ -62,7 +62,7 @@ class TomorrowClient:
         session = await self._get_session()
         
         try:
-            async with session.get(f"{self.base_url}/weather/realtime", 
+            async with session.get(f"{self.base_url}/weather/realtime",
                                  params=params, timeout=30) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -72,35 +72,35 @@ class TomorrowClient:
             raise
     
     async def get_weather_forecast(self, location: str = None, days: int = 5) -> dict:
-    """Get weather forecast from Tomorrow.io API"""
-    if not self.api_key:
-        raise ValueError("TOMORROW_IO_API_KEY not configured")
-    
-    location = location or self.default_location
-    await self._rate_limit()
-    
-    # Request daily forecasts
-    params = {
-        'location': location,
-        'timesteps': '1d',  # Daily timesteps
-        'units': 'metric',
-        'apikey': self.api_key
-    }
-    
-    session = await self._get_session()
-    
-    try:
-        async with session.get(f"{self.base_url}/weather/forecast",
-                             params=params, timeout=30) as response:
-            response.raise_for_status()
-            data = await response.json()
-            
-            # Extract the daily forecast (limit to requested days)
-            timelines = data.get('timelines', {}).get('daily', [])
-            return timelines[:days]
-    except Exception as e:
-        logger.error(f"Tomorrow.io Forecast API error: {e}")
-        raise
+        """Get weather forecast from Tomorrow.io API"""
+        if not self.api_key:
+            raise ValueError("TOMORROW_IO_API_KEY not configured")
+        
+        location = location or self.default_location
+        await self._rate_limit()
+        
+        # Request daily forecasts
+        params = {
+            'location': location,
+            'timesteps': '1d',  # Daily timesteps
+            'units': 'metric',
+            'apikey': self.api_key
+        }
+        
+        session = await self._get_session()
+        
+        try:
+            async with session.get(f"{self.base_url}/weather/forecast",
+                                 params=params, timeout=30) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                # Extract the daily forecast (limit to requested days)
+                timelines = data.get('timelines', {}).get('daily', [])
+                return timelines[:days]
+        except Exception as e:
+            logger.error(f"Tomorrow.io Forecast API error: {e}")
+            raise
     
     async def close(self):
         """Clean up resources"""
