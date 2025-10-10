@@ -1799,32 +1799,48 @@ class SyntaxPrimeChat {
         }
     }
 
-    async saveBookmark() {
-        const bookmarkName = document.getElementById('bookmarkName').value.trim();
-        if (!bookmarkName) return;
-        
-        try {
-            // Need to track which message is being bookmarked
-            if (!this.bookmarkToCreate) {
-                this.showToast('❌ No message selected to bookmark', 'error');
-                return;
-            }
+        async saveBookmark() {
+            const bookmarkName = document.getElementById('bookmarkName').value.trim();
+            if (!bookmarkName) return;
             
-            const response = await this.apiCall('/ai/bookmarks', 'POST', formData);
-                    
-                    if (response && response.success) {
-                        this.showToast('✅ Bookmark saved!', 'success');
-                    }
-                    
-                    this.hideModal(document.getElementById('bookmarkModal'));
-                    document.getElementById('bookmarkName').value = '';
-                    this.bookmarkToCreate = null;
-                    
-                } catch (error) {
-                    console.error('Error saving bookmark:', error);
-                    this.showToast('❌ Failed to save bookmark', 'error');
+            console.log('🔖 saveBookmark called with name:', bookmarkName);
+            
+            try {
+                // Need to track which message is being bookmarked
+                if (!this.bookmarkToCreate) {
+                    console.log('❌ No bookmarkToCreate found');
+                    this.showToast('❌ No message selected to bookmark', 'error');
+                    return;
                 }
+                
+                console.log('✅ bookmarkToCreate:', this.bookmarkToCreate);
+                console.log('✅ currentThreadId:', this.currentThreadId);
+                
+                // Create FormData instead of JSON
+                const formData = new FormData();
+                formData.append('message_id', this.bookmarkToCreate.messageId);
+                formData.append('bookmark_name', bookmarkName);
+                if (this.currentThreadId) {
+                    formData.append('thread_id', this.currentThreadId);
+                }
+                
+                console.log('📤 Calling API with FormData...');
+                const response = await this.apiCall('/ai/bookmarks', 'POST', formData);
+                console.log('📥 API response:', response);
+                
+                if (response && response.success) {
+                    this.showToast('✅ Bookmark saved!', 'success');
+                }
+                
+                this.hideModal(document.getElementById('bookmarkModal'));
+                document.getElementById('bookmarkName').value = '';
+                this.bookmarkToCreate = null;
+                
+            } catch (error) {
+                console.error('❌ Error saving bookmark:', error);
+                this.showToast('❌ Failed to save bookmark', 'error');
             }
+        }
     
     copyMessage(messageId) {
         try {
