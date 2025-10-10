@@ -1810,26 +1810,22 @@ class SyntaxPrimeChat {
                 return;
             }
             
-            const response = await this.apiCall('/ai/bookmarks', 'POST', {
-                message_id: this.bookmarkToCreate.messageId,
-                bookmark_name: bookmarkName,
-                thread_id: this.currentThreadId
-            });
-            
-            if (response && response.success) {
-                this.showToast('✅ Bookmark saved!', 'success');
+            const response = await this.apiCall('/ai/bookmarks', 'POST', formData);
+                    
+                    if (response && response.success) {
+                        this.showToast('✅ Bookmark saved!', 'success');
+                    }
+                    
+                    this.hideModal(document.getElementById('bookmarkModal'));
+                    document.getElementById('bookmarkName').value = '';
+                    this.bookmarkToCreate = null;
+                    
+                } catch (error) {
+                    console.error('Error saving bookmark:', error);
+                    this.showToast('❌ Failed to save bookmark', 'error');
+                }
             }
-            
-            this.hideModal(document.getElementById('bookmarkModal'));
-            document.getElementById('bookmarkName').value = '';
-            this.bookmarkToCreate = null;
-            
-        } catch (error) {
-            console.error('Error saving bookmark:', error);
-            this.showToast('❌ Failed to save bookmark', 'error');
-        }
-    }
-
+    
     copyMessage(messageId) {
         try {
             // Find the message element by messageId
