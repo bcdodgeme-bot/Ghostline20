@@ -309,16 +309,54 @@ class PersonalityEngine:
         
         return final_response
     
-    def _apply_realtime_adaptations(self, 
-                                  response: str, 
-                                  personality_id: str,
-                                  conversation_context: List[Dict] = None) -> str:
-        """Apply real-time personality adaptations based on context"""
+    # ADD THIS METHOD TO PersonalityEngine CLASS IN modules/ai/personality_engine.py
+    # Insert this around line 150, after the process_ai_response method
+
+    async def process_personality_response(self,
+                                          raw_response: str,
+                                          personality_id: str,
+                                          user_id: str = None) -> str:
+        """
+        Process AI response through personality filters and enhancements
+        This delegates to the internal learning_integration object
         
-        # For now, just return the response as-is
-        # This could be enhanced with real-time personality tuning
-        return response
-    
+        Args:
+            raw_response: Raw AI response text
+            personality_id: Current personality ID
+            user_id: User ID for pattern fatigue tracking
+            
+        Returns:
+            Processed response with personality filtering applied
+        """
+        
+        if self.learning_integration and hasattr(self.learning_integration, 'process_personality_response'):
+            # Delegate to the actual PersonalityIntegration object
+            try:
+                processed = await self.learning_integration.process_personality_response(
+                    raw_response,
+                    personality_id,
+                    user_id
+                )
+                logger.info(f"✅ Personality post-processing completed for {personality_id}")
+                return processed
+            except Exception as e:
+                logger.error(f"❌ Personality post-processing failed: {e}", exc_info=True)
+                # Return original response if processing fails
+                return raw_response
+        else:
+            logger.warning("⚠️ No learning_integration available for personality processing")
+            return raw_response
+        
+        def _apply_realtime_adaptations(self,
+                                      response: str,
+                                      personality_id: str,
+                                      conversation_context: List[Dict] = None) -> str:
+            """Apply real-time personality adaptations based on context"""
+            
+            # For now, just return the response as-is
+            # This could be enhanced with real-time personality tuning
+            return response
+        
     def record_personality_feedback(self, 
                                   message_id: str,
                                   personality_id: str,
