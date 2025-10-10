@@ -59,8 +59,7 @@ class TomorrowClient:
             'apikey': self.api_key
         }
         
-        session = await self._get_session()
-        
+        async with aiohttp.ClientSession() as session:
         try:
             async with session.get(f"{self.base_url}/weather/realtime",
                                  params=params, timeout=30) as response:
@@ -87,20 +86,18 @@ class TomorrowClient:
             'apikey': self.api_key
         }
         
-        session = await self._get_session()
-        
-        try:
-            async with session.get(f"{self.base_url}/weather/forecast",
-                                 params=params, timeout=30) as response:
-                response.raise_for_status()
-                data = await response.json()
-                
-                # Extract the daily forecast (limit to requested days)
-                timelines = data.get('timelines', {}).get('daily', [])
-                return timelines[:days]
-        except Exception as e:
-            logger.error(f"Tomorrow.io Forecast API error: {e}")
-            raise
+        # Create and close session within this request
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(f"{self.base_url}/weather/forecast",
+                                     params=params, timeout=30) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    timelines = data.get('timelines', {}).get('daily', [])
+                    return timelines[:days]
+            except Exception as e:
+                logger.error(f"Tomorrow.io Forecast API error: {e}")
+                raise
     
     async def close(self):
         """Clean up resources"""
