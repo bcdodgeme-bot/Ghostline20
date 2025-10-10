@@ -282,15 +282,54 @@ async def chat_with_ai(
         
         # 1. 🌦️ Weather command detection (FIRST)
         logger.info("🌦️ DEBUG: Checking for weather commands...")
-        if detect_weather_request(message_content):
-            logger.info("✅ DEBUG: Weather command detected - processing...")
+        is_weather, weather_type = detect_weather_request(message_content)
+
+        if is_weather:
+            logger.info(f"✅ DEBUG: Weather command detected - type: {weather_type}")
             try:
-                weather_data = await get_weather_for_user(user_id)
-                logger.info(f"📊 DEBUG: Weather data received: {weather_data.get('success', False)}")
-                
-                if weather_data.get('success'):
-                    weather_info = weather_data['data']
-                    special_response = f"""🌦️ **Current Weather**
+                if weather_type == 'forecast':
+                    # Handle forecast request
+                    forecast_data = await get_weather_forecast_for_user(user_id)
+                    logger.info(f"📊 DEBUG: Forecast data received: {forecast_data.get('success', False)}")
+                    
+                    if forecast_data.get('success'):
+                        forecast_info = forecast_data['data']
+                        
+                        # Build forecast response
+                        special_response = "🌦️ **5-Day Weather Forecast**\n\n"
+                        special_response += f"📍 **Location:** {forecast_info.get('location', 'Unknown')}\n\n"
+                        
+                        for day in forecast_info['forecast_days']:
+                            special_response += f"📅 **{day['day_name']}**\n"
+                            special_response += f"🌡️ High: {day['temp_high']}°F / Low: {day['temp_low']}°F\n"
+                            special_response += f"☁️ {day['condition']}\n"
+                            special_response += f"💧 Precipitation: {day['precipitation_probability']:.0f}%\n"
+                            special_response += f"💨 Wind: {day['wind_speed']:.1f} mph\n"
+                            special_response += f"☀️ UV Index: {day['uv_index']:.0f}\n\n"
+                        
+                        special_response += "\nForecast data powered by Tomorrow.io"
+                        logger.info("✅ DEBUG: Forecast response generated successfully")
+                    else:
+                        special_response = f"🌦️ **Weather Forecast Error**\n\nUnable to retrieve forecast: {forecast_data.get('error', 'Unknown error')}"
+                        logger.warning(f"⚠️ DEBUG: Forecast service error: {forecast_data.get('error')}")
+                        
+                else:  # weather_type == 'current'
+                    # Handle current weather request (existing code)
+                    weather_data = await get_weather_for_user(user_id)
+                    logger.info(f"📊 DEBUG: Weather data received: {weather_data.get('success', False)}")
+                    
+                    if weather_data.get('success'):
+                        weather_info = weather_data['data']
+                        special_response = f"""🌦️ **Current Weather**
+                if detect_weather_request(message_content):
+                    logger.info("✅ DEBUG: Weather command detected - processing...")
+                    try:
+                        weather_data = await get_weather_for_user(user_id)
+                        logger.info(f"📊 DEBUG: Weather data received: {weather_data.get('success', False)}")
+                        
+                        if weather_data.get('success'):
+                            weather_info = weather_data['data']
+                            special_response = f"""🌦️ **Current Weather**
 
 📍 **Location:** {weather_info.get('location', 'Unknown')}
 🌡️ **Temperature:** {weather_info.get('temperature_f', 'N/A')}°F
@@ -301,13 +340,14 @@ async def chat_with_ai(
 👁️ **Visibility:** {weather_info.get('visibility', 'N/A')} miles
 
 Weather data powered by Tomorrow.io"""
-                    logger.info("✅ DEBUG: Weather response generated successfully")
-                else:
-                    special_response = f"🌦️ **Weather Service Error**\n\nUnable to retrieve weather data: {weather_data.get('error', 'Unknown error')}"
-                    logger.warning(f"⚠️ DEBUG: Weather service error: {weather_data.get('error')}")
-            except Exception as e:
-                logger.error(f"❌ DEBUG: Weather processing failed: {e}")
-                special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
+                  logger.info("✅ DEBUG: Weather response generated successfully")
+            else:
+                special_response = f"🌦️ **Weather Service Error**\n\nUnable to retrieve weather data: {weather_data.get('error', 'Unknown error')}"
+                logger.warning(f"⚠️ DEBUG: Weather service error: {weather_data.get('error')}")
+                
+    except Exception as e:
+        logger.error(f"❌ DEBUG: Weather processing failed: {e}")
+        special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"  
         
         # 2. 🔵 Bluesky command detection (SECOND)
         elif detect_bluesky_command(message_content):

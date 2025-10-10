@@ -107,59 +107,106 @@ def get_current_datetime_context() -> dict:
 
 #-- Section 3: Weather Integration Functions - 9/26/25
 def detect_weather_request(message: str) -> bool:
-    """Detect weather-related requests"""
+    """Detect weather-related requests
+    
+    Returns:
+        tuple: (is_weather_request, request_type)
+        request_type: 'current' or 'forecast'
+    
+    """
     weather_keywords = [
         "weather", "temperature", "forecast", "rain", "snow", "sunny",
         "cloudy", "storm", "wind", "humidity", "barometric pressure",
         "headache weather", "pressure change", "uv index"
     ]
     message_lower = message.lower()
-    return any(keyword in message_lower for keyword in weather_keywords)
+    
+    # Check if it's a weather request
+    is_weather = any(keyword in message_lower for keyword in weather_keywords)
+    
+    if not is_weather:
+        return (False, None)
+    
+    # Determine if it's a forecast request
+    forecast_keywords = ["forecast", "tomorrow", "next", "upcoming", "week", "days"]
+    is_forecast = any(keyword in message_lower for keyword in forecast_keywords)
+    
+    request_type = 'forecast' if is_forecast else 'current'
+    
+    return (True, request_type)
 
-async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
-    """Get current weather data for the user"""
+async def get_weather_forecast_for_user(user_id: str, location: str = None) -> Dict:
+    """Get weather forecast for the user"""
     try:
-        base_url = "https://api.tomorrow.io/v4/weather/realtime"
-        api_key = os.getenv("TOMORROW_IO_API_KEY")
+        from modules.integrations.weather.tomorrow_client import TomorrowClient
         
-        if not api_key:
-            return {"error": "Weather API key not configured"}
-            
-        # Default location if not provided
-        location = location or "22031"  # Default to Cary, NC
+        client = TomorrowClient()
+        location = location or "22031"
         
-        params = {
-            "location": location,
-            "apikey": api_key,
-            "units": "imperial"
+        # Get forecast data
+        forecast_data = await client.get_weather_forecast(location, days=5)
+        
+        if not forecast_data:
+            return {
+                "success": False,
+                "error": "No forecast data available"
+            }
+        
+        # Format forecast data
+        forecast_days = []
+        
+        # Weather code mappings
+        WEATHER_CODES = {
+            1000: "Clear, Sunny", 1100: "Mostly Clear", 1101: "Partly Cloudy",
+            1102: "Mostly Cloudy", 1001: "Cloudy", 2000: "Fog", 4000: "Drizzle",
+            4001: "Rain", 4200: "Light Rain", 4201: "Heavy Rain", 5000: "Snow",
+            5100: "Light Snow", 5101: "Heavy Snow", 8000: "Thunderstorm"
         }
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(base_url, params=params)
+        for day in forecast_data:
+            values = day.get('values', {})
+            timestamp = day.get('time', '')
             
-            if response.status_code == 200:
-                data = response.json()
-                weather_data = data.get('data', {}).get('values', {})
-                
-                return {
-                    "success": True,
-                    "data": {
-                        "location": location,
-                        "temperature_f": weather_data.get('temperature', 'N/A'),
-                        "humidity": weather_data.get('humidity', 'N/A'),
-                        "wind_speed": weather_data.get('windSpeed', 'N/A'),
-                        "weather_code": weather_data.get('weatherCode', 'N/A'),
-                        "pressure": weather_data.get('pressureSeaLevel', 'N/A'),
-                        "uv_index": weather_data.get('uvIndex', 'N/A'),
-                        "visibility": weather_data.get('visibility', 'N/A')
-                    }
-                }
-            else:
-                return {"error": f"Weather API returned status {response.status_code}"}
-                
+            # Parse date
+            from datetime import datetime
+            date_obj = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            day_name = date_obj.strftime('%A, %B %d')
+            
+            # Convert temperatures from Celsius to Fahrenheit
+            temp_min_c = values.get('temperatureMin', 0)
+            temp_max_c = values.get('temperatureMax', 0)
+            temp_min_f = temp_min_c * 9/5 + 32
+            temp_max_f = temp_max_c * 9/5 + 32
+            
+            # Get weather description
+            weather_code = values.get('weatherCodeMax', 1000)
+            condition = WEATHER_CODES.get(weather_code, "Unknown")
+            
+            forecast_days.append({
+                'day_name': day_name,
+                'temp_high': f"{temp_max_f:.1f}",
+                'temp_low': f"{temp_min_f:.1f}",
+                'condition': condition,
+                'precipitation_probability': values.get('precipitationProbabilityAvg', 0),
+                'humidity': values.get('humidityAvg', 0),
+                'wind_speed': values.get('windSpeedAvg', 0),
+                'uv_index': values.get('uvIndexMax', 0)
+            })
+        
+        return {
+            "success": True,
+            "data": {
+                "location": location,
+                "forecast_days": forecast_days
+            }
+        }
+        
     except Exception as e:
-        logger.error(f"Weather API error: {e}")
-        return {"error": str(e)}
+        logger.error(f"Forecast error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 #-- Section 4: Bluesky Integration Functions - 9/26/25
 #-- Section 4: Bluesky Integration Functions updated for posting - 9/30/25
