@@ -918,6 +918,53 @@ async def create_bookmark(
         logger.error(f"Bookmark creation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/bookmarks")
+async def get_bookmarks(
+    limit: int = 50,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Get user's bookmarks"""
+    try:
+        from ..core.database import db_manager
+        
+        query = """
+        SELECT 
+            b.id,
+            b.message_id,
+            b.thread_id,
+            b.bookmark_name,
+            b.notes,
+            b.created_at,
+            cm.content as message_content
+        FROM user_bookmark b
+        LEFT JOIN conversation_messages cm ON b.message_id = cm.id
+        WHERE b.user_id = $1
+        ORDER BY b.created_at DESC
+        LIMIT $2;
+        """
+        
+        bookmarks = await db_manager.fetch_all(query, user_id, limit)
+        
+        return {
+            "bookmarks": [
+                {
+                    "id": b['id'],
+                    "message_id": b['message_id'],
+                    "thread_id": b['thread_id'],
+                    "bookmark_name": b['bookmark_name'],
+                    "notes": b['notes'],
+                    "message_preview": b['message_content'][:100] if b['message_content'] else '',
+                    "created_at": b['created_at'].isoformat() if b['created_at'] else None
+                }
+                for b in bookmarks
+            ],
+            "total": len(bookmarks)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get bookmarks: {e}")
+        return {"bookmarks": [], "total": 0}
+
 @router.get("/conversations")
 async def get_conversations(limit: int = 50):
     """Get conversation threads"""
