@@ -19,18 +19,11 @@ class TomorrowClient:
         self.api_key = os.getenv('TOMORROW_IO_API_KEY')
         self.base_url = "https://api.tomorrow.io/v4"
         self.default_location = os.getenv('DEFAULT_WEATHER_LOCATION', '38.8606,-77.2287')
-        self.session = None
         self._last_request = None
         self._min_interval = 300  # 5 minutes between requests
         
         if not self.api_key:
             logger.warning("TOMORROW_IO_API_KEY not configured")
-    
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session"""
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        return self.session
     
     async def _rate_limit(self):
         """Rate limiting to avoid API abuse"""
@@ -60,15 +53,15 @@ class TomorrowClient:
         }
         
         async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(f"{self.base_url}/weather/realtime",
-                                 params=params, timeout=30) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return data['data']['values']
-        except Exception as e:
-            logger.error(f"Tomorrow.io API error: {e}")
-            raise
+            try:
+                async with session.get(f"{self.base_url}/weather/realtime",
+                                     params=params, timeout=30) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    return data['data']['values']
+            except Exception as e:
+                logger.error(f"Tomorrow.io API error: {e}")
+                raise
     
     async def get_weather_forecast(self, location: str = None, days: int = 5) -> dict:
         """Get weather forecast from Tomorrow.io API"""
@@ -78,15 +71,13 @@ class TomorrowClient:
         location = location or self.default_location
         await self._rate_limit()
         
-        # Request daily forecasts
         params = {
             'location': location,
-            'timesteps': '1d',  # Daily timesteps
+            'timesteps': '1d',
             'units': 'metric',
             'apikey': self.api_key
         }
         
-        # Create and close session within this request
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(f"{self.base_url}/weather/forecast",
@@ -98,8 +89,3 @@ class TomorrowClient:
             except Exception as e:
                 logger.error(f"Tomorrow.io Forecast API error: {e}")
                 raise
-    
-    async def close(self):
-        """Clean up resources"""
-        if self.session and not self.session.closed:
-            await self.session.close()
