@@ -1560,7 +1560,10 @@ class SyntaxPrimeChat {
 
     hideModal(modal) {
         if (modal) {
-            modal.style.display = 'none';
+            modal.classList.remove('active');
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 300);
         }
     }
 
@@ -1617,7 +1620,7 @@ class SyntaxPrimeChat {
 
     async loadConversations() {
         try {
-            const response = await this.apiCall('/ai/conversations?limit=50', 'GET');
+            const response = await this.apiCall('/ai/conversations?limit=300', 'GET');
             
             if (response && response.conversations) {
                 this.renderConversations(response.conversations);
@@ -1788,6 +1791,10 @@ class SyntaxPrimeChat {
         const modal = document.getElementById('bookmarkModal');
         if (modal) {
             modal.style.display = 'flex';
+            // Add active class for animation
+                    setTimeout(() => {
+                        modal.classList.add('active');
+                    }, 10);
             document.getElementById('bookmarkName').focus();
         }
     }
