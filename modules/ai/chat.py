@@ -208,6 +208,48 @@ async def get_weather_forecast_for_user(user_id: str, location: str = None) -> D
             "error": str(e)
         }
 
+async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
+    """Get current weather data for the user"""
+    try:
+        from modules.integrations.weather.tomorrow_client import TomorrowClient
+        
+        client = TomorrowClient()
+        location = location or "22031"
+        
+        # Get current weather data
+        weather_data = await client.get_current_weather(location)
+        
+        if not weather_data:
+            return {
+                "success": False,
+                "error": "No weather data available"
+            }
+        
+        # Convert temperature from Celsius to Fahrenheit
+        temp_c = weather_data.get('temperature', 0)
+        temp_f = temp_c * 9/5 + 32
+        
+        # Format the response
+        return {
+            "success": True,
+            "data": {
+                "location": location,
+                "temperature_f": f"{temp_f:.1f}",
+                "humidity": weather_data.get('humidity', 0),
+                "wind_speed": weather_data.get('windSpeed', 0),
+                "pressure": weather_data.get('pressureSurfaceLevel', 0),
+                "uv_index": weather_data.get('uvIndex', 0),
+                "visibility": weather_data.get('visibility', 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Current weather error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 #-- Section 4: Bluesky Integration Functions - 9/26/25
 #-- Section 4: Bluesky Integration Functions updated for posting - 9/30/25
 import re
