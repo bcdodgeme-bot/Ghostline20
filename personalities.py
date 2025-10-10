@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 
 # Add import for pattern fatigue system
 try:
-    from .pattern_fatigue import get_pattern_fatigue_tracker
+    from modules.ai.pattern_fatigue import get_pattern_fatigue_tracker
     PATTERN_FATIGUE_AVAILABLE = True
 except ImportError:
     PATTERN_FATIGUE_AVAILABLE = False
