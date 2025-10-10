@@ -141,7 +141,16 @@ async def get_weather_forecast_for_user(user_id: str, location: str = None) -> D
         from modules.integrations.weather.tomorrow_client import TomorrowClient
         
         client = TomorrowClient()
-        location = location or "22031"
+        # Use IP-based location detection (reuse prayer times infrastructure)
+        if not location:
+            try:
+                from modules.integrations.prayer_times.location_detector import detect_user_location
+                location_data = await detect_user_location()
+                location = f"{location_data['latitude']},{location_data['longitude']}"
+                logger.info(f"🌍 Weather using IP location: {location_data['city']}, {location_data['region']}")
+            except Exception as e:
+                logger.warning(f"IP location failed, using fallback: {e}")
+                location = "38.8606,-77.2287"  # Fallback to Fairfax, VA
         
         # Get forecast data
         forecast_data = await client.get_weather_forecast(location, days=5)
@@ -214,7 +223,16 @@ async def get_weather_for_user(user_id: str, location: str = None) -> Dict:
         from modules.integrations.weather.tomorrow_client import TomorrowClient
         
         client = TomorrowClient()
-        location = location or "22031"
+        # Use IP-based location detection (reuse prayer times infrastructure)
+        if not location:
+            try:
+                from modules.integrations.prayer_times.location_detector import detect_user_location
+                location_data = await detect_user_location()
+                location = f"{location_data['latitude']},{location_data['longitude']}"
+                logger.info(f"🌍 Weather using IP location: {location_data['city']}, {location_data['region']}")
+            except Exception as e:
+                logger.warning(f"IP location failed, using fallback: {e}")
+                location = "38.8606,-77.2287"  # Fallback to Fairfax, VA
         
         # Get current weather data
         weather_data = await client.get_current_weather(location)
