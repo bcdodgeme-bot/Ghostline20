@@ -56,6 +56,7 @@ class SyntaxPrimeChat {
         this.setupEventListeners();
         this.loadPersonalities();
         this.loadConversations();
+        this.loadBookmarks();
         this.setupDragAndDrop();
         this.autoResizeTextarea();
         this.initializeTrendsSystem();
@@ -1871,6 +1872,50 @@ class SyntaxPrimeChat {
         }
     }
 
+    async loadBookmarks() {
+        try {
+            const response = await this.apiCall('/ai/bookmarks?limit=50', 'GET');
+            
+            if (response && response.bookmarks) {
+                this.renderBookmarks(response.bookmarks);
+            }
+        } catch (error) {
+            console.error('Failed to load bookmarks:', error);
+        }
+    }
+
+    renderBookmarks(bookmarks) {
+        const bookmarksList = document.querySelector('.bookmarks-list');
+        const bookmarkCount = document.getElementById('bookmarkCount');
+        
+        if (!bookmarksList) {
+            console.error('Bookmarks list not found');
+            return;
+        }
+        
+        // Update count
+        if (bookmarkCount) {
+            bookmarkCount.textContent = bookmarks.length;
+        }
+        
+        if (bookmarks.length === 0) {
+            bookmarksList.innerHTML = `
+                <div class="no-bookmarks">
+                    <p>No bookmarks yet</p>
+                    <small>Use "Remember This" to create your first bookmark</small>
+                </div>
+            `;
+            return;
+        }
+        
+        bookmarksList.innerHTML = bookmarks.map(bookmark => `
+            <div class="bookmark-item" onclick="window.syntaxPrimeChat.loadBookmarkedMessage('${bookmark.message_id}')">
+                <div class="bookmark-name">${bookmark.bookmark_name}</div>
+                <div class="bookmark-date">${this.formatDate(bookmark.created_at)}</div>
+            </div>
+        `).join('');
+    }
+    
     async submitFeedback(messageId, feedbackType) {
         try {
             console.log('Feedback submitted:', messageId, feedbackType);
