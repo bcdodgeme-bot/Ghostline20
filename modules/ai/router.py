@@ -697,7 +697,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     logger.info("🎭 DEBUG: Applying personality post-processing...")
                     try:
                         personality_engine = get_personality_engine()
-                        processed_response = personality_engine.process_personality_response(
+                        processed_response = await personality_engine.process_personality_response(
                             final_response,
                             personality_id,
                             user_id
