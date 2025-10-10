@@ -106,7 +106,7 @@ def get_current_datetime_context() -> dict:
     }
 
 #-- Section 3: Weather Integration Functions - 9/26/25
-def detect_weather_request(message: str) -> bool:
+def detect_weather_request(message: str) -> tuple[bool, str]:
     """Detect weather-related requests
     
     Returns:
