@@ -893,7 +893,7 @@ async def create_bookmark(
         bookmark_id = str(uuid.uuid4())
         
         insert_query = """
-        INSERT INTO user_bookmarks 
+        INSERT INTO user_bookmark 
         (id, user_id, message_id, thread_id, bookmark_name, created_at)
         VALUES ($1, $2, $3, $4, $5, NOW())
         RETURNING id;
