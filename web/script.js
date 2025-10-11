@@ -1898,10 +1898,10 @@ class SyntaxPrimeChat {
                 title: docName,
                 content: this.driveDocToCreate.content,
                 chat_thread_id: this.currentThreadId || null
-            }
+            };
             
             console.log('📤 Calling Drive API...');
-            const response = await this.apiCall('/google/drive/document', 'POST', requestData;
+            const response = await this.apiCall('/google/drive/document', 'POST', requestData);
             console.log('📥 Drive API response:', response);
             
             if (response && response.success) {
