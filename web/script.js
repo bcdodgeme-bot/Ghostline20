@@ -1894,15 +1894,14 @@ class SyntaxPrimeChat {
             console.log('✅ driveDocToCreate:', this.driveDocToCreate);
             
             // Use existing backend endpoint format
-            const formData = new FormData();
-            formData.append('title', docName);
-            formData.append('content', this.driveDocToCreate.content);
-            if (this.currentThreadId) {
-                formData.append('chat_thread_id', this.currentThreadId);
-            }
+            const formData = {
+                title: docName,
+                content: this.driveDocToCreate.content,
+                chat_thread_id: this.currentThreadId || null
+            };
             
             console.log('📤 Calling Drive API...');
-            const response = await this.apiCall('/google/drive/document', 'POST', formData);
+            const response = await this.apiCall('/google/drive/document', 'POST', requestData;
             console.log('📥 Drive API response:', response);
             
             if (response && response.success) {
