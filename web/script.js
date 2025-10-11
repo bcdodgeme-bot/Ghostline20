@@ -1812,11 +1812,12 @@ class SyntaxPrimeChat {
         if (modal) {
             modal.style.display = 'flex';
             // Add active class for animation
-                    setTimeout(() => {
-                        modal.classList.add('active');
-                    }, 10);
+            setTimeout(() => {
+                modal.classList.add('active');
+            }, 10);
             document.getElementById('bookmarkName').focus();
         }
+    }
     
         showDriveModal() {
             const modal = document.getElementById('driveModal');
