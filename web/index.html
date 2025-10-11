@@ -190,6 +190,24 @@
         </div>
     </div>
 
+    <!-- 💾 Drive Modal -->
+    <div class="modal" id="driveModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💾 Copy to Google Drive</h3>
+                <button class="modal-close" id="closeDriveModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>What should we name this document?</p>
+                <input type="text" id="driveDocName" placeholder="Enter document name..." maxlength="100">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelDrive">Cancel</button>
+                <button class="btn btn-primary" id="saveDrive">Create Document</button>
+            </div>
+        </div>
+    </div>
+    
     <div class="modal" id="settingsModal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">

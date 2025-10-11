@@ -239,6 +239,16 @@ class SyntaxPrimeChat {
         if (cancelBookmark) cancelBookmark.addEventListener('click', () => this.hideModal(bookmarkModal));
         if (saveBookmark) saveBookmark.addEventListener('click', this.saveBookmark.bind(this));
 
+        // 💾 Drive modal handlers
+        const driveModal = document.getElementById('driveModal');
+        const closeDriveModal = document.getElementById('closeDriveModal');
+        const cancelDrive = document.getElementById('cancelDrive');
+        const saveDrive = document.getElementById('saveDrive');
+
+        if (closeDriveModal) closeDriveModal.addEventListener('click', () => this.hideModal(driveModal));
+        if (cancelDrive) cancelDrive.addEventListener('click', () => this.hideModal(driveModal));
+        if (saveDrive) saveDrive.addEventListener('click', this.saveDriveDoc.bind(this));
+        
         // Settings modal
         const settingsModal = document.getElementById('settingsModal');
         const closeSettingsModal = document.getElementById('closeSettingsModal');
@@ -1358,14 +1368,23 @@ class SyntaxPrimeChat {
             bookmarkBtn.innerHTML = '📌';
             bookmarkBtn.addEventListener('click', () => this.rememberMessage(metadata.messageId));
             
+            // 💾 Drive button
+            const driveBtn = document.createElement('button');
+            driveBtn.className = 'message-action drive-btn';
+            driveBtn.title = 'Copy to Google Drive';
+            driveBtn.innerHTML = '💾';
+            driveBtn.addEventListener('click', () => this.copyToDrive(metadata.messageId, content));
+            
             actionsDiv.appendChild(copyBtn);
             actionsDiv.appendChild(goodBtn);
             actionsDiv.appendChild(badBtn);
             actionsDiv.appendChild(personalityBtn);
             actionsDiv.appendChild(bookmarkBtn);
+            actionsDiv.appendChild(driveBtn);
 
             contentDiv.appendChild(actionsDiv);
         }
+        
 
         // Add metadata for assistant messages
         if (role === 'assistant' && !metadata.error) {
@@ -1798,6 +1817,17 @@ class SyntaxPrimeChat {
                     }, 10);
             document.getElementById('bookmarkName').focus();
         }
+    
+        showDriveModal() {
+            const modal = document.getElementById('driveModal');
+            if (modal) {
+                modal.style.display = 'flex';
+                // Add active class for animation
+                setTimeout(() => {
+                    modal.classList.add('active');
+                }, 10);
+                document.getElementById('driveDocName').focus();
+            }
     }
 
         async saveBookmark() {
@@ -1843,6 +1873,58 @@ class SyntaxPrimeChat {
             }
         }
     
+        async saveDriveDoc() {
+            const docName = document.getElementById('driveDocName').value.trim();
+            if (!docName) {
+                this.showToast('❌ Please enter a document name', 'error');
+                return;
+            }
+            
+            console.log('💾 saveDriveDoc called with name:', docName);
+            
+            try {
+                // Check if we have content to save
+                if (!this.driveDocToCreate) {
+                    console.log('❌ No driveDocToCreate found');
+                    this.showToast('❌ No message selected', 'error');
+                    return;
+                }
+                
+                console.log('✅ driveDocToCreate:', this.driveDocToCreate);
+                
+                // Use existing backend endpoint format
+                const formData = new FormData();
+                formData.append('title', docName);
+                formData.append('content', this.driveDocToCreate.content);
+                if (this.currentThreadId) {
+                    formData.append('chat_thread_id', this.currentThreadId);
+                }
+                
+                console.log('📤 Calling Drive API...');
+                const response = await this.apiCall('/google/drive/document', 'POST', formData);
+                console.log('📥 Drive API response:', response);
+                
+                if (response && response.success) {
+                    this.showToast('✅ Document created!', 'success');
+                    
+                    // Show link to open document
+                    if (response.document && response.document.url) {
+                        setTimeout(() => {
+                            this.showToast(`📄 <a href="${response.document.url}" target="_blank" style="color: white; text-decoration: underline;">Open in Google Docs</a>`, 'info');
+                        }, 1500);
+                    }
+                }
+                
+                this.hideModal(document.getElementById('driveModal'));
+                document.getElementById('driveDocName').value = '';
+                this.driveDocToCreate = null;
+                
+            } catch (error) {
+                console.error('❌ Error creating Drive doc:', error);
+                this.showToast('❌ Failed to create document. Make sure Google Drive is connected.', 'error');
+            }
+        }
+        
     copyMessage(messageId) {
         try {
             // Find the message element by messageId
@@ -1944,6 +2026,17 @@ class SyntaxPrimeChat {
         
         this.showBookmarkModal();
     }
+    
+    copyToDrive(messageId, content) {
+        console.log('💾 Copy to Drive:', messageId);
+        
+        // Store which message we're copying (same pattern as bookmarks)
+        this.driveDocToCreate = {
+            messageId: messageId,
+            content: content
+        };
+        
+        this.showDriveModal();
 }
 
 // ENHANCED: Proper initialization with DOM ready protection - PROTECTED
