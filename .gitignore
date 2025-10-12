@@ -43,3 +43,4 @@ modules/integrations/google_workspace/__pycache__/__init__.cpython-311.pyc
 modules/integrations/google_workspace/__pycache__/oauth_manager.cpython-311.pyc
 modules/core/__pycache__/crypto.cpython-311.pyc
 modules/integrations/google_workspace/__pycache__/router.cpython-311.pyc
+modules/core/auth copy.py

@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
+from fastapi import Cookie
 
 from .database import db_manager
 
@@ -166,7 +167,7 @@ class AuthManager:
         }
 
 # Dependency function for FastAPI
-async def get_current_user(session_token: str = None) -> Optional[Dict[str, Any]]:
+async def get_current_user(session_token: str = Cookie(None)) -> Optional[Dict[str, Any]]:
     """
     FastAPI dependency to get the current authenticated user
     Usage: user = Depends(get_current_user)
