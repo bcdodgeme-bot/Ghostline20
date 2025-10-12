@@ -172,10 +172,18 @@ async def get_current_user(session_token: str = Cookie(None)) -> Optional[Dict[s
     FastAPI dependency to get the current authenticated user
     Usage: user = Depends(get_current_user)
     """
+    logger.info(f"🔍 get_current_user called")
+    logger.info(f"   session_token type: {type(session_token)}")
+    logger.info(f"   session_token value: {session_token}")
+    
     if not session_token:
+        logger.warning("⚠️ No session_token provided")
         return None
     
-    return AuthManager.validate_session(session_token)
+    user = AuthManager.validate_session(session_token)
+    logger.info(f"   validate_session returned: {user is not None}")
+    
+    return user
 
 # Utility functions for the web interface
 def get_user_id_from_session(session_token: str) -> Optional[str]:
