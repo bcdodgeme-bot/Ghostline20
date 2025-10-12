@@ -750,23 +750,7 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
         except Exception as e:
             logger.error(f"❌ DEBUG: Failed to store user message: {e}")
             user_message_id = str(uuid.uuid4())  # Fallback ID
-        
-        # Store AI response
-        logger.info("💾 DEBUG: Storing AI response...")
-        try:
-            ai_message_id = await memory_manager.add_message(
-                thread_id=thread_id,
-                role="assistant",
-                content=final_response,
-                model_used=model_used,
-                response_time_ms=response_time_ms,
-                knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
-            )
-            logger.info(f"✅ DEBUG: AI response stored: {ai_message_id}")
-        except Exception as e:
-            logger.error(f"❌ DEBUG: Failed to store AI response: {e}")
-            ai_message_id = str(uuid.uuid4())  # Fallback ID
-        
+                
         # Store AI response
         logger.info("💾 DEBUG: Storing AI response...")
         try:
