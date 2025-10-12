@@ -65,6 +65,14 @@ from modules.integrations.image_generation.integration_info import get_integrati
 from modules.integrations.google_workspace import router as google_workspace_router
 from modules.integrations.google_workspace import get_integration_info as google_workspace_integration_info, check_module_health as google_workspace_module_health
 
+#-- NEW Section 2j: Telegram Notification System - added 10/12/25
+from modules.integrations.telegram.router import router as telegram_router
+from modules.integrations.telegram.notification_manager import NotificationManager
+from modules.integrations.telegram.bot_client import TelegramBotClient
+from modules.integrations.telegram.kill_switch import KillSwitch
+from modules.integrations.telegram.notification_types.prayer_notifications import PrayerNotificationHandler
+from modules.integrations.telegram.notification_types.reminder_notifications import ReminderNotificationHandler
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -274,6 +282,35 @@ async def startup_event():
     await db_manager.connect()
     print("✅ Database connected")
     
+    # Initialize Telegram notification system - added 10/12/25
+    logger.info("🤖 Initializing Telegram notification system...")
+    try:
+        telegram_bot = TelegramBotClient(os.getenv('TELEGRAM_BOT_TOKEN'))
+        telegram_kill_switch = KillSwitch()
+        telegram_notification_manager = NotificationManager(telegram_bot, telegram_kill_switch)
+        
+        prayer_handler = PrayerNotificationHandler(telegram_notification_manager)
+        reminder_handler = ReminderNotificationHandler(telegram_notification_manager)
+        
+        # Store in app state for access throughout the app
+        app.state.telegram_notification_manager = telegram_notification_manager
+        app.state.telegram_prayer_handler = prayer_handler
+        app.state.telegram_reminder_handler = reminder_handler
+        app.state.telegram_kill_switch = telegram_kill_switch
+        
+        # Verify bot connection
+        bot_info = await telegram_bot.get_me()
+        logger.info(f"✅ Telegram bot connected: @{bot_info.get('username')}")
+        
+        logger.info("✅ Telegram notification system initialized")
+        
+        # Start background notification tasks
+        asyncio.create_task(prayer_notification_task())
+        asyncio.create_task(reminder_notification_task())
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Telegram: {e}")
+    
     # Check Slack-ClickUp integration health
     integration_health = check_module_health()
     if integration_health['healthy']:
@@ -456,6 +493,33 @@ async def startup_event():
     print("\n💡 Don't forget to create a user account with:")
     print("   python standalone_create_user.py")
     print()
+
+#-- Section 10a: Telegram Background Tasks - added 10/12/25
+USER_ID = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+
+async def prayer_notification_task():
+    """Check for prayer notifications every 5 minutes"""
+    logger.info("🕌 Prayer notification task started")
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_prayer_handler.check_and_notify()
+        except Exception as e:
+            logger.error(f"Prayer notification error: {e}")
+            await asyncio.sleep(60)
+
+async def reminder_notification_task():
+    """Check for reminders every 60 seconds"""
+    logger.info("⏰ Reminder notification task started")
+    while True:
+        try:
+            await asyncio.sleep(60)  # 1 minute
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_reminder_handler.check_and_notify()
+        except Exception as e:
+            logger.error(f"Reminder notification error: {e}")
+            await asyncio.sleep(30)
 
 #-- Section 11: API Status and Health Endpoints - updated 9/28/25 with Voice & Image
 @app.get("/health")
@@ -843,6 +907,9 @@ app.include_router(image_generation_router)
 
 # Include Google Workspace integration router - added 9/30/25
 app.include_router(google_workspace_router)
+
+# Include Telegram notification router - added 10/12/25
+app.include_router(telegram_router, prefix="/telegram", tags=["telegram"])
 
 #-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
 # Periodic cleanup of expired sessions (every hour) + Prayer notification service
