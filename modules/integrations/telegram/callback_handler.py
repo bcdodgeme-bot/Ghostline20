@@ -7,19 +7,19 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from .bot_client import get_bot_client
-from .database_manager import get_telegram_db_manager
-from .notification_manager import get_notification_manager
+from .bot_client import TelegramBotClient
+from .database_manager import TelegramDatabaseManager
+from .notification_manager import NotificationManager
 
 logger = logging.getLogger(__name__)
 
 class CallbackHandler:
     """Handles Telegram inline keyboard button callbacks"""
     
-    def __init__(self):
-        self.bot_client = get_bot_client()
-        self.db_manager = get_telegram_db_manager()
-        self.notification_manager = get_notification_manager()
+    def __init__(self, bot_client=None, notification_manager=None):
+        self.bot_client = bot_client
+        self.notification_manager = notification_manager
+        # Note: db_manager will be initialized when needed
     
     async def process_callback(
         self,

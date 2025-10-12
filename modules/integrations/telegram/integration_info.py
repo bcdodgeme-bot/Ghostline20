@@ -120,7 +120,7 @@ async def check_module_health() -> Dict[str, Any]:
     # Check bot client
     try:
         from .bot_client import get_bot_client
-        bot_client = get_bot_client()
+        bot_client = TelegramBotClient(os.getenv('TELEGRAM_BOT_TOKEN'))
         connection_test = await bot_client.test_connection()
         
         health["components"]["bot_client"] = {
