@@ -330,6 +330,9 @@ async def get_posting_timing(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== DRIVE ENDPOINTS ====================
+# Replace the /drive/document endpoint in modules/integrations/google_workspace/router.py
+# Look for: @router.post("/drive/document")
+# Around line 260-280 in the DRIVE ENDPOINTS section
 
 @router.post("/drive/document")
 async def create_document(
@@ -343,6 +346,15 @@ async def create_document(
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required")
         
+        # ENHANCED: Log the incoming request
+        logger.info(f"📥 ROUTER: Received document creation request")
+        logger.info(f"   Title: {request.title}")
+        logger.info(f"   Content length: {len(request.content)} chars")
+        logger.info(f"   User ID: {user['id']}")
+        logger.info(f"   Thread ID: {request.chat_thread_id}")
+        
+        # Call the drive client function
+        logger.info(f"📞 ROUTER: Calling create_google_doc...")
         doc = await create_google_doc(
             user['id'],
             request.title,
@@ -350,14 +362,29 @@ async def create_document(
             request.chat_thread_id
         )
         
+        logger.info(f"✅ ROUTER: Document created successfully: {doc}")
+        
         return {
             "success": True,
             "document": doc
         }
         
     except Exception as e:
-        logger.error(f"Failed to create document: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # ENHANCED: Capture full error details
+        import traceback
+        error_type = type(e).__name__
+        error_message = str(e)
+        error_traceback = traceback.format_exc()
+        
+        logger.error(f"❌ ROUTER ERROR: Failed to create document")
+        logger.error(f"   Exception type: {error_type}")
+        logger.error(f"   Exception message: '{error_message}'")
+        logger.error(f"   Exception repr: {repr(e)}")
+        logger.error(f"   Full traceback:\n{error_traceback}")
+        
+        # Return detailed error to client
+        detail = error_message if error_message else f"{error_type} (no message)"
+        raise HTTPException(status_code=500, detail=detail)
 
 @router.post("/drive/spreadsheet")
 async def create_spreadsheet(
