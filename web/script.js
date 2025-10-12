@@ -1288,6 +1288,7 @@ class SyntaxPrimeChat {
         
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
+        messageDiv.setAttribute('data-raw-markdown', content);
         textDiv.innerHTML = this.formatMessageContent(content);
         
         bubble.appendChild(textDiv);
@@ -1373,7 +1374,7 @@ class SyntaxPrimeChat {
             driveBtn.className = 'message-action drive-btn';
             driveBtn.title = 'Copy to Google Drive';
             driveBtn.innerHTML = '💾';
-            driveBtn.addEventListener('click', () => this.copyToDrive(metadata.messageId, content));
+            driveBtn.addEventListener('click', () => this.copyToDrive(metadata.messageId));
             
             actionsDiv.appendChild(copyBtn);
             actionsDiv.appendChild(goodBtn);
@@ -2029,6 +2030,16 @@ class SyntaxPrimeChat {
     
     copyToDrive(messageId, content) {
         console.log('💾 Copy to Drive:', messageId);
+        
+        // Get the message element and retrieve raw markdown
+            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+            const content = messageElement ? messageElement.getAttribute('data-raw-markdown') : null;
+            
+            if (!content) {
+                this.showToast('❌ Could not find message content', 'error');
+                return;
+            }
+        
         console.log('📝 Content type:', typeof content);
         console.log('📝 Content preview (first 200 chars):', content.substring(0, 200));
         console.log('📝 Content includes italic markers:', content.includes('*'));
