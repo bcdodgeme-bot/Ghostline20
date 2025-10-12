@@ -206,42 +206,54 @@ class DriveClient:
     
     def _markdown_to_docs_requests(self, content: str) -> List[Dict[str, Any]]:
         """
-        Convert markdown to Google Docs API requests with FULL formatting support
-        
-        Supports:
-        - H1-H6 headers (# to ######)
-        - Bold (**text** or __text__)
-        - Italic (*text* or _text_)
-        - Bullet lists (-, *, +)
-        - Numbered lists (1., 2., etc)
-        - Links [text](url)
-        - Code blocks (converted to plain text)
+        Convert markdown to Google Docs API requests - FIXED VERSION
+        Properly strips markdown and applies formatting
         """
         requests = []
         
-        # Parse content into structured elements
-        lines = content.split('\n')
-        current_index = 1
+        # Step 1: Strip markdown and track formatting
+        clean_text, formatting_map = self._strip_markdown_and_track_formatting(content)
         
-        full_text = []
-        format_instructions = []
+        # Step 2: Insert the clean text
+        if clean_text:
+            requests.append({
+                'insertText': {
+                    'location': {'index': 1},
+                    'text': clean_text
+                }
+            })
+        
+        # Step 3: Apply all formatting
+        requests.extend(formatting_map)
+        
+        return requests
+        
+    def _strip_markdown_and_track_formatting(self, content: str) -> tuple:
+        """
+        Strip markdown symbols and track where formatting should be applied
+        Returns: (clean_text, formatting_requests)
+        """
+        formatting_requests = []
+        lines = content.split('\n')
+        clean_lines = []
+        current_pos = 1  # Google Docs starts at index 1
         
         for line in lines:
-            line_start = len(''.join(full_text))
+            line_start = current_pos
             
-            # Check for headers (# to ######)
+            # Handle headers (# to ######)
             header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
             if header_match:
                 level = len(header_match.group(1))
-                text = header_match.group(2) + '\n'
-                full_text.append(text)
+                text = header_match.group(2)
+                clean_lines.append(text)
                 
-                # Add header style
-                format_instructions.append({
+                line_length = len(text) + 1  # +1 for newline
+                formatting_requests.append({
                     'updateParagraphStyle': {
                         'range': {
-                            'startIndex': line_start + 1,
-                            'endIndex': line_start + len(text)
+                            'startIndex': line_start,
+                            'endIndex': line_start + line_length
                         },
                         'paragraphStyle': {
                             'namedStyleType': f'HEADING_{level}'
@@ -249,127 +261,124 @@ class DriveClient:
                         'fields': 'namedStyleType'
                     }
                 })
+                current_pos += line_length
                 continue
             
-            # Check for bullet list
+            # Handle bullet lists (-, *, +)
             bullet_match = re.match(r'^[\-\*\+]\s+(.+)$', line)
             if bullet_match:
-                text = bullet_match.group(1) + '\n'
-                full_text.append(text)
+                text = bullet_match.group(1)
+                clean_lines.append(text)
                 
-                # Add bullet point
-                format_instructions.append({
+                line_length = len(text) + 1
+                formatting_requests.append({
                     'createParagraphBullets': {
                         'range': {
-                            'startIndex': line_start + 1,
-                            'endIndex': line_start + len(text)
+                            'startIndex': line_start,
+                            'endIndex': line_start + line_length
                         },
                         'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
                     }
                 })
+                current_pos += line_length
                 continue
             
-            # Check for numbered list
+            # Handle numbered lists (1., 2., etc)
             number_match = re.match(r'^(\d+)\.\s+(.+)$', line)
             if number_match:
-                text = number_match.group(2) + '\n'
-                full_text.append(text)
+                text = number_match.group(2)
+                clean_lines.append(text)
                 
-                # Add numbered point
-                format_instructions.append({
+                line_length = len(text) + 1
+                formatting_requests.append({
                     'createParagraphBullets': {
                         'range': {
-                            'startIndex': line_start + 1,
-                            'endIndex': line_start + len(text)
+                            'startIndex': line_start,
+                            'endIndex': line_start + line_length
                         },
                         'bulletPreset': 'NUMBERED_DECIMAL_ALPHA_ROMAN'
                     }
                 })
+                current_pos += line_length
                 continue
             
-            # Regular line - add with formatting
-            processed_line = line + '\n'
-            full_text.append(processed_line)
-        
-        # Insert all text first
-        full_content = ''.join(full_text)
-        requests.append({
-            'insertText': {
-                'location': {'index': 1},
-                'text': full_content
-            }
-        })
-        
-        # Add all formatting instructions (headers, lists)
-        requests.extend(format_instructions)
-        
-        # Now add inline formatting (bold, italic, links)
-        inline_requests = self._add_inline_formatting(full_content)
-        requests.extend(inline_requests)
-        
-        return requests
+            # Regular line - strip inline markdown
+            clean_line, inline_formats = self._strip_inline_markdown(line, line_start)
     
-    def _add_inline_formatting(self, text: str) -> List[Dict[str, Any]]:
+    def _strip_inline_markdown(self, text: str, start_pos: int) -> tuple:
         """
-        Add inline formatting (bold, italic, links) to text
+        Strip inline markdown (bold, italic, links) and track formatting
+        Returns: (clean_text, formatting_requests)
         """
-        requests = []
+        formatting_requests = []
+        clean_text = text
+        offset = 0  # Track how much we've removed
         
-        # Find all bold text (**text** or __text__)
-        for match in re.finditer(r'\*\*(.+?)\*\*|__(.+?)__', text):
+        # Handle bold (**text** or __text__)
+        bold_pattern = r'\*\*(.+?)\*\*|__(.+?)__'
+        for match in re.finditer(bold_pattern, text):
             bold_text = match.group(1) or match.group(2)
-            start = match.start()
-            end = match.end()
+            match_start = match.start() - offset
+            match_end = match_start + len(bold_text)
             
-            # Calculate actual position (accounting for markdown symbols)
-            actual_start = start - text[:start].count('**') * 2 - text[:start].count('__') * 2 + 1
-            actual_end = actual_start + len(bold_text)
-            
-            requests.append({
+            formatting_requests.append({
                 'updateTextStyle': {
                     'range': {
-                        'startIndex': actual_start,
-                        'endIndex': actual_end
+                        'startIndex': start_pos + match_start,
+                        'endIndex': start_pos + match_end
                     },
                     'textStyle': {'bold': True},
                     'fields': 'bold'
                 }
             })
+            
+            # Remove the markdown symbols
+            clean_text = clean_text[:match.start() - offset] + bold_text + clean_text[match.end() - offset:]
+            offset += len(match.group(0)) - len(bold_text)
         
-        # Find all italic text (*text* or _text_)
-        for match in re.finditer(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', text):
+        # Update text for italic processing
+        text = clean_text
+        offset = 0
+        
+        # Handle italic (*text* or _text_) - but not ** or __
+        italic_pattern = r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)'
+        for match in re.finditer(italic_pattern, text):
             italic_text = match.group(1) or match.group(2)
-            start = match.start()
-            end = match.end()
+            match_start = match.start() - offset
+            match_end = match_start + len(italic_text)
             
-            actual_start = start - text[:start].count('*') + text[:start].count('**') * 2 - text[:start].count('_') + text[:start].count('__') * 2 + 1
-            actual_end = actual_start + len(italic_text)
-            
-            requests.append({
+            formatting_requests.append({
                 'updateTextStyle': {
                     'range': {
-                        'startIndex': actual_start,
-                        'endIndex': actual_end
+                        'startIndex': start_pos + match_start,
+                        'endIndex': start_pos + match_end
                     },
                     'textStyle': {'italic': True},
                     'fields': 'italic'
                 }
             })
+            
+            # Remove the markdown symbols
+            clean_text = clean_text[:match.start() - offset] + italic_text + clean_text[match.end() - offset:]
+            offset += len(match.group(0)) - len(italic_text)
         
-        # Find all links [text](url)
-        for match in re.finditer(r'\[(.+?)\]\((.+?)\)', text):
+        # Update text for link processing
+        text = clean_text
+        offset = 0
+        
+        # Handle links [text](url)
+        link_pattern = r'\[(.+?)\]\((.+?)\)'
+        for match in re.finditer(link_pattern, text):
             link_text = match.group(1)
             url = match.group(2)
-            start = match.start()
+            match_start = match.start() - offset
+            match_end = match_start + len(link_text)
             
-            actual_start = start + 1  # Simplified for links
-            actual_end = actual_start + len(link_text)
-            
-            requests.append({
+            formatting_requests.append({
                 'updateTextStyle': {
                     'range': {
-                        'startIndex': actual_start,
-                        'endIndex': actual_end
+                        'startIndex': start_pos + match_start,
+                        'endIndex': start_pos + match_end
                     },
                     'textStyle': {
                         'link': {'url': url}
@@ -377,8 +386,9 @@ class DriveClient:
                     'fields': 'link'
                 }
             })
-        
-        return requests
+            
+            # Remove the markdown symbols, keep just the link text
+            clean_text = clean_text[:match.start() - offset] + link_text
     
     async def _store_document_info(self, doc_id: str, title: str, doc_type: str,
                                       url: str, chat_thread_id: Optional[str],
