@@ -314,91 +314,68 @@ class DriveClient:
         
         return ''.join(clean_parts), formatting_requests
        
-    
     def _strip_inline_markdown(self, text: str, start_pos: int) -> tuple:
-        """
-        Strip inline markdown (bold, italic, links) and track formatting
-        Returns: (clean_text, formatting_requests)
-        """
-        formatting_requests = []
-        clean_text = text
-        offset = 0  # Track how much we've removed
+    """
+    Strip inline markdown (bold, italic) and track formatting
+    Returns: (clean_text, formatting_requests)
+    """
+    formatting_requests = []
+    clean_text = ""
+    pos = 0
+    
+    # Process bold first (**text**)
+    bold_pattern = r'\*\*(.+?)\*\*'
+    for match in re.finditer(bold_pattern, text):
+        # Add text before the match
+        clean_text += text[pos:match.start()]
+        bold_text = match.group(1)
         
-        # Handle bold (**text** or __text__)
-        bold_pattern = r'\*\*(.+?)\*\*|__(.+?)__'
-        for match in re.finditer(bold_pattern, text):
-            bold_text = match.group(1) or match.group(2)
-            match_start = match.start() - offset
-            match_end = match_start + len(bold_text)
-            
-            formatting_requests.append({
-                'updateTextStyle': {
-                    'range': {
-                        'startIndex': start_pos + match_start,
-                        'endIndex': start_pos + match_end
-                    },
-                    'textStyle': {'bold': True},
-                    'fields': 'bold'
-                }
-            })
-            
-            # Remove the markdown symbols
-            clean_text = clean_text[:match.start() - offset] + bold_text + clean_text[match.end() - offset:]
-            offset += len(match.group(0)) - len(bold_text)
+        # Add formatting request
+        formatting_requests.append({
+            'updateTextStyle': {
+                'range': {
+                    'startIndex': start_pos + len(clean_text),
+                    'endIndex': start_pos + len(clean_text) + len(bold_text)
+                },
+                'textStyle': {'bold': True},
+                'fields': 'bold'
+            }
+        })
         
-        # Update text for italic processing
-        text = clean_text
-        offset = 0
+        # Add the clean text
+        clean_text += bold_text
+        pos = match.end()
+    
+    # Add remaining text
+    clean_text += text[pos:]
+    
+    # Now process italic (*text*) on the clean text
+    text = clean_text
+    clean_text = ""
+    pos = 0
+    
+    italic_pattern = r'\*(.+?)\*'
+    for match in re.finditer(italic_pattern, text):
+        clean_text += text[pos:match.start()]
+        italic_text = match.group(1)
         
-        # Handle italic (*text* or _text_) - but not ** or __
-        italic_pattern = r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)'
-        for match in re.finditer(italic_pattern, text):
-            italic_text = match.group(1) or match.group(2)
-            match_start = match.start() - offset
-            match_end = match_start + len(italic_text)
-            
-            formatting_requests.append({
-                'updateTextStyle': {
-                    'range': {
-                        'startIndex': start_pos + match_start,
-                        'endIndex': start_pos + match_end
-                    },
-                    'textStyle': {'italic': True},
-                    'fields': 'italic'
-                }
-            })
-            
-            # Remove the markdown symbols
-            clean_text = clean_text[:match.start() - offset] + italic_text + clean_text[match.end() - offset:]
-            offset += len(match.group(0)) - len(italic_text)
+        formatting_requests.append({
+            'updateTextStyle': {
+                'range': {
+                    'startIndex': start_pos + len(clean_text),
+                    'endIndex': start_pos + len(clean_text) + len(italic_text)
+                },
+                'textStyle': {'italic': True},
+                'fields': 'italic'
+            }
+        })
         
-        # Update text for link processing
-        text = clean_text
-        offset = 0
-        
-        # Handle links [text](url)
-        link_pattern = r'\[(.+?)\]\((.+?)\)'
-        for match in re.finditer(link_pattern, text):
-            link_text = match.group(1)
-            url = match.group(2)
-            match_start = match.start() - offset
-            match_end = match_start + len(link_text)
-            
-            formatting_requests.append({
-                'updateTextStyle': {
-                    'range': {
-                        'startIndex': start_pos + match_start,
-                        'endIndex': start_pos + match_end
-                    },
-                    'textStyle': {
-                        'link': {'url': url}
-                    },
-                    'fields': 'link'
-                }
-            })
-            
-            # Remove the markdown symbols, keep just the link text
-            clean_text = clean_text[:match.start() - offset] + link_text
+        clean_text += italic_text
+        pos = match.end()
+    
+    clean_text += text[pos:]
+    
+    return clean_text, formatting_requests
     
     async def _store_document_info(self, doc_id: str, title: str, doc_type: str,
                                       url: str, chat_thread_id: Optional[str],
