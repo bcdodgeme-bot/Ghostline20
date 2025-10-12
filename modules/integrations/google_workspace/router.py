@@ -337,14 +337,17 @@ async def get_posting_timing(
 @router.post("/drive/document")
 async def create_document(
     request: DocumentCreateRequest,
+    user_id: Optional[str] = None,
     user = Depends(get_current_user)
 ):
     """
     Create a Google Doc
     """
     try:
-        if not user:
+        if not user and not user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
+            
+        final_user_id = user_id if user_id else user['id']  # ← ADD THIS LINE
         
         # ENHANCED: Log the incoming request
         logger.info(f"📥 ROUTER: Received document creation request")
@@ -356,7 +359,7 @@ async def create_document(
         # Call the drive client function
         logger.info(f"📞 ROUTER: Calling create_google_doc...")
         doc = await create_google_doc(
-            user['id'],
+            final_user_id,
             request.title,
             request.content,
             request.chat_thread_id
