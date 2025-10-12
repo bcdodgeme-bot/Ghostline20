@@ -2028,7 +2028,7 @@ class SyntaxPrimeChat {
         this.showBookmarkModal();
     }
     
-    copyToDrive(messageId, content) {
+    copyToDrive(messageId) {
         console.log('💾 Copy to Drive:', messageId);
         
         // Get the message element and retrieve raw markdown
