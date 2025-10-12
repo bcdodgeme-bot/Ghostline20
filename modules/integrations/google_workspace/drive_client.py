@@ -51,35 +51,51 @@ class DriveClient:
     async def create_document(self, title: str, content: str,
                             chat_thread_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Create Google Doc with full markdown formatting support
+        Create Google Doc with markdown formatting - WITH DETAILED ERROR LOGGING
         """
         try:
             if not self._user_creds:
                 await self.initialize(self._user_id)
             
             logger.info(f"📄 Creating Doc: {title}")
+            logger.info(f"📝 Content length: {len(content)} chars")
             
             async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
                 docs_v1 = await aiogoogle.discover('docs', 'v1')
                 
-                # FIXED: Create empty document and handle response properly
+                # Step 1: Create empty document
+                logger.info("Step 1: Creating empty document...")
                 doc_response = await aiogoogle.as_user(
-                    docs_v1.documents.create(
-                        json={'title': title}
-                    )
+                    docs_v1.documents.create(json={'title': title})
                 )
                 
-                # FIXED: Check if response is valid
                 if not doc_response or 'documentId' not in doc_response:
                     raise Exception(f"Invalid API response: {doc_response}")
                 
                 doc_id = doc_response['documentId']
+                logger.info(f"✅ Document created: {doc_id}")
                 
-                # Convert markdown to Google Docs requests with full formatting
-                requests = self._markdown_to_docs_requests(content)
+                # Step 2: Convert markdown to requests
+                logger.info("Step 2: Converting markdown...")
+                try:
+                    requests = self._markdown_to_docs_requests(content)
+                    logger.info(f"✅ Generated {len(requests)} format requests")
+                except Exception as markdown_error:
+                    logger.error(f"❌ Markdown conversion failed: {markdown_error}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    # Continue with plain text
+                    requests = [{
+                        'insertText': {
+                            'location': {'index': 1},
+                            'text': content
+                        }
+                    }]
+                    logger.info("⚠️ Falling back to plain text insertion")
                 
+                # Step 3: Apply formatting
                 if requests:
-                    # Apply formatting with proper error handling
+                    logger.info("Step 3: Applying formatting...")
                     try:
                         await aiogoogle.as_user(
                             docs_v1.documents.batchUpdate(
@@ -87,19 +103,22 @@ class DriveClient:
                                 json={'requests': requests}
                             )
                         )
-                        logger.info(f"✅ Applied {len(requests)} formatting requests")
+                        logger.info(f"✅ Applied formatting successfully")
                     except Exception as format_error:
-                        logger.warning(f"⚠️ Formatting error (content still saved): {format_error}")
+                        logger.error(f"❌ Format apply failed: {format_error}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                 
                 doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
                 
-                # FIXED: Store in database with proper await
+                # Step 4: Store in database
+                logger.info("Step 4: Storing in database...")
                 await self._store_document_info(
                     doc_id, title, 'document', doc_url,
                     chat_thread_id, len(content)
                 )
                 
-                logger.info(f"✅ Created Doc: {title}")
+                logger.info(f"✅ Successfully created Doc: {title}")
                 
                 return {
                     'id': doc_id,
@@ -110,6 +129,8 @@ class DriveClient:
                 
         except Exception as e:
             logger.error(f"❌ Failed to create document: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             raise
     
     async def create_spreadsheet(self, title: str, data: List[List[Any]],
