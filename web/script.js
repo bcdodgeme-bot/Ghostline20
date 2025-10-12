@@ -2029,6 +2029,10 @@ class SyntaxPrimeChat {
     
     copyToDrive(messageId, content) {
         console.log('💾 Copy to Drive:', messageId);
+        console.log('📝 Content type:', typeof content);
+        console.log('📝 Content preview (first 200 chars):', content.substring(0, 200));
+        console.log('📝 Content includes italic markers:', content.includes('*'));
+        console.log('📝 Content includes bold markers:', content.includes('**'));
         
         // Store which message we're copying (same pattern as bookmarks)
         this.driveDocToCreate = {
