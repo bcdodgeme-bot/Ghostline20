@@ -103,20 +103,28 @@ class AuthManager:
     @staticmethod
     def validate_session(session_token: str) -> Optional[Dict[str, Any]]:
         """Validate a session token and return user info if valid"""
+        logger.info(f"🔍 validate_session called with token: {session_token}")
+        logger.info(f"   Total sessions in memory: {len(AuthManager._sessions)}")
+        logger.info(f"   Session tokens in memory: {list(AuthManager._sessions.keys())}")
+        
         if not session_token or session_token not in AuthManager._sessions:
+            logger.warning(f"⚠️ Session token not found in memory")
             return None
         
         session = AuthManager._sessions[session_token]
-        
+        logger.info(f"   Session found! Created: {session['created_at']}, Expires: {session['expires_at']}")
+    
         # Check if session has expired
-        if datetime.now() > session['expires_at']:
-            logger.info(f"Session expired: {session_token}")
+        now = datetime.now()
+        if now > session['expires_at']:
+            logger.warning(f"⚠️ Session expired (now: {now}, expires: {session['expires_at']})")
             AuthManager.destroy_session(session_token)
             return None
         
         # Update last activity
         session['last_activity'] = datetime.now()
-        
+        logger.info(f"✅ Session valid, returning user: {session['user']['email']}")
+    
         return session['user']
     
     @staticmethod
