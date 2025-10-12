@@ -230,80 +230,71 @@ class DriveClient:
         
     def _strip_markdown_and_track_formatting(self, content: str) -> tuple:
         """
-        Strip markdown symbols and track where formatting should be applied
-        Returns: (clean_text, formatting_requests)
+        Strip markdown and track formatting - SIMPLIFIED VERSION
         """
-        formatting_requests = []
         lines = content.split('\n')
-        result_parts = []  # Build text as we go
+        clean_parts = []
+        formatting_requests = []
         
         for line in lines:
-            line_start = len(''.join(result_parts)) + 1  # +1 for Google Docs 1-based indexing
+            current_pos = len(''.join(clean_parts)) + 1  # +1 for Google Docs indexing
             
-            # Handle headers (# to ######)
-            header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
-            if header_match:
-                level = len(header_match.group(1))
-                text = header_match.group(2) + '\n'
-                result_parts.append(text)
-                
-                formatting_requests.append({
-                    'updateParagraphStyle': {
-                        'range': {
-                            'startIndex': line_start,
-                            'endIndex': line_start + len(text)
-                        },
-                        'paragraphStyle': {
-                            'namedStyleType': f'HEADING_{level}'
-                        },
-                        'fields': 'namedStyleType'
-                    }
-                })
-                continue
+            # Headers
+            if line.startswith('#'):
+                header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+                if header_match:
+                    level = len(header_match.group(1))
+                    clean_text = header_match.group(2) + '\n'
+                    clean_parts.append(clean_text)
+                    
+                    formatting_requests.append({
+                        'updateParagraphStyle': {
+                            'range': {'startIndex': current_pos, 'endIndex': current_pos + len(clean_text)},
+                            'paragraphStyle': {'namedStyleType': f'HEADING_{level}'},
+                            'fields': 'namedStyleType'
+                        }
+                    })
+                    continue
             
-            # Handle bullet lists (-, *, +)
-            bullet_match = re.match(r'^[\-\*\+]\s+(.+)$', line)
-            if bullet_match:
-                text = bullet_match.group(1) + '\n'
-                result_parts.append(text)
+            # Bullet lists
+            if re.match(r'^[\-\*\+]\s', line):
+                clean_text = line[2:] + '\n'  # Remove "- " or "* "
+                clean_parts.append(clean_text)
                 
                 formatting_requests.append({
                     'createParagraphBullets': {
-                        'range': {
-                            'startIndex': line_start,
-                            'endIndex': line_start + len(text)
-                        },
+                        'range': {'startIndex': current_pos, 'endIndex': current_pos + len(clean_text)},
                         'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
                     }
                 })
                 continue
             
-            # Handle numbered lists (1., 2., etc)
-            number_match = re.match(r'^(\d+)\.\s+(.+)$', line)
-            if number_match:
-                text = number_match.group(2) + '\n'
-                result_parts.append(text)
+            # Numbered lists
+            num_match = re.match(r'^(\d+)\.\s+(.+)$', line)
+            if num_match:
+                clean_text = num_match.group(2) + '\n'
+                clean_parts.append(clean_text)
                 
                 formatting_requests.append({
                     'createParagraphBullets': {
-                        'range': {
-                            'startIndex': line_start,
-                            'endIndex': line_start + len(text)
-                        },
+                        'range': {'startIndex': current_pos, 'endIndex': current_pos + len(clean_text)},
                         'bulletPreset': 'NUMBERED_DECIMAL_ALPHA_ROMAN'
                     }
                 })
                 continue
             
-            # Regular line - strip inline markdown and add newline
-            clean_line, inline_formats = self._strip_inline_markdown(line, line_start)
-            result_parts.append(clean_line + '\n')
-            formatting_requests.extend(inline_formats)
+            # Regular lines - just strip bold/italic for now (keep it simple)
+            clean_text = line
+            clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', clean_text)  # Remove **bold**
+            clean_text = re.sub(r'__(.+?)__', r'\1', clean_text)      # Remove __bold__
+            clean_text = re.sub(r'\*(.+?)\*', r'\1', clean_text)      # Remove *italic*
+            clean_text = re.sub(r'_(.+?)_', r'\1', clean_text)        # Remove _italic_
+            clean_text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', clean_text)  # Remove [links](url)
+            clean_text += '\n'
+            clean_parts.append(clean_text)
         
-        # Join all parts (they already have newlines)
-        clean_text = ''.join(result_parts)
-        
-        return clean_text, formatting_requests
+        return ''.join(clean_parts), formatting_requests
+       
     
     def _strip_inline_markdown(self, text: str, start_pos: int) -> tuple:
         """
