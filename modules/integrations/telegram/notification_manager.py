@@ -7,9 +7,9 @@ import logging
 from typing import Dict, Optional, Any
 from datetime import datetime, time as dt_time
 
-from .bot_client import get_bot_client
-from .database_manager import get_telegram_db_manager
-from .kill_switch import get_kill_switch
+from .bot_client import TelegramBotClient
+from .database_manager import TelegramDatabaseManager
+from .kill_switch import KillSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,9 @@ RATE_LIMITS = {
 class NotificationManager:
     """Central manager for all Telegram notifications"""
     
-    def __init__(self):
-        self.bot_client = get_bot_client()
-        self.db_manager = get_telegram_db_manager()
-        self.kill_switch = get_kill_switch()
+    def __init__(self, bot_client=None, kill_switch=None):
+        self.bot_client = bot_client
+        self.kill_switch = kill_switch
     
     async def send_notification(
         self,
