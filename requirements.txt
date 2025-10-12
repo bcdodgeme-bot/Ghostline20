@@ -87,3 +87,5 @@ python-docx>=0.8.11
 
 # Excel file processing
 openpyxl>=3.1.0
+
+dateparser
