@@ -9,19 +9,18 @@ import dateparser
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-from ..database_manager import get_telegram_db_manager
-from ..notification_manager import get_notification_manager
-from ..message_formatter import get_message_formatter
+from ..database_manager import TelegramDatabaseManager
+from ..notification_manager import NotificationManager
+from ..message_formatter import MessageFormatter
 
 logger = logging.getLogger(__name__)
 
 class ReminderNotificationHandler:
     """Handles custom user reminders with natural language parsing"""
     
-    def __init__(self):
-        self.db_manager = get_telegram_db_manager()
-        self.notification_manager = get_notification_manager()
-        self.message_formatter = get_message_formatter()
+    def __init__(self, notification_manager):
+        self.notification_manager = notification_manager
+        self.message_formatter = MessageFormatter()
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
     
     async def create_reminder_from_text(
