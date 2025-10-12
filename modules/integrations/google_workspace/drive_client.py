@@ -305,14 +305,12 @@ class DriveClient:
                 continue
             
             # Regular lines - just strip bold/italic for now (keep it simple)
-            clean_text = line
-            clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', clean_text)  # Remove **bold**
-            clean_text = re.sub(r'__(.+?)__', r'\1', clean_text)      # Remove __bold__
-            clean_text = re.sub(r'\*(.+?)\*', r'\1', clean_text)      # Remove *italic*
-            clean_text = re.sub(r'_(.+?)_', r'\1', clean_text)        # Remove _italic_
-            clean_text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', clean_text)  # Remove [links](url)
-            clean_text += '\n'
-            clean_parts.append(clean_text)
+            # Regular lines - process inline markdown (bold, italic, links)
+            line_start_pos = current_pos
+            clean_line, inline_formatting = self._strip_inline_markdown(line, line_start_pos)
+            clean_line += '\n'
+            clean_parts.append(clean_line)
+            formatting_requests.extend(inline_formatting)
         
         return ''.join(clean_parts), formatting_requests
        
