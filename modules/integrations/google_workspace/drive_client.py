@@ -235,25 +235,23 @@ class DriveClient:
         """
         formatting_requests = []
         lines = content.split('\n')
-        clean_lines = []
-        current_pos = 1  # Google Docs starts at index 1
+        result_parts = []  # Build text as we go
         
         for line in lines:
-            line_start = current_pos
+            line_start = len(''.join(result_parts)) + 1  # +1 for Google Docs 1-based indexing
             
             # Handle headers (# to ######)
             header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
             if header_match:
                 level = len(header_match.group(1))
-                text = header_match.group(2)
-                clean_lines.append(text)
+                text = header_match.group(2) + '\n'
+                result_parts.append(text)
                 
-                line_length = len(text) + 1  # +1 for newline
                 formatting_requests.append({
                     'updateParagraphStyle': {
                         'range': {
                             'startIndex': line_start,
-                            'endIndex': line_start + line_length
+                            'endIndex': line_start + len(text)
                         },
                         'paragraphStyle': {
                             'namedStyleType': f'HEADING_{level}'
@@ -261,49 +259,51 @@ class DriveClient:
                         'fields': 'namedStyleType'
                     }
                 })
-                current_pos += line_length
                 continue
             
             # Handle bullet lists (-, *, +)
             bullet_match = re.match(r'^[\-\*\+]\s+(.+)$', line)
             if bullet_match:
-                text = bullet_match.group(1)
-                clean_lines.append(text)
+                text = bullet_match.group(1) + '\n'
+                result_parts.append(text)
                 
-                line_length = len(text) + 1
                 formatting_requests.append({
                     'createParagraphBullets': {
                         'range': {
                             'startIndex': line_start,
-                            'endIndex': line_start + line_length
+                            'endIndex': line_start + len(text)
                         },
                         'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
                     }
                 })
-                current_pos += line_length
                 continue
             
             # Handle numbered lists (1., 2., etc)
             number_match = re.match(r'^(\d+)\.\s+(.+)$', line)
             if number_match:
-                text = number_match.group(2)
-                clean_lines.append(text)
+                text = number_match.group(2) + '\n'
+                result_parts.append(text)
                 
-                line_length = len(text) + 1
                 formatting_requests.append({
                     'createParagraphBullets': {
                         'range': {
                             'startIndex': line_start,
-                            'endIndex': line_start + line_length
+                            'endIndex': line_start + len(text)
                         },
                         'bulletPreset': 'NUMBERED_DECIMAL_ALPHA_ROMAN'
                     }
                 })
-                current_pos += line_length
                 continue
             
-            # Regular line - strip inline markdown
+            # Regular line - strip inline markdown and add newline
             clean_line, inline_formats = self._strip_inline_markdown(line, line_start)
+            result_parts.append(clean_line + '\n')
+            formatting_requests.extend(inline_formats)
+        
+        # Join all parts (they already have newlines)
+        clean_text = ''.join(result_parts)
+        
+        return clean_text, formatting_requests
     
     def _strip_inline_markdown(self, text: str, start_pos: int) -> tuple:
         """
