@@ -249,19 +249,6 @@ async def chat_with_ai(
             logger.error(f"❌ DEBUG: Thread management failed: {e}")
             raise
         
-        # Store user message
-        logger.info("💾 DEBUG: Storing user message...")
-        try:
-            user_message_id = await memory_manager.add_message(
-                thread_id=thread_id,
-                role="user",
-                content=message
-            )
-            logger.info(f"✅ DEBUG: User message stored: {user_message_id}")
-        except Exception as e:
-            logger.error(f"❌ DEBUG: Failed to store user message: {e}")
-            raise
-        
         # Build message content
         message_content = message
         logger.info(f"🔍 DEBUG: Processing message content: '{message_content[:100]}...'")
@@ -750,6 +737,35 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
         # Calculate response time
         response_time_ms = int((time.time() - start_time) * 1000)
         logger.info(f"⏱️ DEBUG: Total processing time: {response_time_ms}ms")
+        
+        # Store user message AFTER getting AI response (prevents duplication in history)
+        logger.info("💾 DEBUG: Storing user message (delayed to prevent echo)...")
+        try:
+            user_message_id = await memory_manager.add_message(
+                thread_id=thread_id,
+                role="user",
+                content=message
+            )
+            logger.info(f"✅ DEBUG: User message stored: {user_message_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to store user message: {e}")
+            user_message_id = str(uuid.uuid4())  # Fallback ID
+        
+        # Store AI response
+        logger.info("💾 DEBUG: Storing AI response...")
+        try:
+            ai_message_id = await memory_manager.add_message(
+                thread_id=thread_id,
+                role="assistant",
+                content=final_response,
+                model_used=model_used,
+                response_time_ms=response_time_ms,
+                knowledge_sources_used=[source.get('id', '') for source in knowledge_sources]
+            )
+            logger.info(f"✅ DEBUG: AI response stored: {ai_message_id}")
+        except Exception as e:
+            logger.error(f"❌ DEBUG: Failed to store AI response: {e}")
+            ai_message_id = str(uuid.uuid4())  # Fallback ID
         
         # Store AI response
         logger.info("💾 DEBUG: Storing AI response...")
