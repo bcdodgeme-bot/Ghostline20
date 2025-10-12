@@ -315,67 +315,67 @@ class DriveClient:
         return ''.join(clean_parts), formatting_requests
        
     def _strip_inline_markdown(self, text: str, start_pos: int) -> tuple:
-    """
-    Strip inline markdown (bold, italic) and track formatting
-    Returns: (clean_text, formatting_requests)
-    """
-    formatting_requests = []
-    clean_text = ""
-    pos = 0
-    
-    # Process bold first (**text**)
-    bold_pattern = r'\*\*(.+?)\*\*'
-    for match in re.finditer(bold_pattern, text):
-        # Add text before the match
-        clean_text += text[pos:match.start()]
-        bold_text = match.group(1)
+        """
+        Strip inline markdown (bold, italic) and track formatting
+        Returns: (clean_text, formatting_requests)
+        """
+        formatting_requests = []
+        clean_text = ""
+        pos = 0
         
-        # Add formatting request
-        formatting_requests.append({
-            'updateTextStyle': {
-                'range': {
-                    'startIndex': start_pos + len(clean_text),
-                    'endIndex': start_pos + len(clean_text) + len(bold_text)
-                },
-                'textStyle': {'bold': True},
-                'fields': 'bold'
-            }
-        })
+        # Process bold first (**text**)
+        bold_pattern = r'\*\*(.+?)\*\*'
+        for match in re.finditer(bold_pattern, text):
+            # Add text before the match
+            clean_text += text[pos:match.start()]
+            bold_text = match.group(1)
+            
+            # Add formatting request
+            formatting_requests.append({
+                'updateTextStyle': {
+                    'range': {
+                        'startIndex': start_pos + len(clean_text),
+                        'endIndex': start_pos + len(clean_text) + len(bold_text)
+                    },
+                    'textStyle': {'bold': True},
+                    'fields': 'bold'
+                }
+            })
+            
+            # Add the clean text
+            clean_text += bold_text
+            pos = match.end()
         
-        # Add the clean text
-        clean_text += bold_text
-        pos = match.end()
-    
-    # Add remaining text
-    clean_text += text[pos:]
-    
-    # Now process italic (*text*) on the clean text
-    text = clean_text
-    clean_text = ""
-    pos = 0
-    
-    italic_pattern = r'\*(.+?)\*'
-    for match in re.finditer(italic_pattern, text):
-        clean_text += text[pos:match.start()]
-        italic_text = match.group(1)
+        # Add remaining text
+        clean_text += text[pos:]
         
-        formatting_requests.append({
-            'updateTextStyle': {
-                'range': {
-                    'startIndex': start_pos + len(clean_text),
-                    'endIndex': start_pos + len(clean_text) + len(italic_text)
-                },
-                'textStyle': {'italic': True},
-                'fields': 'italic'
-            }
-        })
+        # Now process italic (*text*) on the clean text
+        text = clean_text
+        clean_text = ""
+        pos = 0
         
-        clean_text += italic_text
-        pos = match.end()
-    
-    clean_text += text[pos:]
-    
-    return clean_text, formatting_requests
+        italic_pattern = r'\*(.+?)\*'
+        for match in re.finditer(italic_pattern, text):
+            clean_text += text[pos:match.start()]
+            italic_text = match.group(1)
+            
+            formatting_requests.append({
+                'updateTextStyle': {
+                    'range': {
+                        'startIndex': start_pos + len(clean_text),
+                        'endIndex': start_pos + len(clean_text) + len(italic_text)
+                    },
+                    'textStyle': {'italic': True},
+                    'fields': 'italic'
+                }
+            })
+            
+            clean_text += italic_text
+            pos = match.end()
+        
+        clean_text += text[pos:]
+        
+        return clean_text, formatting_requests
     
     async def _store_document_info(self, doc_id: str, title: str, doc_type: str,
                                       url: str, chat_thread_id: Optional[str],
