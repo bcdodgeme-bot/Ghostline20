@@ -21,8 +21,16 @@ class ReminderNotificationHandler:
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
         self.db = db_manager
-        self.db_manager = TelegramDatabaseManager() 
+        self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+
+    @property
+    def db_manager(self):
+        """Lazy-load TelegramDatabaseManager"""
+        if self._db_manager is None:
+            from ..database_manager import TelegramDatabaseManager
+            self._db_manager = TelegramDatabaseManager()
+        return self._db_manager
     
     async def create_reminder_from_text(
         self,
