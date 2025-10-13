@@ -12,7 +12,6 @@ from typing import Dict, Optional
 from ....core.database import db_manager
 from ..database_manager import TelegramDatabaseManager
 from ..notification_manager import NotificationManager
-from ..message_formatter import MessageFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ class ReminderNotificationHandler:
     
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
-        self.message_formatter = MessageFormatter()
+        self.db = db_manager
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
     
     async def create_reminder_from_text(

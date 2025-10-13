@@ -26,7 +26,6 @@ class AnalyticsNotificationHandler:
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
         self.db = db_manager
-        self.message_formatter = MessageFormatter()
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
     
     async def check_and_notify(self) -> bool:
