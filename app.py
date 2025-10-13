@@ -512,16 +512,12 @@ async def prayer_notification_task():
             await asyncio.sleep(60)
 
 async def reminder_notification_task():
-    """Check for reminders every 60 seconds"""
+    """Monitor reminders continuously"""
     logger.info("⏰ Reminder notification task started")
-    while True:
-        try:
-            await asyncio.sleep(60)  # 1 minute
-            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
-                await app.state.telegram_reminder_handler.check_and_notify()
-        except Exception as e:
-            logger.error(f"Reminder notification error: {e}")
-            await asyncio.sleep(30)
+    try:
+        await app.state.telegram_reminder_handler.monitor_reminders()
+    except Exception as e:
+        logger.error(f"Reminder monitor error: {e}")
 
 #-- Section 11: API Status and Health Endpoints - updated 9/28/25 with Voice & Image
 @app.get("/health")
