@@ -9,6 +9,7 @@ import dateparser
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
+from ....core.database import db_manager
 from ..database_manager import TelegramDatabaseManager
 from ..notification_manager import NotificationManager
 from ..message_formatter import MessageFormatter

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
+from ....core.database import db_manager
 
 logger = logging.getLogger(__name__)
 

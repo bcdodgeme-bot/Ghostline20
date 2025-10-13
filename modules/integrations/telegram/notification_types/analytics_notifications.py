@@ -8,6 +8,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
+from ....core.database import db_manager
+
 logger = logging.getLogger(__name__)
 
 class AnalyticsNotificationHandler:
