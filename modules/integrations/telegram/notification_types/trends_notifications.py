@@ -25,8 +25,17 @@ class TrendsNotificationHandler:
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
         self.db = db_manager
-        self.db_manager = TelegramDatabaseManager() 
+        self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+
+# 2. ADD THIS PROPERTY RIGHT AFTER __init__:
+    @property
+    def db_manager(self):
+        """Lazy-load TelegramDatabaseManager"""
+        if self._db_manager is None:
+            from ..database_manager import TelegramDatabaseManager
+            self._db_manager = TelegramDatabaseManager()
+        return self._db_manager
     
     async def check_and_notify(self) -> bool:
         """
