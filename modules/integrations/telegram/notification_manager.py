@@ -8,7 +8,6 @@ from typing import Dict, Optional, Any
 from datetime import datetime, time as dt_time
 
 from .bot_client import TelegramBotClient
-from .database_manager import TelegramDatabaseManager
 from .kill_switch import KillSwitch
 
 logger = logging.getLogger(__name__)
