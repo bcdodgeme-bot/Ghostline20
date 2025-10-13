@@ -32,6 +32,7 @@ class NotificationManager:
     def __init__(self, bot_client=None, kill_switch=None):
         self.bot_client = bot_client
         self.kill_switch = kill_switch
+        self.db_manager = TelegramDatabaseManager()
     
     async def send_notification(
         self,
