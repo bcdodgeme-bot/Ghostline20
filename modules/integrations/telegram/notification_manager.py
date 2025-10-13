@@ -32,7 +32,15 @@ class NotificationManager:
     def __init__(self, bot_client=None, kill_switch=None):
         self.bot_client = bot_client
         self.kill_switch = kill_switch
-        self.db_manager = TelegramDatabaseManager()
+        self._db_manager = None  # ← Lazy initialization
+
+    @property
+    def db_manager(self):
+        """Lazy-load TelegramDatabaseManager"""
+        if self._db_manager is None:
+            from .database_manager import TelegramDatabaseManager
+            self._db_manager = TelegramDatabaseManager()
+        return self._db_manager
     
     async def send_notification(
         self,
