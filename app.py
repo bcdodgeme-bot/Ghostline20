@@ -22,6 +22,8 @@ from datetime import datetime
 
 import time  # Add this with your other imports
 
+import asyncio
+
 from modules.core.health import get_health_status
 from modules.core.database import db_manager
 
