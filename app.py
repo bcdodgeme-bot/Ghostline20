@@ -311,8 +311,10 @@ async def startup_event():
         asyncio.create_task(reminder_notification_task())
         
     except Exception as e:
+        import traceback
         logger.error(f"❌ Failed to initialize Telegram: {e}")
-    
+        logger.error(traceback.format_exc())
+        
     # Check Slack-ClickUp integration health
     integration_health = check_module_health()
     if integration_health['healthy']:
