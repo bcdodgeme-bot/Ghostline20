@@ -280,5 +280,14 @@ def get_notification_manager() -> NotificationManager:
     """Get the global notification manager instance"""
     global _notification_manager
     if _notification_manager is None:
-        _notification_manager = NotificationManager()
+        from .bot_client import get_bot_client
+        from .kill_switch import KillSwitch
+        
+        bot_client = get_bot_client()
+        kill_switch = KillSwitch()
+        
+        _notification_manager = NotificationManager(
+            bot_client=bot_client,
+            kill_switch=kill_switch
+        )
     return _notification_manager
