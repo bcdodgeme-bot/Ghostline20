@@ -45,7 +45,7 @@ class KnowledgeQueryEngine:
                              conversation_context: List[Dict] = None,
                              personality_id: str = 'syntaxprime',
                              limit: int = 10,
-                             min_relevance: float = 0.1) -> List[Dict]:
+                             min_relevance: float = 0.01) -> List[Dict]:
         """
         Search knowledge base with context awareness
         
@@ -74,7 +74,30 @@ class KnowledgeQueryEngine:
         enhanced_query = self._build_enhanced_query(query, context_keywords)
         
         # Perform the search
-        search_results = await self._execute_knowledge_search(enhanced_query, limit * 2)  # Get more for filtering
+        # PHASE 1: Try full-text search
+        logger.info(f"📊 Phase 1: Full-text search for '{query}'")
+        search_results = await self._execute_knowledge_search(enhanced_query, limit * 3)
+        logger.info(f"📊 Full-text search returned {len(search_results)} results")
+
+        # PHASE 2: If full-text returns nothing or low-quality results, use pattern matching
+        needs_fallback = False
+        if not search_results:
+            needs_fallback = True
+            logger.info(f"⚠️  Full-text search returned 0 results - using pattern matching fallback")
+        elif len(search_results) < 3:
+            needs_fallback = True
+            logger.info(f"⚠️  Full-text search returned only {len(search_results)} results - augmenting with pattern matching")
+
+        if needs_fallback:
+            logger.info(f"🔄 Phase 2: Pattern matching search for '{query}'")
+            pattern_results = await self._pattern_match_search(query, limit * 2)
+            logger.info(f"📊 Pattern matching found {len(pattern_results)} additional results")
+            
+            # Merge results, avoiding duplicates
+            existing_ids = {r['id'] for r in search_results}
+            for result in pattern_results:
+                if result['id'] not in existing_ids:
+                    search_results.append(result)
         
         # Score and rank results
         scored_results = await self._score_and_rank_results(
@@ -133,6 +156,84 @@ class KnowledgeQueryEngine:
         
         # Return top keywords
         return [word for word, count in keyword_counts.most_common(10)]
+    
+    async def _pattern_match_search(self, query: str, limit: int) -> List[Dict]:
+        """
+        Fallback pattern matching search using ILIKE
+        Used when full-text search fails or returns poor results
+        """
+        
+        pattern_query = """
+        SELECT 
+            ke.id,
+            ke.title,
+            ke.content,
+            ke.content_type,
+            ke.word_count,
+            ke.access_count,
+            ke.relevance_score,
+            ke.key_topics,
+            ke.project_id,
+            ke.summary,
+            ke.created_at,
+            kp.name as project_name,
+            kp.category as project_category,
+            ks.name as source_name,
+            ks.source_type,
+            -- Rank by position of term in content
+            CASE 
+                WHEN ke.title ILIKE $1 THEN 1.0
+                WHEN POSITION(LOWER($2) IN LOWER(ke.content)) < 500 THEN 0.8
+                WHEN POSITION(LOWER($2) IN LOWER(ke.content)) < 2000 THEN 0.6
+                WHEN POSITION(LOWER($2) IN LOWER(ke.content)) < 5000 THEN 0.4
+                ELSE 0.3
+            END as search_rank,
+            -- Context snippet
+            SUBSTRING(
+                ke.content,
+                GREATEST(1, POSITION(LOWER($2) IN LOWER(ke.content)) - 100),
+                300
+            ) as snippet
+        FROM knowledge_entries ke
+        LEFT JOIN knowledge_projects kp ON ke.project_id = kp.id
+        LEFT JOIN knowledge_sources ks ON ke.source_id = ks.id
+        WHERE (ke.content ILIKE $1 OR ke.title ILIKE $1)
+        AND ke.processed = true
+        ORDER BY search_rank DESC, ke.access_count DESC, ke.relevance_score DESC
+        LIMIT $3;
+        """
+        
+        try:
+            search_pattern = f'%{query}%'
+            results = await db_manager.fetch_all(pattern_query, search_pattern, query, limit)
+            
+            # Convert to standard format
+            formatted_results = []
+            for row in results:
+                formatted_results.append({
+                    'id': row['id'],
+                    'title': row['title'],
+                    'content': row['content'],
+                    'content_type': row['content_type'],
+                    'word_count': row['word_count'],
+                    'access_count': row['access_count'],
+                    'relevance_score': float(row['relevance_score']) if row['relevance_score'] else 5.0,
+                    'key_topics': row['key_topics'] or [],
+                    'project_id': row['project_id'],
+                    'project_name': row['project_name'],
+                    'project_category': row['project_category'],
+                    'source_name': row['source_name'],
+                    'source_type': row['source_type'],
+                    'search_rank': float(row['search_rank']),
+                    'snippet': row['snippet'],
+                    'created_at': row['created_at']
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Pattern match search failed: {e}")
+            return []
     
     def _build_enhanced_query(self, original_query: str, context_keywords: List[str]) -> str:
         """Build an enhanced search query with context"""
