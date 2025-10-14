@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Dict, Optional, Any
 from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
 
 from .bot_client import TelegramBotClient
 from .kill_switch import KillSwitch
@@ -182,7 +183,7 @@ class NotificationManager:
         Emergency weather notifications bypass quiet hours
         """
         # Emergency weather always allowed
-        if notification_type == 'weather':
+        if notification_type in ['weather', 'prayer']:
             return False
         
         prefs = await self.db_manager.get_user_preferences(user_id)
@@ -195,7 +196,8 @@ class NotificationManager:
         if not quiet_start or not quiet_end:
             return False
         
-        now = datetime.now().time()
+        eastern = ZoneInfo('America/New_York')
+        now = datetime.now(eastern).time()
         
         # Handle overnight quiet hours (e.g., 23:00 to 07:00)
         if quiet_start > quiet_end:
