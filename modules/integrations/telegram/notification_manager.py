@@ -70,7 +70,8 @@ class NotificationManager:
         """
         
         # SAFETY CHECK 1: Kill switch
-        if not await self.kill_switch.can_send_notification(user_id, notification_type):
+        # SAFETY CHECK 1: Kill switch
+        if not await self.kill_switch.is_enabled(user_id):
             logger.info(f"Notification blocked by kill switch: {notification_type}")
             return {
                 "success": False,
