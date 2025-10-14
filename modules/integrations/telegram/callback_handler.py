@@ -21,6 +21,13 @@ class CallbackHandler:
         self.notification_manager = notification_manager
         # Note: db_manager will be initialized when needed
     
+    @property
+    def db_manager(self):
+        """Lazy-load database manager"""
+        if not hasattr(self, '_db_manager'):
+            self._db_manager = TelegramDatabaseManager()
+        return self._db_manager
+    
     async def process_callback(
         self,
         callback_query_id: str,
@@ -513,5 +520,20 @@ def get_callback_handler() -> CallbackHandler:
     """Get the global callback handler instance"""
     global _callback_handler
     if _callback_handler is None:
-        _callback_handler = CallbackHandler()
+        import os
+        from .bot_client import TelegramBotClient
+        from .notification_manager import get_notification_manager
+        
+        # Get bot token from environment
+        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
+        
+        bot_client = TelegramBotClient(bot_token)
+        notification_manager = get_notification_manager()
+        
+        _callback_handler = CallbackHandler(
+            bot_client=bot_client,
+            notification_manager=notification_manager
+        )
     return _callback_handler
