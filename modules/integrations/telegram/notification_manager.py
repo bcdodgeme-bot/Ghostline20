@@ -134,44 +134,44 @@ class NotificationManager:
                 
                 # Send via Telegram
                 result = await self.bot_client.send_message(
-                    chat_id=chat_id,  # ← CRITICAL: Added chat_id parameter
+                    chat_id=chat_id,
                     text=message_text,
                     reply_markup=reply_markup
                 )
+                
+                if result.get('message_id'):
+                    # Log to database
+                    notification_id = await self.db_manager.log_notification(
+                        user_id=user_id,
+                        notification_type=notification_type,
+                        notification_subtype=notification_subtype,
+                        message_data=message_data or {},
+                        telegram_message_id=result.get('message_id')
+                    )
+                    
+                    logger.info(
+                        f"✅ Notification sent: {notification_type}/{notification_subtype} "
+                        f"(ID: {notification_id}, Telegram: {result.get('message_id')})"
+                    )
+                    
+                    return {
+                        "success": True,
+                        "notification_id": notification_id,
+                        "telegram_message_id": result.get('message_id')
+                    }
+                else:
+                    logger.error(f"Failed to send notification: No message_id returned")
+                    return {
+                        "success": False,
+                        "error": "No message_id returned"
+                    }
             
-            if result.get('message_id')
-                # Log to database
-                notification_id = await self.db_manager.log_notification(
-                    user_id=user_id,
-                    notification_type=notification_type,
-                    notification_subtype=notification_subtype,
-                    message_data=message_data or {},
-                    telegram_message_id=result.get('message_id')
-                )
-                
-                logger.info(
-                    f"Notification sent: {notification_type}/{notification_subtype} "
-                    f"(ID: {notification_id})"
-                )
-                
-                return {
-                    "success": True,
-                    "notification_id": notification_id,
-                    "telegram_message_id": result.get('message_id')
-                }
-            else:
-                logger.error(f"Failed to send notification: {result.get('error')}")
+            except Exception as e:
+                logger.error(f"Exception sending notification: {e}", exc_info=True)
                 return {
                     "success": False,
-                    "error": result.get('error')
+                    "error": str(e)
                 }
-        
-        except Exception as e:
-            logger.error(f"Exception sending notification: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
     
     async def _is_quiet_hours(
         self,
