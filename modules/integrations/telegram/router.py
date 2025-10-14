@@ -7,9 +7,9 @@ import logging
 from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
 
-from .callback_handler import CallbackHandler
-from .kill_switch import KillSwitch
-from .notification_manager import NotificationManager
+from .callback_handler import get_callback_handler
+from .kill_switch import get_kill_switch
+from .notification_manager import get_notification_manager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def telegram_webhook(request: Request):
         # Handle callback queries (button clicks)
         if 'callback_query' in data:
             callback_query = data['callback_query']
-            #callback_handler = get_callback_handler()
+            callback_handler = get_callback_handler()
             
             result = await callback_handler.process_callback(
                 callback_query_id=callback_query['id'],
@@ -76,7 +76,7 @@ async def process_telegram_command(command: str) -> str:
     command_lower = command.lower().strip()
     user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Your user ID
     
-    #kill_switch = get_kill_switch()
+    kill_switch = get_kill_switch()
     
     # Global kill switch
     if 'kill' in command_lower or 'stop all' in command_lower:
@@ -92,7 +92,7 @@ async def process_telegram_command(command: str) -> str:
     # Disable specific type
     elif 'disable' in command_lower:
         # Extract type from command
-        types = ['prayer', 'weather', 'reminders', 'calendar', 'email', 
+        types = ['prayer', 'weather', 'reminders', 'calendar', 'email',
                 'clickup', 'bluesky', 'trends', 'analytics']
         
         for notif_type in types:
@@ -117,7 +117,7 @@ async def process_telegram_command(command: str) -> str:
     # Status check
     elif 'status' in command_lower:
         status = await kill_switch.get_status(user_id)
-        #notification_manager = get_notification_manager()
+        notification_manager = get_notification_manager()
         rate_limits = await notification_manager.get_rate_limit_status(user_id)
         
         # Build status message
