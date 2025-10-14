@@ -28,6 +28,21 @@ class TelegramBotClient:
         
         logger.info("Telegram Bot Client initialized")
     
+    def create_inline_keyboard(self, buttons: List[List[Dict[str, str]]]) -> Dict:
+        """
+        Create inline keyboard markup
+        
+        Args:
+            buttons: 2D array of button dicts with 'text' and 'callback_data'
+            Example: [[{"text": "✅ Done", "callback_data": "action:done"}]]
+        
+        Returns:
+            Inline keyboard markup dict for Telegram API
+        """
+        return {
+            "inline_keyboard": buttons
+        }
+    
     async def get_me(self) -> Dict[str, Any]:
         """
         Get bot information (useful for testing connection)
