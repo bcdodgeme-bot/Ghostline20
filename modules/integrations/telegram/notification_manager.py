@@ -280,10 +280,16 @@ def get_notification_manager() -> NotificationManager:
     """Get the global notification manager instance"""
     global _notification_manager
     if _notification_manager is None:
-        from .bot_client import get_bot_client
+        import os
+        from .bot_client import TelegramBotClient
         from .kill_switch import KillSwitch
         
-        bot_client = get_bot_client()
+        # Get bot token from environment
+        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
+        
+        bot_client = TelegramBotClient(bot_token)
         kill_switch = KillSwitch()
         
         _notification_manager = NotificationManager(
