@@ -27,9 +27,9 @@ async def telegram_webhook(request: Request):
         
         # Handle callback queries (button clicks)
         if 'callback_query' in data:
-            from .callback_handler import CallbackHandler
+            from .callback_handler import get_callback_handler
             callback_query = data['callback_query']
-            callback_handler = CallbackHandler()
+            callback_handler = get_callback_handler()  # Use the getter function!
             
             result = await callback_handler.process_callback(
                 callback_query_id=callback_query['id'],
