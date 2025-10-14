@@ -9,6 +9,7 @@ from datetime import datetime, time, timedelta
 from typing import Optional, Dict, Any
 
 from ....core.database import db_manager
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,6 @@ class PrayerNotificationHandler:
         self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
         
-    @property
-    def db_manager(self):
-        """Lazy-load TelegramDatabaseManager"""
-        if self._db_manager is None:
-            from ..database_manager import TelegramDatabaseManager
-            self._db_manager = TelegramDatabaseManager()
-        return self._db_manager
-        
         # Prayer names for display
         self.prayer_names = {
             'fajr': 'Fajr',
@@ -42,6 +35,16 @@ class PrayerNotificationHandler:
             'maghrib': 'Maghrib',
             'isha': 'Isha'
         }
+        
+    @property
+    def db_manager(self):
+        """Lazy-load TelegramDatabaseManager"""
+        if self._db_manager is None:
+            from ..database_manager import TelegramDatabaseManager
+            self._db_manager = TelegramDatabaseManager()
+        return self._db_manager
+        
+        
     
     async def check_and_notify(self) -> bool:
         """
@@ -59,7 +62,9 @@ class PrayerNotificationHandler:
                 return False
             
             # Check each prayer
-            now = datetime.now()
+            from zoneinfo import ZoneInfo
+            eastern = ZoneInfo('America/New_York')
+            now = datetime.now(eastern)
             current_time = now.time()
             
             for prayer_name, prayer_time in prayer_times.items():
