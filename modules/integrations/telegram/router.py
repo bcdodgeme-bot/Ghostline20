@@ -7,10 +7,6 @@ import logging
 from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
 
-from .callback_handler import get_callback_handler
-from .kill_switch import get_kill_switch
-from .notification_manager import get_notification_manager
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
@@ -31,8 +27,9 @@ async def telegram_webhook(request: Request):
         
         # Handle callback queries (button clicks)
         if 'callback_query' in data:
+            from .callback_handler import CallbackHandler
             callback_query = data['callback_query']
-            callback_handler = get_callback_handler()
+            callback_handler = CallbackHandler()
             
             result = await callback_handler.process_callback(
                 callback_query_id=callback_query['id'],
@@ -73,46 +70,23 @@ async def process_telegram_command(command: str) -> str:
         - telegram enable [type]
         - telegram status
     """
+    from .kill_switch import KillSwitch
+    from .notification_manager import get_notification_manager
+    
     command_lower = command.lower().strip()
     user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Your user ID
     
-    kill_switch = get_kill_switch()
+    kill_switch = KillSwitch()
     
     # Global kill switch
     if 'kill' in command_lower or 'stop all' in command_lower:
-        await kill_switch.activate_global_kill(user_id, "User command via Telegram")
+        await kill_switch.disable(user_id, "User command via Telegram")
         return "🛑 All notifications stopped. Use 'telegram resume' to re-enable."
     
     # Resume notifications
-    elif 'resume' in command_lower or 'enable' in command_lower:
-        if 'disable' not in command_lower:  # Avoid confusion with "enable [type]"
-            await kill_switch.deactivate_global_kill(user_id)
-            return "✅ Notifications resumed."
-    
-    # Disable specific type
-    elif 'disable' in command_lower:
-        # Extract type from command
-        types = ['prayer', 'weather', 'reminders', 'calendar', 'email',
-                'clickup', 'bluesky', 'trends', 'analytics']
-        
-        for notif_type in types:
-            if notif_type in command_lower:
-                await kill_switch.kill_notification_type(user_id, notif_type)
-                return f"✅ {notif_type.title()} notifications disabled."
-        
-        return "❓ Specify notification type to disable (prayer, weather, reminders, etc.)"
-    
-    # Enable specific type
-    elif 'enable' in command_lower:
-        types = ['prayer', 'weather', 'reminders', 'calendar', 'email',
-                'clickup', 'bluesky', 'trends', 'analytics']
-        
-        for notif_type in types:
-            if notif_type in command_lower:
-                await kill_switch.revive_notification_type(user_id, notif_type)
-                return f"✅ {notif_type.title()} notifications enabled."
-        
-        return "❓ Specify notification type to enable (prayer, weather, reminders, etc.)"
+    elif 'resume' in command_lower or ('enable' in command_lower and 'disable' not in command_lower):
+        await kill_switch.enable(user_id)
+        return "✅ Notifications resumed."
     
     # Status check
     elif 'status' in command_lower:
@@ -121,19 +95,12 @@ async def process_telegram_command(command: str) -> str:
         rate_limits = await notification_manager.get_rate_limit_status(user_id)
         
         # Build status message
-        if status['global_kill_active']:
+        if not status['enabled']:
             msg = "🛑 **All notifications STOPPED**\n\n"
-            msg += f"Reason: {status.get('activated_reason', 'Manual stop')}\n"
+            msg += f"Reason: {status.get('reason', 'Manual stop')}\n"
             msg += "Use 'telegram resume' to re-enable."
         else:
             msg = "✅ **Notifications Active**\n\n"
-            
-            if status['killed_types']:
-                msg += "**Disabled Types:**\n"
-                for t in status['killed_types']:
-                    msg += f"  • {t.title()}\n"
-                msg += "\n"
-            
             msg += "**Rate Limits (24h):**\n"
             for notif_type, limits in rate_limits.items():
                 if limits['count'] > 0:
@@ -141,7 +108,7 @@ async def process_telegram_command(command: str) -> str:
         
         return msg
     
-    return "❓ Unknown command. Try: kill, resume, disable [type], enable [type], status"
+    return "❓ Unknown command. Try: kill, resume, status"
 
 # ============================================================================
 # MANUAL NOTIFICATION ENDPOINTS (For Testing)
@@ -151,6 +118,8 @@ async def process_telegram_command(command: str) -> str:
 async def send_test_notification():
     """Send a test notification to verify system is working"""
     try:
+        from .notification_manager import get_notification_manager
+        
         notification_manager = get_notification_manager()
         
         result = await notification_manager.send_notification(
@@ -210,9 +179,12 @@ async def health_check():
 async def get_notification_status():
     """Get current notification system status"""
     try:
+        from .kill_switch import KillSwitch
+        from .notification_manager import get_notification_manager
+        
         user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
         
-        kill_switch = get_kill_switch()
+        kill_switch = KillSwitch()
         notification_manager = get_notification_manager()
         
         status = await kill_switch.get_status(user_id)

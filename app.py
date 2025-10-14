@@ -909,7 +909,7 @@ app.include_router(image_generation_router)
 app.include_router(google_workspace_router)
 
 # Include Telegram notification router - added 10/12/25
-app.include_router(telegram_router, prefix="/telegram", tags=["telegram"])
+app.include_router(telegram_router, prefix="/integrations", tags=["telegram"])
 
 #-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
 # Periodic cleanup of expired sessions (every hour) + Prayer notification service
