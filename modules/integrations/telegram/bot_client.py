@@ -195,7 +195,41 @@ class TelegramBotClient:
         except Exception as e:
             logger.error(f"Error editing message: {e}")
             return False
-    
+            
+    async def edit_message(
+        self,
+        message_id: int,
+        text: str,
+        reply_markup: Optional[Dict] = None
+    ) -> bool:
+        """
+        Convenience wrapper for edit_message_text
+        Automatically uses TELEGRAM_CHAT_ID from environment
+        
+        Args:
+            message_id: Message ID to edit
+            text: New message text
+            reply_markup: Optional new inline keyboard
+        
+        Returns:
+            True if successful
+        """
+        import os
+        
+        # Get chat_id from environment
+        chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        if not chat_id:
+            logger.error("TELEGRAM_CHAT_ID not set in environment")
+            return False
+        
+        # Call the full edit_message_text method
+        return await self.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup
+        )
+        
     async def delete_message(self, chat_id: str, message_id: int) -> bool:
         """
         Delete a message
