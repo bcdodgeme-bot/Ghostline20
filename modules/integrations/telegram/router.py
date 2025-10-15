@@ -4,6 +4,7 @@ Handles incoming webhooks from Telegram for button callbacks and commands
 """
 
 import logging
+import uuid
 from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
 
