@@ -3,6 +3,7 @@ Telegram Callback Handler - Button Click Processing
 Processes inline keyboard button clicks and updates notification state
 """
 
+import os
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -20,6 +21,18 @@ class CallbackHandler:
         self.bot_client = bot_client
         self.notification_manager = notification_manager
         # Note: db_manager will be initialized when needed
+    
+    async def edit_message(self, message_id: int, text: str, reply_markup=None):
+        """Helper to edit message - wraps bot_client.edit_message_text"""
+        # Get chat_id from the notification manager's default
+        chat_id = self.notification_manager._default_chat_id or os.getenv('TELEGRAM_CHAT_ID')
+        
+        return await self.bot_client.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup
+        )
     
     @property
     def db_manager(self):

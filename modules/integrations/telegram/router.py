@@ -128,7 +128,7 @@ async def send_test_notification():
             notification_subtype="test",
             message_text="🧪 **Test Notification**\n\nTelegram notification system is working!",
             buttons=[[
-                {"text": "✅ Got it", "callback_data": "reminder:done:test"}
+                {"text": "✅ Got it", "callback_data": f"reminder:done:{uuid.uuid4()}"}
             ]],
             message_data={"test": True}
         )
