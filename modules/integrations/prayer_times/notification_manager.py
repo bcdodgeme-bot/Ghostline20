@@ -30,7 +30,7 @@ class PrayerNotificationManager:
         self.user_preferences = {
             'enabled': True,
             'advance_minutes': 15,
-            'personality_enabled': True,
+            'personality_enabled': False,
             'prayers_to_notify': ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
         }
     
