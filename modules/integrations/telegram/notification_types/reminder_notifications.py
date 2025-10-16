@@ -5,6 +5,7 @@ Natural language parsing and scheduled reminder delivery
 
 import logging
 import asyncio
+import pytz
 import dateparser
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -157,18 +158,25 @@ class ReminderNotificationHandler:
         logger.info(f"🔍 Reminder text: '{reminder_text}'")
         logger.info(f"🔍 Time phrase: '{time_phrase}'")
         
-        # Parse the time phrase with better settings
+        # Parse the time phrase with proper timezone handling
+        import pytz
+        eastern = pytz.timezone('America/New_York')
+        now_eastern = datetime.now(eastern)
+        
         parsed_time = dateparser.parse(
             time_phrase,
             settings={
                 'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.now(),
+                'RELATIVE_BASE': now_eastern,
                 'TIMEZONE': 'America/New_York',
-                'RETURN_AS_TIMEZONE_AWARE': True,
-                'TO_TIMEZONE': 'America/New_York'
+                'RETURN_AS_TIMEZONE_AWARE': True
             }
         )
         
+        # Ensure the result is in UTC for database storage
+        if parsed_time and parsed_time.tzinfo is not None:
+            parsed_time = parsed_time.astimezone(pytz.UTC)
+
         logger.info(f"🔍 Parsed time result: {parsed_time}")
         
         return {
