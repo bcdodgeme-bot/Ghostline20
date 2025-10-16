@@ -237,7 +237,9 @@ def get_reminder_notification_handler() -> ReminderNotificationHandler:
     """Get the global reminder notification handler"""
     global _reminder_handler
     if _reminder_handler is None:
-        _reminder_handler = ReminderNotificationHandler()
+        from ..notification_manager import get_notification_manager
+        notification_manager = get_notification_manager()
+        _reminder_handler = ReminderNotificationHandler(notification_manager)
     return _reminder_handler
 
 async def start_reminder_notifications():
