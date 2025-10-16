@@ -20,7 +20,7 @@ class ReminderNotificationHandler:
     """Handles custom user reminders with natural language parsing"""
     
     def __init__(self, notification_manager):
-        sself.notification_manager = notification_manager
+        self.notification_manager = notification_manager
         self.db = db_manager
         self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
