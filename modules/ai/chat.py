@@ -3678,7 +3678,7 @@ async def process_reminder_create(message: str, user_id: str) -> str:
                 local_time = scheduled_time
             
             # Format time nicely
-            time_str = scheduled_time.strftime('%A, %B %d at %I:%M %p')
+            time_str = local_time.strftime('%A, %B %d at %I:%M %p')
             reminder_id = result['reminder_id']
             
             return f"""⏰ **Reminder Created Successfully!**
