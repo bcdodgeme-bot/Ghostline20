@@ -113,6 +113,9 @@ class ReminderNotificationHandler:
         elif text_lower.startswith('remind me '):
             text = text[10:]
         
+        # UPDATE THE LOWERCASE VERSION TOO!
+        text_lower = text.lower()
+        
         logger.info(f"🔍 After prefix removal: '{text}'")
         
         # Try to find time-related keywords
