@@ -105,11 +105,15 @@ class ReminderNotificationHandler:
         # Common patterns
         text_lower = text.lower()
         
+        logger.info(f"🔍 Parsing reminder: '{text}'")
+        
         # Remove "remind me to" prefix if present
         if text_lower.startswith('remind me to '):
             text = text[13:]
         elif text_lower.startswith('remind me '):
             text = text[10:]
+        
+        logger.info(f"🔍 After prefix removal: '{text}'")
         
         # Try to find time-related keywords
         time_keywords = [
@@ -126,9 +130,13 @@ class ReminderNotificationHandler:
                 if time_start_idx == -1 or idx < time_start_idx:
                     time_start_idx = idx
         
+        logger.info(f"🔍 Time keyword index: {time_start_idx}")
+        
         if time_start_idx == -1:
             # No time keyword found, try parsing the whole thing
+            logger.info(f"🔍 No time keyword, parsing entire text")
             parsed_time = dateparser.parse(text)
+            logger.info(f"🔍 Parsed result: {parsed_time}")
             if parsed_time:
                 return {
                     "reminder_text": text,
@@ -143,7 +151,10 @@ class ReminderNotificationHandler:
         reminder_text = text[:time_start_idx].strip()
         time_phrase = text[time_start_idx:].strip()
         
-        # Parse the time phrase
+        logger.info(f"🔍 Reminder text: '{reminder_text}'")
+        logger.info(f"🔍 Time phrase: '{time_phrase}'")
+        
+        # Parse the time phrase with better settings
         parsed_time = dateparser.parse(
             time_phrase,
             settings={
@@ -154,6 +165,8 @@ class ReminderNotificationHandler:
                 'TO_TIMEZONE': 'America/New_York'
             }
         )
+        
+        logger.info(f"🔍 Parsed time result: {parsed_time}")
         
         return {
             "reminder_text": reminder_text or text,
