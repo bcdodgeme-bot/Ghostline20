@@ -176,10 +176,12 @@ class BlueskyNotificationHandler:
         
         # Send via notification manager
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='bluesky',
-            message=message,
-            metadata=metadata,
-            reply_markup=buttons
+            notification_subtype='approval_request',
+            message_text=message,
+            buttons=buttons,  # Note: convert the reply_markup format to simple list
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent Bluesky notification: {count} opportunities")
@@ -232,9 +234,11 @@ class BlueskyNotificationHandler:
                 message += f"\n_You have {pending} opportunity{'ies' if pending != 1 else 'y'} awaiting review._"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='bluesky',
-                message=message,
-                metadata={'summary_type': 'daily'}
+                notification_subtype='daily_summary',
+                message_text=message,
+                message_data={'summary_type': 'daily'}
             )
             
             logger.info("✅ Sent Bluesky daily summary")
@@ -261,9 +265,11 @@ class BlueskyNotificationHandler:
             message += f"Engagement ID: {approval_id}"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='bluesky',
-                message=message,
-                metadata={
+                notification_subtype='engagement_success',
+                message_text=message,
+                message_data={
                     'approval_id': approval_id,
                     'engagement_type': engagement_type,
                     'notification_type': 'success'

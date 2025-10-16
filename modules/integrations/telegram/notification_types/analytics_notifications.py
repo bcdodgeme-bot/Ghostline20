@@ -125,9 +125,11 @@ class AnalyticsNotificationHandler:
             message += f"\n💪 Have a productive day!"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='analytics',
-                message=message,
-                metadata={'summary_type': 'morning'}
+                notification_subtype='morning_summary',
+                message_text=message,
+                message_data={'summary_type': 'morning'}
             )
             
             logger.info("✅ Sent morning analytics summary")
@@ -181,9 +183,12 @@ class AnalyticsNotificationHandler:
             message += f"\n🌟 Great work today!"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='analytics',
-                message=message,
-                metadata={'summary_type': 'evening'}
+                notification_subtype='evening_summary',
+                message_text=message,
+                message_data={'summary_type': 'evening'}
+
             )
             
             logger.info("✅ Sent evening analytics summary")
@@ -232,9 +237,12 @@ class AnalyticsNotificationHandler:
             message += f"\n✨ Keep up the great work!"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='analytics',
-                message=message,
-                metadata={'summary_type': 'weekly'}
+                notification_subtype='weekly_summary',
+                message_text=message,
+                message_data={'summary_type': 'weekly'}
+
             )
             
             logger.info("✅ Sent weekly analytics summary")

@@ -142,9 +142,11 @@ class ClickUpNotificationHandler:
         }
         
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='clickup',
-            message=message,
-            metadata=metadata
+            notification_subtype='overdue',
+            message_text=message,
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent ClickUp overdue notification: {count} tasks")
@@ -182,9 +184,11 @@ class ClickUpNotificationHandler:
         }
         
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='clickup',
-            message=message,
-            metadata=metadata
+            notification_subtype='due_soon',
+            message_text=message,
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent ClickUp due soon notification: {count} tasks")
@@ -213,9 +217,11 @@ class ClickUpNotificationHandler:
         }
         
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='clickup',
-            message=message,
-            metadata=metadata
+            notification_subtype='urgent_priority',
+            message_text=message,
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent ClickUp priority notification: {count} tasks")
@@ -267,9 +273,11 @@ class ClickUpNotificationHandler:
                 message += "\n🎯 On track - keep going!"
             
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='clickup',
-                message=message,
-                metadata={'summary_type': 'daily'}
+                notification_subtype='daily_summary',
+                message_text=message,
+                message_data={'summary_type': 'daily'}
             )
             
             logger.info("✅ Sent ClickUp daily summary")

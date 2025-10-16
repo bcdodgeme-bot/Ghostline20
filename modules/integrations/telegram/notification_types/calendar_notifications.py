@@ -206,10 +206,12 @@ class CalendarNotificationHandler:
         
         # Send via notification manager
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='calendar',
-            message=message,
-            metadata=metadata,
-            reply_markup=buttons
+            notification_subtype='event_reminder',
+            message_text=message,
+            buttons=buttons,  # Note: simplified buttons format, not reply_markup
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent calendar reminder: {summary} in {minutes_until} min")
@@ -252,9 +254,11 @@ class CalendarNotificationHandler:
             
             # Send summary
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='calendar',
-                message=message,
-                metadata={'agenda_type': 'daily_summary'}
+                notification_subtype='daily_summary',
+                message_text=message,
+                message_data={'agenda_type': 'daily_summary'}
             )
             
             logger.info("✅ Sent daily agenda summary")

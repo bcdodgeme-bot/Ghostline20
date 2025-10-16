@@ -167,9 +167,14 @@ class PrayerNotificationHandler:
         
         # Send via notification manager
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='prayer',
-            message=message,
-            metadata=metadata
+            notification_subtype='initial',
+            message_text=message,
+            buttons=[[
+                {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
+            ]],
+            message_data=metadat
         )
         
         logger.info(f"✅ Sent {display_name} prayer notification for {formatted_time}")
@@ -196,9 +201,14 @@ class PrayerNotificationHandler:
             
             # Send schedule
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='prayer',
-                message=message,
-                metadata={'schedule_type': 'daily'}
+                notification_subtype='initial',
+                message_text=message,
+                buttons=[[
+                    {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
+                ]],
+                message_data=metadat
             )
             
             logger.info("✅ Sent daily prayer schedule")

@@ -179,9 +179,11 @@ class WeatherNotificationHandler:
         
         # Send via notification manager
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='weather',
-            message=message,
-            metadata=metadata
+            notification_subtype='daily_update',
+            message_text=message,
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent weather notification: {location} - {temp}°F, {condition}")

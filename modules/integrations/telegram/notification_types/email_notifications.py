@@ -163,10 +163,12 @@ class EmailNotificationHandler:
         
         # Send via notification manager
         await self.notification_manager.send_notification(
+            user_id=self.user_id,
             notification_type='email',
-            message=message,
-            metadata=metadata,
-            reply_markup=buttons
+            notification_subtype='important_email',
+            message_text=message,
+            buttons=buttons,  # Note: convert reply_markup to simple list format
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent email notification: {subject}")
@@ -214,9 +216,11 @@ class EmailNotificationHandler:
             
             # Send summary
             await self.notification_manager.send_notification(
+                user_id=self.user_id,
                 notification_type='email',
-                message=message,
-                metadata={'summary_type': 'daily'}
+                notification_subtype='daily_summary',
+                message_text=message,
+                message_data={'summary_type': 'daily'}
             )
             
             logger.info("✅ Sent daily email summary")
