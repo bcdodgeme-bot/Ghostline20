@@ -148,7 +148,10 @@ class ReminderNotificationHandler:
             time_phrase,
             settings={
                 'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.now()
+                'RELATIVE_BASE': datetime.now(),
+                'TIMEZONE': 'America/New_York',
+                'RETURN_AS_TIMEZONE_AWARE': True,
+                'TO_TIMEZONE': 'America/New_York'
             }
         )
         
