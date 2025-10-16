@@ -3592,3 +3592,304 @@ You can copy this and create the draft manually in Gmail."""
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return f"Error creating draft: {str(e)}"
+
+#-- Section 15: Reminder Functions - 10/16/25
+def detect_reminder_command(message: str) -> Optional[str]:
+    """
+    Detect reminder-related commands
+    
+    Returns:
+        'create' - Create new reminder
+        'list' - List all reminders
+        'cancel_one' - Cancel specific reminder
+        'cancel_all' - Kill all reminders
+        None - Not a reminder command
+    """
+    message_lower = message.lower()
+    
+    # KILL SWITCH - Check this FIRST (most important!)
+    kill_phrases = [
+        "cancel all reminders",
+        "delete all reminders",
+        "kill all reminders",
+        "stop all reminders",
+        "remove all reminders",
+        "clear all reminders",
+        "kill reminders"
+    ]
+    if any(phrase in message_lower for phrase in kill_phrases):
+        return 'cancel_all'
+    
+    # Cancel specific reminder
+    cancel_keywords = ["cancel reminder", "delete reminder", "remove reminder"]
+    if any(keyword in message_lower for keyword in cancel_keywords):
+        return 'cancel_one'
+    
+    # List reminders
+    list_keywords = [
+        "list reminders", "show reminders", "my reminders",
+        "list my reminders", "show my reminders",
+        "what reminders", "view reminders"
+    ]
+    if any(keyword in message_lower for keyword in list_keywords):
+        return 'list'
+    
+    # Create reminder (default if contains remind keywords)
+    create_keywords = [
+        "remind", "reminder", "remind me", "set reminder",
+        "create reminder", "make reminder"
+    ]
+    if any(keyword in message_lower for keyword in create_keywords):
+        return 'create'
+    
+    return None
+
+
+async def process_reminder_create(message: str, user_id: str) -> str:
+    """
+    Create a new reminder from natural language
+    
+    Examples:
+        - "remind me to call mom in 30 minutes"
+        - "remind me about meeting tomorrow at 2pm"
+        - "set reminder for Friday at 3pm"
+    """
+    try:
+        from ..integrations.telegram.notification_types.reminder_notifications import (
+            get_reminder_notification_handler
+        )
+        
+        handler = get_reminder_notification_handler()
+        result = await handler.create_reminder_from_text(
+            reminder_text=message,
+            original_message=message
+        )
+        
+        if result['success']:
+            scheduled_time = result['scheduled_for']
+            reminder_text = result['reminder_text']
+            
+            # Format time nicely
+            time_str = scheduled_time.strftime('%A, %B %d at %I:%M %p')
+            reminder_id = result['reminder_id']
+            
+            return f"""⏰ **Reminder Created Successfully!**
+
+📝 **What:** {reminder_text}
+🕐 **When:** {time_str}
+🆔 **ID:** `{reminder_id[:8]}...`
+
+✅ You'll receive a Telegram notification at the scheduled time.
+
+**Manage Reminders:**
+- `list reminders` - See all pending reminders
+- `cancel reminder {reminder_id[:8]}` - Cancel this specific reminder
+- `cancel all reminders` - Delete all reminders (kill switch)
+"""
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            suggestion = result.get('suggestion', '')
+            
+            return f"""❌ **Couldn't Parse Reminder Time**
+
+**Error:** {error_msg}
+
+{suggestion}
+
+**Try these formats:**
+- "remind me to [task] in 30 minutes"
+- "remind me about [event] tomorrow at 2pm"
+- "set reminder for [thing] on Friday at 3pm"
+- "remind me to [action] next Monday at 9am"
+"""
+    
+    except Exception as e:
+        logger.error(f"Reminder creation failed: {e}")
+        return f"""❌ **Reminder System Error**
+
+Error: {str(e)}
+
+Try: "remind me to [task] [when]"
+"""
+
+
+async def process_reminder_list(user_id: str) -> str:
+    """List all pending reminders for the user"""
+    try:
+        from ..integrations.telegram.database_manager import get_telegram_db_manager
+        
+        db_manager = get_telegram_db_manager()
+        reminders = await db_manager.get_all_reminders(user_id)
+        
+        if not reminders:
+            return """📋 **No Pending Reminders**
+
+You don't have any reminders scheduled.
+
+Create one with: "remind me to [task] [when]"
+"""
+        
+        # Build the list
+        reminder_list = []
+        for idx, reminder in enumerate(reminders, 1):
+            reminder_id = str(reminder['id'])
+            text = reminder['reminder_text']
+            scheduled = reminder['scheduled_for']
+            
+            # Format time
+            time_str = scheduled.strftime('%a, %b %d at %I:%M %p')
+            
+            # Calculate time until
+            now = datetime.now()
+            if scheduled.tzinfo is not None:
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+            
+            delta = scheduled - now
+            
+            if delta.total_seconds() < 0:
+                time_until = "⚠️ Overdue"
+            elif delta.days > 0:
+                time_until = f"in {delta.days} day(s)"
+            else:
+                hours = delta.seconds // 3600
+                minutes = (delta.seconds % 3600) // 60
+                if hours > 0:
+                    time_until = f"in {hours}h {minutes}m"
+                else:
+                    time_until = f"in {minutes}m"
+            
+            reminder_list.append(
+                f"{idx}. **{text}**\n"
+                f"   🕐 {time_str} ({time_until})\n"
+                f"   🆔 `{reminder_id[:8]}...`"
+            )
+        
+        reminders_text = "\n\n".join(reminder_list)
+        
+        return f"""📋 **Your Pending Reminders** ({len(reminders)} total)
+
+{reminders_text}
+
+**Commands:**
+- `cancel reminder [id]` - Cancel a specific reminder
+- `cancel all reminders` - 🔥 Delete all reminders (kill switch)
+"""
+    
+    except Exception as e:
+        logger.error(f"Failed to list reminders: {e}")
+        return f"❌ **Error:** {str(e)}"
+
+
+async def process_reminder_cancel(message: str, user_id: str) -> str:
+    """
+    Cancel reminder(s) - handles both single and mass deletion
+    
+    Examples:
+        - "cancel reminder abc-123-456"
+        - "cancel all reminders"
+    """
+    try:
+        from ..integrations.telegram.database_manager import get_telegram_db_manager
+        
+        db_manager = get_telegram_db_manager()
+        message_lower = message.lower()
+        
+        # Check if it's the KILL SWITCH
+        kill_phrases = [
+            "cancel all", "delete all", "kill all",
+            "stop all", "remove all", "clear all"
+        ]
+        
+        is_kill_switch = any(phrase in message_lower for phrase in kill_phrases)
+        
+        if is_kill_switch:
+            # KILL ALL REMINDERS
+            count = await db_manager.delete_all_reminders(user_id)
+            
+            if count > 0:
+                return f"""🔥 **KILL SWITCH ACTIVATED**
+
+✅ Successfully deleted **{count} reminder(s)**
+
+All pending reminders have been cancelled. No more notifications will be sent.
+
+Create new reminders with: "remind me to [task] [when]"
+"""
+            else:
+                return """📋 **No Reminders to Cancel**
+
+You don't have any pending reminders.
+
+Create one with: "remind me to [task] [when]"
+"""
+        
+        else:
+            # Cancel specific reminder - extract ID
+            import re
+            
+            # Try to find UUID or short ID in message
+            uuid_pattern = r'[0-9a-f]{8}[-]?[0-9a-f]{4}[-]?[0-9a-f]{4}[-]?[0-9a-f]{4}[-]?[0-9a-f]{12}'
+            short_pattern = r'[0-9a-f]{8}'
+            
+            uuid_match = re.search(uuid_pattern, message_lower)
+            if uuid_match:
+                reminder_id = uuid_match.group(0)
+            else:
+                short_match = re.search(short_pattern, message_lower)
+                if short_match:
+                    # Get short ID and find full ID from database
+                    short_id = short_match.group(0)
+                    reminders = await db_manager.get_all_reminders(user_id)
+                    
+                    matching = [r for r in reminders if str(r['id']).startswith(short_id)]
+                    
+                    if len(matching) == 1:
+                        reminder_id = str(matching[0]['id'])
+                    elif len(matching) > 1:
+                        return f"""❌ **Ambiguous ID**
+
+The ID `{short_id}` matches multiple reminders. Please use a longer ID:
+
+{chr(10).join([f"- `{str(r['id'])[:12]}...` - {r['reminder_text']}" for r in matching])}
+"""
+                    else:
+                        return f"""❌ **Reminder Not Found**
+
+No reminder found with ID starting with `{short_id}`.
+
+Use `list reminders` to see all IDs.
+"""
+                else:
+                    return """❌ **No Reminder ID Found**
+
+Please specify which reminder to cancel:
+
+**Usage:**
+- `cancel reminder [id]` - where [id] is from `list reminders`
+- `cancel all reminders` - to delete all reminders
+
+Example: `cancel reminder abc12345`
+"""
+            
+            # Delete the reminder
+            success = await db_manager.delete_reminder(reminder_id, user_id)
+            
+            if success:
+                return f"""✅ **Reminder Cancelled**
+
+Reminder `{reminder_id[:8]}...` has been deleted.
+
+Use `list reminders` to see remaining reminders.
+"""
+            else:
+                return f"""❌ **Could Not Cancel Reminder**
+
+Reminder `{reminder_id[:8]}...` not found or already sent.
+
+Use `list reminders` to see your pending reminders.
+"""
+    
+    except Exception as e:
+        logger.error(f"Failed to cancel reminder: {e}")
+        return f"❌ **Error:** {str(e)}"

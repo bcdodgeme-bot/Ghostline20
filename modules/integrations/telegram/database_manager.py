@@ -300,6 +300,88 @@ class TelegramDatabaseManager:
             logger.error(f"Failed to mark reminder sent: {e}")
             return False
     
+    async def get_all_reminders(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get ALL pending reminders for user (not just due ones)
+        Used for listing reminders
+        
+        Returns reminders ordered by scheduled time
+        """
+        query = """
+            SELECT 
+                id,
+                reminder_text,
+                scheduled_for,
+                created_at,
+                notification_sent
+            FROM telegram_reminders
+            WHERE user_id = $1
+            AND notification_sent = false
+            ORDER BY scheduled_for ASC;
+        """
+        
+        try:
+            results = await self.db.fetch_all(query, user_id)
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Failed to get all reminders: {e}")
+            return []
+    
+    async def delete_reminder(self, reminder_id: str, user_id: str) -> bool:
+        """
+        Delete a specific reminder by ID
+        
+        Args:
+            reminder_id: UUID of the reminder
+            user_id: User ID for security (ensures user owns the reminder)
+        
+        Returns:
+            True if deleted, False if not found or error
+        """
+        query = """
+            DELETE FROM telegram_reminders
+            WHERE id = $1
+            AND user_id = $2
+            AND notification_sent = false
+            RETURNING id;
+        """
+        
+        try:
+            result = await self.db.fetch_one(query, reminder_id, user_id)
+            if result:
+                logger.info(f"Deleted reminder {reminder_id}")
+                return True
+            else:
+                logger.warning(f"Reminder {reminder_id} not found or already sent")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to delete reminder: {e}")
+            return False
+    
+    async def delete_all_reminders(self, user_id: str) -> int:
+        """
+        KILL SWITCH - Delete ALL pending reminders for user
+        
+        Returns:
+            Number of reminders deleted
+        """
+        query = """
+            DELETE FROM telegram_reminders
+            WHERE user_id = $1
+            AND notification_sent = false
+            RETURNING id;
+        """
+        
+        try:
+            results = await self.db.fetch_all(query, user_id)
+            count = len(results)
+            logger.info(f"🔥 KILL SWITCH: Deleted {count} reminders for user {user_id}")
+            return count
+        except Exception as e:
+            logger.error(f"Failed to delete all reminders: {e}")
+            return 0
+    
+    
     # ========================================================================
     # TRAINING FEEDBACK
     # ========================================================================

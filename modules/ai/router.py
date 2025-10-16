@@ -179,6 +179,8 @@ async def chat_with_ai(
                  detect_image_command, process_image_command,
                  detect_google_command, process_google_command,
                  detect_pattern_complaint, handle_pattern_complaint,
+                 detect_reminder_command, process_reminder_create,
+                 process_reminder_list, process_reminder_cancel,
                  detect_email_detail_command, process_email_detail_command,
                  detect_draft_creation_command, process_draft_creation_command # NEW 10/2/25
             )
@@ -465,6 +467,26 @@ Weather data powered by Tomorrow.io"""
             except Exception as e:
                 logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
+        
+        # 8.5. ⏰ Reminder commands - 10/16/25
+        elif detect_reminder_command(message_content):
+            command_type = detect_reminder_command(message_content)
+            logger.info(f"⏰ DEBUG: Reminder command detected - type: {command_type}")
+            
+            try:
+                if command_type == 'create':
+                    special_response = await process_reminder_create(message_content, user_id)
+                elif command_type == 'list':
+                    special_response = await process_reminder_list(user_id)
+                elif command_type in ['cancel_one', 'cancel_all']:
+                    special_response = await process_reminder_cancel(message_content, user_id)
+                else:
+                    special_response = "⏰ Unknown reminder command"
+                
+                logger.info(f"✅ DEBUG: Reminder {command_type} processed successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Reminder processing failed: {e}")
+                special_response = f"⏰ **Reminder Error:** {str(e)}"
         
        # 9. 🔍 Google Workspace command detection (NINTH) - NEW 9/30/25
         elif detect_google_command(message_content)[0]:

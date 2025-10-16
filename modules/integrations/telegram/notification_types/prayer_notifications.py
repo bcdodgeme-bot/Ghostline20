@@ -174,7 +174,7 @@ class PrayerNotificationHandler:
             buttons=[[
                 {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
             ]],
-            message_data=metadat
+            message_data=metadata
         )
         
         logger.info(f"✅ Sent {display_name} prayer notification for {formatted_time}")
@@ -208,7 +208,7 @@ class PrayerNotificationHandler:
                 buttons=[[
                     {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
                 ]],
-                message_data=metadat
+                message_data=metadata
             )
             
             logger.info("✅ Sent daily prayer schedule")
