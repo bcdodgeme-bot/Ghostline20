@@ -3669,6 +3669,14 @@ async def process_reminder_create(message: str, user_id: str) -> str:
             scheduled_time = result['scheduled_for']
             reminder_text = result['reminder_text']
             
+            # Convert UTC to Eastern for display
+            import pytz
+            eastern = pytz.timezone('America/New_York')
+            if scheduled_time.tzinfo is not None:
+                local_time = scheduled_time.astimezone(eastern)
+            else:
+                local_time = scheduled_time
+            
             # Format time nicely
             time_str = scheduled_time.strftime('%A, %B %d at %I:%M %p')
             reminder_id = result['reminder_id']
