@@ -506,9 +506,13 @@ async def prayer_notification_task():
     logger.info("🕌 Prayer notification task started")
     while True:
         try:
-            await asyncio.sleep(300)  # 5 minutes
+            # CHECK FIRST (like reminders do)
             if await app.state.telegram_kill_switch.is_enabled(USER_ID):
                 await app.state.telegram_prayer_handler.check_and_notify()
+            
+            # THEN SLEEP (not before)
+            await asyncio.sleep(300)  # 5 minutes
+            
         except Exception as e:
             logger.error(f"Prayer notification error: {e}")
             await asyncio.sleep(60)
