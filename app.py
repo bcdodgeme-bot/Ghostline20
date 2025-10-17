@@ -74,6 +74,17 @@ from modules.integrations.telegram.bot_client import TelegramBotClient
 from modules.integrations.telegram.kill_switch import KillSwitch
 from modules.integrations.telegram.notification_types.prayer_notifications import PrayerNotificationHandler
 from modules.integrations.telegram.notification_types.reminder_notifications import ReminderNotificationHandler
+from modules.integrations.telegram.notification_types.calendar_notifications import CalendarNotificationHandler
+from modules.integrations.telegram.notification_types.weather_notifications import WeatherNotificationHandler
+from modules.integrations.telegram.notification_types.email_notifications import EmailNotificationHandler
+from modules.integrations.telegram.notification_types.clickup_notifications import ClickUpNotificationHandler
+from modules.integrations.telegram.notification_types.bluesky_notifications import BlueSkyNotificationHandler
+from modules.integrations.telegram.notification_types.trends_notifications import TrendsNotificationHandler
+from modules.integrations.telegram.notification_types.analytics_notifications import AnalyticsNotificationHandler
+
+#-- NEW Section 2k: Fathom Meeting Integration - added 10/16/25
+from modules.integrations.fathom import router as fathom_router
+from modules.integrations.fathom import get_integration_info as fathom_integration_info, check_module_health as fathom_module_health
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -291,13 +302,30 @@ async def startup_event():
         telegram_kill_switch = KillSwitch()
         telegram_notification_manager = NotificationManager(telegram_bot, telegram_kill_switch)
         
+        
         prayer_handler = PrayerNotificationHandler(telegram_notification_manager)
         reminder_handler = ReminderNotificationHandler(telegram_notification_manager)
+        calendar_handler = CalendarNotificationHandler(telegram_notification_manager)
+        weather_handler = WeatherNotificationHandler(telegram_notification_manager)
+        email_handler = EmailNotificationHandler(telegram_notification_manager)
+        clickup_handler = ClickUpNotificationHandler(telegram_notification_manager)
+        bluesky_handler = BlueSkyNotificationHandler(telegram_notification_manager)
+        trends_handler = TrendsNotificationHandler(telegram_notification_manager)
+        analytics_handler = AnalyticsNotificationHandler(telegram_notification_manager)
+    
         
         # Store in app state for access throughout the app
         app.state.telegram_notification_manager = telegram_notification_manager
         app.state.telegram_prayer_handler = prayer_handler
         app.state.telegram_reminder_handler = reminder_handler
+        app.state.telegram_calendar_handler = calendar_handler
+        app.state.telegram_weather_handler = weather_handler
+        app.state.telegram_email_handler = email_handler
+        app.state.telegram_clickup_handler = clickup_handler
+        app.state.telegram_bluesky_handler = bluesky_handler
+        app.state.telegram_trends_handler = trends_handler
+        app.state.telegram_analytics_handler = analytics_handler
+        app.state.telegram_kill_switch = telegram_kill_switch
         app.state.telegram_kill_switch = telegram_kill_switch
         
         # Verify bot connection
@@ -309,6 +337,14 @@ async def startup_event():
         # Start background notification tasks
         asyncio.create_task(prayer_notification_task())
         asyncio.create_task(reminder_notification_task())
+        asyncio.create_task(calendar_notification_task())
+        asyncio.create_task(weather_notification_task())
+        asyncio.create_task(email_notification_task())
+        asyncio.create_task(clickup_notification_task())
+        asyncio.create_task(bluesky_notification_task())
+        asyncio.create_task(trends_notification_task())
+        asyncio.create_task(analytics_notification_task())
+
         
     except Exception as e:
         import traceback
@@ -525,6 +561,91 @@ async def reminder_notification_task():
     except Exception as e:
         logger.error(f"Reminder monitor error: {e}")
 
+async def calendar_notification_task():
+    """Check for calendar notifications every 30 minutes"""
+    logger.info("📅 Calendar notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_calendar_handler.check_and_notify()
+            await asyncio.sleep(1800)  # 30 minutes
+        except Exception as e:
+            logger.error(f"Calendar notification error: {e}")
+            await asyncio.sleep(60)
+
+async def weather_notification_task():
+    """Check for weather notifications every 2 hours"""
+    logger.info("🌤️ Weather notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_weather_handler.check_and_notify()
+            await asyncio.sleep(7200)  # 2 hours
+        except Exception as e:
+            logger.error(f"Weather notification error: {e}")
+            await asyncio.sleep(60)
+
+async def email_notification_task():
+    """Check for email notifications every hour"""
+    logger.info("📧 Email notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_email_handler.check_and_notify()
+            await asyncio.sleep(3600)  # 1 hour
+        except Exception as e:
+            logger.error(f"Email notification error: {e}")
+            await asyncio.sleep(60)
+
+async def clickup_notification_task():
+    """Check for ClickUp notifications every 4 hours"""
+    logger.info("📋 ClickUp notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_clickup_handler.check_and_notify()
+            await asyncio.sleep(14400)  # 4 hours
+        except Exception as e:
+            logger.error(f"ClickUp notification error: {e}")
+            await asyncio.sleep(60)
+
+async def bluesky_notification_task():
+    """Check for Bluesky notifications every 4 hours"""
+    logger.info("🦋 Bluesky notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_bluesky_handler.check_and_notify()
+            await asyncio.sleep(14400)  # 4 hours
+        except Exception as e:
+            logger.error(f"Bluesky notification error: {e}")
+            await asyncio.sleep(60)
+
+async def trends_notification_task():
+    """Check for trending topics every 4 hours"""
+    logger.info("📈 Trends notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_trends_handler.check_and_notify()
+            await asyncio.sleep(14400)  # 4 hours
+        except Exception as e:
+            logger.error(f"Trends notification error: {e}")
+            await asyncio.sleep(60)
+
+async def analytics_notification_task():
+    """Check for analytics notifications (morning/evening summaries)"""
+    logger.info("📊 Analytics notification task started")
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_analytics_handler.check_and_notify()
+            # Check every hour to catch 8 AM and 8 PM windows
+            await asyncio.sleep(3600)  # 1 hour
+        except Exception as e:
+            logger.error(f"Analytics notification error: {e}")
+            await asyncio.sleep(60)
+
 #-- Section 11: API Status and Health Endpoints - updated 9/28/25 with Voice & Image
 @app.get("/health")
 async def health_check():
@@ -576,12 +697,13 @@ async def api_status():
             "🔍 AI-powered marketing scraper for competitive analysis",
             "🕌 Islamic prayer times with intelligent scheduling",
             "📈 Google Trends analysis for market research",
+            "🎙️ Fathom meeting integration with AI summaries",
             "🎤 Voice synthesis with ElevenLabs (4 personality voices)",  # NEW 9/28/25
             "🎨 AI image generation with Replicate (inline display)",  # NEW 9/28/25
             "📱 Mobile-responsive web interface",
             "⏰ Timezone-aware user management"
         ],
-        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "google-trends", "voice-synthesis", "image-generation", "authentication"],  # UPDATED
+        "integrations": ["slack-clickup", "ai-brain", "chat-system", "weather", "bluesky-multi-account", "rss-learning", "marketing-scraper", "prayer-times", "google-trends", "voice-synthesis", "image-generation", "fathom-meetings", "authentication"],  # UPDATED
         "endpoints": {
             "web_interface": "/",
             "chat_interface": "/chat",
@@ -825,6 +947,18 @@ async def integrations_info():
             'health': {'healthy': False, 'error': str(e)}
         }
     
+    # Fathom Meeting integration
+    try:
+        integrations['fathom_meetings'] = {
+            'info': fathom_integration_info(),
+            'health': fathom_module_health()
+        }
+    except Exception as e:
+        integrations['fathom_meetings'] = {
+            'info': {'module': 'fathom_meetings', 'status': 'failed'},
+            'health': {'healthy': False, 'error': str(e)}
+        }
+    
     # AI Brain integration
     try:
         integrations['ai_brain'] = {
@@ -914,6 +1048,9 @@ app.include_router(google_workspace_router)
 
 # Include Telegram notification router - added 10/12/25
 app.include_router(telegram_router, prefix="/integrations", tags=["telegram"])
+
+# Include Fathom meeting integration router - added 10/16/25
+app.include_router(fathom_router)
 
 #-- Section 13: Development Server and Periodic Tasks - updated 9/27/25 with Prayer Notifications
 # Periodic cleanup of expired sessions (every hour) + Prayer notification service
