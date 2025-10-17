@@ -91,7 +91,7 @@ class EmailNotificationHandler:
             if not already_notified:
                 filtered.append(dict(email))
         
-    return filtered
+        return filtered
     
     async def _check_if_notified(self, message_id: str) -> bool:
         """Check if we already sent notification for this email"""
