@@ -107,7 +107,6 @@ class EmailNotificationHandler:
         return result['count'] > 0 if result else False
     
     async def _send_email_notification(self, email: Dict[str, Any]) -> None:
-    async def _send_email_notification(self, email: Dict[str, Any]) -> None:
         """Send email notification"""
         subject = email['subject_line']
         sender_email = email['sender_email']
