@@ -83,11 +83,8 @@ class MeetingProcessor:
     async def _generate_ai_summary(self, title: str, date: str,
                                   participants: List[str], duration: int,
                                   transcript: str) -> Dict[str, Any]:
-        """Generate comprehensive summary using Claude AI via OpenRouter"""
+        """Generate comprehensive summary using Claude AI"""
         try:
-            # Import OpenRouter client
-            from ...ai.openrouter_client import get_openrouter_client
-            
             # Build detailed prompt for Claude
             prompt = self._build_summary_prompt(
                 title, date, participants, duration, transcript
@@ -96,7 +93,7 @@ class MeetingProcessor:
             # Get OpenRouter client
             openrouter = await get_openrouter_client()
             
-            # Call Claude via OpenRouter
+            # Call Claude API
             response = await openrouter.chat_completion(
                 messages=[
                     {
@@ -293,9 +290,7 @@ async def process_meeting(meeting_data: Dict[str, Any]) -> Dict[str, Any]:
 
 async def extract_action_items(transcript_text: str) -> List[Dict[str, Any]]:
     """Convenience function to extract just action items from transcript"""
-    
-    # Import OpenRouter client
-    from ...ai.openrouter_client import get_openrouter_client
+    processor = MeetingProcessor()
     
     # Build simplified prompt for action items only
     try:
