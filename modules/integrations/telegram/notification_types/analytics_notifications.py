@@ -83,6 +83,43 @@ class AnalyticsNotificationHandler:
         result = await self.db.fetch_one(query, self.user_id, summary_type)
         return result['count'] > 0 if result else False
     
+    async def _get_analytics_summary(self, days: int = 1) -> Dict[str, Any]:
+        """Get website analytics summary from google_analytics_data"""
+        query = """
+        SELECT 
+            site_name,
+            metrics,
+            dimensions,
+            audience_insights,
+            content_performance,
+            traffic_patterns,
+            date_range_start,
+            date_range_end
+        FROM google_analytics_data
+        WHERE user_id = $1
+        AND date_range_end >= CURRENT_DATE - $2
+        ORDER BY date_range_end DESC
+        LIMIT 1
+        """
+        
+        result = await self.db.fetch_one(query, self.user_id, days)
+        
+        if not result:
+            return {}
+        
+        import json
+        
+        # Parse JSONB fields
+        metrics = result['metrics'] if isinstance(result['metrics'], dict) else json.loads(result['metrics'])
+        dimensions = result['dimensions'] if isinstance(result['dimensions'], dict) else json.loads(result['dimensions'])
+        
+        return {
+            'site_name': result['site_name'],
+            'metrics': metrics,
+            'dimensions': dimensions,
+            'date_range': f"{result['date_range_start']} to {result['date_range_end']}"
+        }
+    
     async def send_morning_summary(self) -> bool:
         """
         Send morning analytics summary
@@ -116,11 +153,14 @@ class AnalyticsNotificationHandler:
             # Calendar events
             if stats.get('events_today'):
                 message += f"\n📅 *Today's Schedule:* {stats['events_today']} event{'s' if stats['events_today'] != 1 else ''}\n"
-            
-            # Weather
-            if stats.get('weather'):
-                message += f"\n🌤️ *Weather:* {stats['weather']['temp']}°F, {stats['weather']['condition']}\n"
-            
+
+            # Website Analytics (if available)
+            if stats.get('website_sessions'):
+                message += f"\n📊 *Yesterday's Website:*\n"
+                message += f"   Sessions: {stats['website_sessions']}\n"
+                message += f"   Users: {stats['website_users']}\n"
+                message += f"   Pageviews: {stats['website_pageviews']}\n"
+
             # Motivational close
             message += f"\n💪 Have a productive day!"
             
@@ -179,7 +219,13 @@ class AnalyticsNotificationHandler:
             # Tomorrow preview
             if stats.get('events_tomorrow'):
                 message += f"\n📅 *Tomorrow:* {stats['events_tomorrow']} event{'s' if stats['events_tomorrow'] != 1 else ''} scheduled\n"
-            
+
+            # Website Analytics (if available)
+            if stats.get('website_sessions'):
+                message += f"\n📊 *Today's Website Performance:*\n"
+                message += f"   Sessions: {stats['website_sessions']}\n"
+                message += f"   Users: {stats['website_users']}\n"
+
             message += f"\n🌟 Great work today!"
             
             await self.notification_manager.send_notification(
@@ -229,11 +275,18 @@ class AnalyticsNotificationHandler:
             if stats.get('top_activity'):
                 message += f"📈 *Most Active Day:* {stats['top_activity']}\n"
             
+            # Website Analytics
+            if stats.get('weekly_sessions'):
+                message += f"\n📊 *Website Performance:*\n"
+                message += f"• Sessions: {stats['weekly_sessions']}\n"
+                message += f"• Users: {stats['weekly_users']}\n"
+                message += f"• Pageviews: {stats['weekly_pageviews']}\n\n"
+
             # Looking ahead
-            message += f"\n🎯 *Next Week:*\n"
+            message += f"🎯 *Next Week:*\n"
             message += f"• {stats.get('events_next_week', 0)} events scheduled\n"
             message += f"• {stats.get('tasks_due_next_week', 0)} tasks due\n"
-            
+
             message += f"\n✨ Keep up the great work!"
             
             await self.notification_manager.send_notification(
@@ -253,11 +306,12 @@ class AnalyticsNotificationHandler:
             return False
     
     async def _get_daily_stats(self, current_day: bool = False) -> Dict[str, Any]:
-        """Get daily statistics"""
+        """Get daily statistics - personal activity + website analytics"""
         target_date = 'CURRENT_DATE' if current_day else 'CURRENT_DATE - INTERVAL \'1 day\''
         
         stats = {}
         
+        # Personal Activity Stats
         # AI messages
         query = f"""
         SELECT COUNT(*) as count
@@ -288,34 +342,41 @@ class AnalyticsNotificationHandler:
         result = await self.db.fetch_one(query, self.user_id)
         stats['tasks_completed'] = result['count'] if result else 0
         
-        # Events today/tomorrow
+        # Calendar events
         if current_day:
             query = """
             SELECT COUNT(*) as count
-            FROM calendar_events
+            FROM google_calendar_events
             WHERE user_id = $1
             AND DATE(start_time) = CURRENT_DATE + INTERVAL '1 day'
-            AND cancelled = false
             """
             result = await self.db.fetch_one(query, self.user_id)
             stats['events_tomorrow'] = result['count'] if result else 0
         else:
             query = """
             SELECT COUNT(*) as count
-            FROM calendar_events
+            FROM google_calendar_events
             WHERE user_id = $1
             AND DATE(start_time) = CURRENT_DATE
-            AND cancelled = false
             """
             result = await self.db.fetch_one(query, self.user_id)
             stats['events_today'] = result['count'] if result else 0
         
+        # Website Analytics (if available)
+        analytics = await self._get_analytics_summary(days=1)
+        if analytics and analytics.get('metrics'):
+            metrics = analytics['metrics']
+            stats['website_sessions'] = metrics.get('sessions', 0)
+            stats['website_users'] = metrics.get('users', 0)
+            stats['website_pageviews'] = metrics.get('pageviews', 0)
+        
         return stats
     
     async def _get_weekly_stats(self) -> Dict[str, Any]:
-        """Get weekly statistics"""
+        """Get weekly statistics - personal + website"""
         stats = {}
         
+        # Personal Activity
         # Tasks completed this week
         query = """
         SELECT COUNT(*) as count
@@ -339,13 +400,20 @@ class AnalyticsNotificationHandler:
         # Events next week
         query = """
         SELECT COUNT(*) as count
-        FROM calendar_events
+        FROM google_calendar_events
         WHERE user_id = $1
         AND start_time >= CURRENT_DATE + INTERVAL '1 day'
         AND start_time < CURRENT_DATE + INTERVAL '8 days'
-        AND cancelled = false
         """
         result = await self.db.fetch_one(query, self.user_id)
         stats['events_next_week'] = result['count'] if result else 0
+        
+        # Website Analytics (last 7 days)
+        analytics = await self._get_analytics_summary(days=7)
+        if analytics and analytics.get('metrics'):
+            metrics = analytics['metrics']
+            stats['weekly_sessions'] = metrics.get('sessions', 0)
+            stats['weekly_users'] = metrics.get('users', 0)
+            stats['weekly_pageviews'] = metrics.get('pageviews', 0)
         
         return stats

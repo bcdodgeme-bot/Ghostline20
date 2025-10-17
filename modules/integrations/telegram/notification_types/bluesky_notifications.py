@@ -66,69 +66,74 @@ class BlueskyNotificationHandler:
             return False
     
     async def _get_pending_approvals(self) -> List[Dict[str, Any]]:
-        """Get pending engagement approvals"""
+        """Get high-potential Bluesky engagement opportunities from trends"""
         query = """
-        SELECT id, account_id, post_uri, post_text, author_handle,
-               engagement_type, relevance_score, created_at,
-               reason, matched_keywords
-        FROM bluesky_approval_queue
-        WHERE user_id = $1
-        AND status = 'pending'
+        SELECT id, keyword, business_area, opportunity_type, 
+               urgency_level, trend_momentum, trend_score_at_alert,
+               bluesky_engagement_potential, created_at,
+               related_rss_insights
+        FROM trend_opportunities
+        WHERE bluesky_engagement_potential > 0.5
+        AND processed = false
         AND created_at > NOW() - INTERVAL '4 hours'
-        ORDER BY relevance_score DESC, created_at DESC
+        ORDER BY bluesky_engagement_potential DESC, trend_score_at_alert DESC
         LIMIT 10
         """
         
-        results = await self.db.fetch_all(query, self.user_id)
+        results = await self.db.fetch_all(query)
         
         if not results:
             return []
         
         # Filter out ones we already notified about
         filtered = []
-        for approval in results:
-            already_notified = await self._check_if_notified(approval['id'])
+        for opportunity in results:
+            already_notified = await self._check_if_notified(opportunity['id'])
             if not already_notified:
-                filtered.append(dict(approval))
+                filtered.append(dict(opportunity))
         
         return filtered
     
-    async def _check_if_notified(self, approval_id: int) -> bool:
-        """Check if we already sent notification for this approval"""
+    async def _check_if_notified(self, opportunity_id) -> bool:
+        """Check if we already sent notification for this opportunity"""
         query = """
         SELECT COUNT(*) as count
         FROM telegram_notifications
         WHERE user_id = $1
         AND notification_type = 'bluesky'
-        AND metadata->>'approval_id' = $2
+        AND metadata->>'opportunity_id' = $2
         """
         
-        result = await self.db.fetch_one(query, self.user_id, str(approval_id))
+        result = await self.db.fetch_one(query, self.user_id, str(opportunity_id))
         return result['count'] > 0 if result else False
     
-    async def _send_approval_notification(self, approvals: List[Dict[str, Any]]) -> None:
+    async def _send_approval_notification(self, opportunities: List[Dict[str, Any]]) -> None:
         """Send notification for engagement opportunities"""
-        count = len(approvals)
+        count = len(opportunities)
         
         if count == 1:
             # Single high-priority opportunity
-            approval = approvals[0]
+            opp = opportunities[0]
+            
+            engagement_pct = int(opp['bluesky_engagement_potential'] * 100)
             
             message = f"🦋 *Bluesky Engagement Opportunity*\n\n"
-            message += f"*Score:* {approval['relevance_score']}/100 🎯\n"
-            message += f"*Account:* {approval['account_id']}\n"
-            message += f"*Author:* @{approval['author_handle']}\n\n"
+            message += f"*Keyword:* {opp['keyword']}\n"
+            message += f"*Business Area:* {opp['business_area']}\n"
+            message += f"*Engagement Potential:* {engagement_pct}% 🎯\n"
+            message += f"*Trend Score:* {opp['trend_score_at_alert']}\n"
+            message += f"*Momentum:* {opp['trend_momentum'].upper()}\n\n"
             
-            post_text = approval['post_text']
-            if len(post_text) > 150:
-                post_text = post_text[:150] + "..."
-            message += f"_{post_text}_\n\n"
+            message += f"*Opportunity Type:* {opp['opportunity_type']}\n"
+            message += f"*Urgency:* {opp['urgency_level'].upper()}\n\n"
             
-            if approval.get('matched_keywords'):
-                keywords = approval['matched_keywords'][:3]
-                message += f"*Keywords:* {', '.join(keywords)}\n"
+            # Add RSS insights if available
+            rss_insights = opp.get('related_rss_insights', {})
+            if rss_insights and isinstance(rss_insights, dict):
+                if rss_insights.get('summary'):
+                    message += f"💡 *Insight:* {rss_insights['summary'][:150]}\n\n"
             
-            message += f"\n*Reason:* {approval['reason']}"
+            message += f"Perfect timing to create content or engage on Bluesky! 🚀"
             
             # Create approval buttons
             buttons = {
@@ -155,23 +160,24 @@ class BlueskyNotificationHandler:
             
         else:
             # Multiple opportunities - digest
-            message = f"🦋 *{count} Bluesky Opportunities*\n\n"
-            
-            for i, approval in enumerate(approvals[:5], 1):
-                message += f"{i}. {approval['account_id']} - Score: {approval['relevance_score']}/100\n"
-                message += f"   @{approval['author_handle']}\n\n"
+            message = f"🦋 *Bluesky: {count} Engagement Opportunities*\n\n"
+        
+            for i, opp in enumerate(opportunities[:5], 1):
+                engagement_pct = int(opp['bluesky_engagement_potential'] * 100)
+                message += f"{i}. *{opp['keyword']}* ({opp['business_area']})\n"
+                message += f"   Engagement: {engagement_pct}% | Trend: {opp['trend_score_at_alert']}\n\n"
             
             if count > 5:
                 message += f"_...and {count - 5} more opportunities_\n\n"
             
-            message += "Check the approval queue to review all opportunities."
+            message += "High potential for Bluesky engagement right now! 🚀"
             
             buttons = None
             
             metadata = {
-                'approval_count': count,
-                'approval_ids': [a['id'] for a in approvals[:5]],
-                'notification_type': 'digest'
+                 'opportunity_count': count,
+                 'opportunity_ids': [str(o['id']) for o in opportunities[:5]],
+                 'notification_type': 'engagement_opportunity'
             }
         
         # Send via notification manager

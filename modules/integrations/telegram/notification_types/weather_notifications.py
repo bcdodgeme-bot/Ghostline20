@@ -64,14 +64,14 @@ class WeatherNotificationHandler:
             return False
     
     async def _get_current_weather(self) -> Optional[Dict[str, Any]]:
-        """Get current weather from cache"""
+        """Get current weather from readings"""
         query = """
-        SELECT location_name, temperature, feels_like, condition, 
-               humidity, wind_speed, icon, forecast_summary,
-               cached_at
-        FROM weather_cache
+        SELECT location, temperature, temperature_apparent, weather_description, 
+               humidity, wind_speed, weather_code, timestamp,
+               headache_risk_level, uv_risk_level
+        FROM weather_readings
         WHERE user_id = $1
-        ORDER BY cached_at DESC
+        ORDER BY timestamp DESC
         LIMIT 1
         """
         
@@ -81,15 +81,15 @@ class WeatherNotificationHandler:
             return None
         
         return {
-            'location': result['location_name'],
+            'location': result['location'],
             'temperature': float(result['temperature']),
-            'feels_like': float(result['feels_like']),
-            'condition': result['condition'],
-            'humidity': result['humidity'],
-            'wind_speed': result['wind_speed'],
-            'icon': result['icon'],
-            'forecast': result['forecast_summary'],
-            'cached_at': result['cached_at']
+            'feels_like': float(result['temperature_apparent']),
+            'condition': result['weather_description'],
+            'humidity': int(result['humidity']) if result['humidity'] else 0,
+            'wind_speed': float(result['wind_speed']) if result['wind_speed'] else 0,
+            'headache_risk': result['headache_risk_level'],
+            'uv_risk': result['uv_risk_level'],
+            'timestamp': result['timestamp']
         }
     
     async def _should_notify_weather(self, weather_data: Dict[str, Any]) -> bool:
@@ -144,7 +144,8 @@ class WeatherNotificationHandler:
         condition = weather_data['condition']
         humidity = weather_data['humidity']
         wind_speed = weather_data['wind_speed']
-        forecast = weather_data.get('forecast', '')
+        headache_risk = weather_data.get('headache_risk', None)
+        uv_risk = weather_data.get('uv_risk', None)
         
         # Weather emoji based on condition
         emoji = self._get_weather_emoji(condition)
@@ -160,12 +161,19 @@ class WeatherNotificationHandler:
         if forecast:
             message += f"\n*Forecast:*\n{forecast}"
         
+        # Add health alerts if present
+        if headache_risk and headache_risk in ['medium', 'high']:
+            message += f"\n\n🤕 *Headache Risk:* {headache_risk.upper()}"
+            
+        if uv_risk and uv_risk in ['medium', 'high', 'very_high']:
+            message += f"\n\n☀️ *UV Risk:* {uv_risk.replace('_', ' ').upper()}"
+
         # Add advisory if extreme conditions
         if temp < 32:
             message += "\n\n❄️ *Advisory:* Freezing temperatures - dress warmly!"
         elif temp > 95:
             message += "\n\n🌡️ *Advisory:* Extreme heat - stay hydrated!"
-        
+
         if 'rain' in condition.lower():
             message += "\n\n☔ Don't forget your umbrella!"
         

@@ -61,22 +61,21 @@ class EmailNotificationHandler:
     
     async def _get_important_emails(self) -> List[Dict[str, Any]]:
         """
-        Get important unread emails from the last hour
+        Get important emails from the last hour
         
-        Important = high priority OR from VIP senders OR flagged
+        Important = high priority OR requires response
         """
         query = """
-        SELECT id, message_id, subject, sender_email, sender_name,
-               received_date, is_important, category, snippet
-        FROM gmail_messages
+        SELECT id, message_id, subject_line, sender_email, 
+               email_date, priority_level, category, requires_response
+        FROM google_gmail_analysis
         WHERE user_id = $1
-        AND is_read = false
-        AND received_date > NOW() - INTERVAL '1 hour'
+        AND email_date > NOW() - INTERVAL '1 hour'
         AND (
-            is_important = true
-            OR category = 'primary'
+            priority_level IN ('high', 'urgent')
+            OR requires_response = true
         )
-        ORDER BY received_date DESC
+        ORDER BY email_date DESC
         LIMIT 5
         """
         
@@ -92,7 +91,7 @@ class EmailNotificationHandler:
             if not already_notified:
                 filtered.append(dict(email))
         
-        return filtered
+    return filtered
     
     async def _check_if_notified(self, message_id: str) -> bool:
         """Check if we already sent notification for this email"""
@@ -108,33 +107,42 @@ class EmailNotificationHandler:
         return result['count'] > 0 if result else False
     
     async def _send_email_notification(self, email: Dict[str, Any]) -> None:
+    async def _send_email_notification(self, email: Dict[str, Any]) -> None:
         """Send email notification"""
-        subject = email['subject']
-        sender_name = email.get('sender_name') or email['sender_email']
+        subject = email['subject_line']
         sender_email = email['sender_email']
-        snippet = email.get('snippet', '')
-        received_date = email['received_date']
+        priority = email.get('priority_level', 'normal')
+        requires_response = email.get('requires_response', False)
+        email_date = email['email_date']
         
-        if isinstance(received_date, str):
-            received_date = datetime.fromisoformat(received_date)
+        if isinstance(email_date, str):
+            email_date = datetime.fromisoformat(email_date)
         
-        # Format time
-        time_str = received_date.strftime("%I:%M %p").lstrip('0')
+        # Calculate time ago
+        time_ago = datetime.now() - email_date
+        if time_ago.total_seconds() < 60:
+            time_str = "Just now"
+        elif time_ago.total_seconds() < 3600:
+            mins = int(time_ago.total_seconds() / 60)
+            time_str = f"{mins} minute{'s' if mins != 1 else ''} ago"
+        else:
+            hours = int(time_ago.total_seconds() / 3600)
+            time_str = f"{hours} hour{'s' if hours != 1 else ''} ago"
+        
+        # Priority emoji
+        priority_emoji = "🔴" if priority == "urgent" else "🟡" if priority == "high" else "📧"
         
         # Build message
-        message = f"📧 *New Important Email*\n\n"
-        message += f"*From:* {sender_name}\n"
+        message = f"{priority_emoji} *New Important Email*\n\n"
+        message += f"*From:* {sender_email}\n"
         message += f"*Subject:* {subject}\n"
         message += f"*Received:* {time_str}\n"
         
-        if snippet:
-            # Truncate snippet
-            snippet_text = snippet[:150] + "..." if len(snippet) > 150 else snippet
-            message += f"\n{snippet_text}\n"
+        if priority in ['high', 'urgent']:
+            message += f"*Priority:* {priority.upper()}\n"
         
-        # Add priority indicator
-        if email.get('is_important'):
-            message += "\n⚠️ *Marked as Important*"
+        if requires_response:
+            message += f"\n⚠️ *Requires Response*"
         
         # Create action buttons
         buttons = {
@@ -155,10 +163,11 @@ class EmailNotificationHandler:
         # Metadata
         metadata = {
             'message_id': email['message_id'],
-            'email_db_id': email['id'],
             'subject': subject,
-            'sender_email': sender_email,
-            'received_date': received_date.isoformat()
+            'sender': sender_email,
+            'received_at': email_date.isoformat(),
+            'priority': priority,
+            'requires_response': requires_response
         }
         
         # Send via notification manager

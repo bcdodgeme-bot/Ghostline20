@@ -62,19 +62,25 @@ class TrendsNotificationHandler:
     async def _get_trending_opportunities(self) -> List[Dict[str, Any]]:
         """Get high-opportunity trending topics"""
         query = """
-        SELECT id, trend_keyword, trend_traffic, opportunity_score,
-               relevance_reason, content_angles, search_volume,
-               competition_level, trend_status, detected_at
-        FROM google_trends_analysis
-        WHERE user_id = $1
-        AND opportunity_score > 70
-        AND detected_at > NOW() - INTERVAL '4 hours'
-        AND trend_status = 'rising'
-        ORDER BY opportunity_score DESC, trend_traffic DESC
-        LIMIT 5
+        SELECT id, keyword, business_area, opportunity_type,
+               urgency_level, trend_momentum, trend_score_at_alert,
+               momentum_change_percent, created_at, processed,
+               related_rss_insights, bluesky_engagement_potential
+        FROM trend_opportunities
+        WHERE urgency_level IN ('high', 'medium')
+        AND processed = false
+        AND created_at > NOW() - INTERVAL '4 hours'
+        ORDER BY 
+            CASE urgency_level 
+                WHEN 'high' THEN 1 
+                WHEN 'medium' THEN 2 
+                ELSE 3 
+            END,
+            trend_score_at_alert DESC
+        LIMIT 10
         """
         
-        results = await self.db.fetch_all(query, self.user_id)
+        results = await self.db.fetch_all(query)
         
         if not results:
             return []
@@ -86,7 +92,7 @@ class TrendsNotificationHandler:
             if not already_notified:
                 filtered.append(dict(trend))
         
-        return filtered
+    return filtered
     
     async def _check_if_notified(self, trend_id: int) -> bool:
         """Check if we already sent notification for this trend"""
@@ -106,17 +112,39 @@ class TrendsNotificationHandler:
         count = len(trends)
         
         if count == 1:
-            # Single high-value trend
+            # Single high-priority trend
             trend = trends[0]
             
-            message = f"📈 *Trending Opportunity*\n\n"
-            message += f"*Keyword:* {trend['trend_keyword']}\n"
-            message += f"*Score:* {trend['opportunity_score']}/100 🎯\n"
-            message += f"*Traffic:* {trend['trend_traffic']}\n"
-            message += f"*Status:* 🚀 {trend['trend_status'].upper()}\n\n"
+            # Urgency emoji
+            urgency_emoji = "🔴" if trend['urgency_level'] == 'high' else "🟡"
             
-            if trend.get('relevance_reason'):
-                message += f"*Why This Matters:*\n{trend['relevance_reason']}\n\n"
+            message = f"{urgency_emoji} *Trending Opportunity*\n\n"
+            message += f"*Keyword:* {trend['keyword']}\n"
+            message += f"*Business Area:* {trend['business_area']}\n"
+            message += f"*Trend Score:* {trend['trend_score_at_alert']}\n"
+            message += f"*Momentum:* {trend['trend_momentum'].upper()}\n"
+            message += f"*Urgency:* {trend['urgency_level'].upper()}\n\n"
+            
+            # Show momentum change if significant
+            if trend.get('momentum_change_percent'):
+                change = float(trend['momentum_change_percent'])
+                if change > 0:
+                    message += f"📊 Momentum increased by {change:.1f}%\n\n"
+            
+            # Add RSS insights if available
+            rss_insights = trend.get('related_rss_insights', {})
+            if rss_insights and isinstance(rss_insights, dict):
+                if rss_insights.get('summary'):
+                    message += f"💡 *Market Insight:*\n{rss_insights['summary'][:200]}\n\n"
+            
+            # Show Bluesky potential if high
+            bluesky_potential = trend.get('bluesky_engagement_potential', 0)
+            if bluesky_potential > 0.5:
+                pct = int(bluesky_potential * 100)
+                message += f"🦋 Bluesky engagement potential: {pct}%\n\n"
+            
+            message += f"*Opportunity Type:* {trend['opportunity_type']}\n"
+            message += f"Perfect timing to create content! 🚀"
             
             if trend.get('content_angles'):
                 angles = trend['content_angles']
@@ -154,19 +182,25 @@ class TrendsNotificationHandler:
         else:
             # Multiple trends - digest
             message = f"📈 *{count} Trending Opportunities*\n\n"
+        
+            for i, trend in enumerate(trends[:5], 1):
+                urgency_emoji = "🔴" if trend['urgency_level'] == 'high' else "🟡"
+                message += f"{i}. {urgency_emoji} *{trend['keyword']}*\n"
+                message += f"   {trend['business_area']} | Score: {trend['trend_score_at_alert']}\n"
+                message += f"   Momentum: {trend['trend_momentum'].upper()}\n\n"
             
-            for i, trend in enumerate(trends, 1):
-                message += f"{i}. *{trend['trend_keyword']}* - Score: {trend['opportunity_score']}/100\n"
-                message += f"   Traffic: {trend['trend_traffic']} | {trend['trend_status'].upper()}\n\n"
+            if count > 5:
+                message += f"_...and {count - 5} more opportunities_\n\n"
             
-            message += "_Check the trends dashboard for detailed analysis._"
+            message += "Multiple trending opportunities detected! 🚀"
             
             buttons = None
             
             metadata = {
-                'trend_count': count,
-                'trend_ids': [t['id'] for t in trends],
-                'notification_type': 'digest'
+                'opportunity_count': count,
+                'opportunity_ids': [str(t['id']) for t in trends[:5]],
+                'notification_type': 'trending_opportunity',
+                'urgency_levels': [t['urgency_level'] for t in trends[:5]]
             }
         
         # Send via notification manager
@@ -192,16 +226,15 @@ class TrendsNotificationHandler:
             # Get today's trend stats
             query = """
             SELECT 
-                COUNT(*) as total_trends,
-                COUNT(*) FILTER (WHERE opportunity_score > 70) as high_opportunity,
-                COUNT(*) FILTER (WHERE trend_status = 'rising') as rising_trends,
-                MAX(opportunity_score) as top_score,
-                (SELECT trend_keyword FROM google_trends_analysis 
-                 WHERE user_id = $1 AND DATE(detected_at) = CURRENT_DATE 
-                 ORDER BY opportunity_score DESC LIMIT 1) as top_trend
-            FROM google_trends_analysis
-            WHERE user_id = $1
-            AND DATE(detected_at) = CURRENT_DATE
+                COUNT(*) as total_opportunities,
+                COUNT(*) FILTER (WHERE urgency_level = 'high') as high_urgency,
+                COUNT(*) FILTER (WHERE trend_momentum = 'rising') as rising_trends,
+                MAX(trend_score_at_alert) as top_score,
+                (SELECT keyword FROM trend_opportunities 
+                 WHERE DATE(created_at) = CURRENT_DATE 
+                 ORDER BY trend_score_at_alert DESC LIMIT 1) as top_keyword
+            FROM trend_opportunities
+            WHERE DATE(created_at) = CURRENT_DATE
             """
             
             result = await self.db.fetch_one(query, self.user_id)
