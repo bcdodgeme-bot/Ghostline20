@@ -92,7 +92,7 @@ class TrendsNotificationHandler:
             if not already_notified:
                 filtered.append(dict(trend))
         
-    return filtered
+        return filtered
     
     async def _check_if_notified(self, trend_id: int) -> bool:
         """Check if we already sent notification for this trend"""
