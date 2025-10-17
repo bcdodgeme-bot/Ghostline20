@@ -68,12 +68,11 @@ class CalendarNotificationHandler:
         """Get calendar events in the next 2 hours"""
         query = """
         SELECT id, event_id, summary, description, start_time, end_time,
-               location, attendees, calendar_name
-        FROM calendar_events
+               location, attendees_count, calendar_id
+        FROM google_calendar_events
         WHERE user_id = $1
         AND start_time > NOW()
         AND start_time < NOW() + INTERVAL '2 hours'
-        AND cancelled = false
         ORDER BY start_time
         """
         
@@ -140,7 +139,7 @@ class CalendarNotificationHandler:
         
         description = event.get('description', '')
         location = event.get('location', '')
-        attendees = event.get('attendees', [])
+        attendees_count = event.get('attendees_count', 0)
         
         # Calculate time until event
         minutes_until = int((start_time - datetime.now()).total_seconds() / 60)
@@ -166,8 +165,8 @@ class CalendarNotificationHandler:
             desc = description[:200] + "..." if len(description) > 200 else description
             message += f"\n{desc}\n"
         
-        if attendees and len(attendees) > 0:
-            message += f"\n👥 {len(attendees)} attendee(s)"
+        if attendees_count > 0:
+            message += f"👥 *Attendees:* {attendees_count}\n"
         
         # Create quick action buttons (if meeting link exists)
         buttons = None
@@ -201,7 +200,7 @@ class CalendarNotificationHandler:
             'summary': summary,
             'start_time': start_time.isoformat(),
             'reminder_minutes': minutes_until,
-            'calendar_name': event.get('calendar_name', 'primary')
+            'calendar_id': event.get('calendar_id', 'primary')
         }
         
         # Send via notification manager
@@ -227,10 +226,9 @@ class CalendarNotificationHandler:
             # Get today's events
             query = """
             SELECT COUNT(*) as count, MIN(start_time) as first_event
-            FROM calendar_events
+            FROM google_calendar_events
             WHERE user_id = $1
             AND DATE(start_time) = CURRENT_DATE
-            AND cancelled = false
             """
             
             result = await self.db.fetch_one(query, self.user_id)

@@ -19,20 +19,18 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
 
-from ...ai.openrouter_client import get_openrouter_client
-
 logger = logging.getLogger(__name__)
 
 class MeetingProcessor:
     """
-    Processes meeting transcripts using Claude AI to generate insights
+    Processes meeting transcripts using Claude AI via OpenRouter to generate insights
     """
     
     def __init__(self):
-        """Initialize meeting processor with Claude client"""
-        self.model = "anthropic/claude-3.5-sonnet"  # Best Claude model
+        """Initialize meeting processor with OpenRouter Claude client"""
+        self.model = "anthropic/claude-3.5-sonnet"  # Best Claude model via OpenRouter
         
-        logger.info("✅ Meeting processor initialized with Claude 3.5 Sonnet")
+        logger.info("✅ Meeting processor initialized with Claude 3.5 Sonnet via OpenRouter")
     
     async def generate_summary(self, meeting_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -85,8 +83,11 @@ class MeetingProcessor:
     async def _generate_ai_summary(self, title: str, date: str,
                                   participants: List[str], duration: int,
                                   transcript: str) -> Dict[str, Any]:
-        """Generate comprehensive summary using Claude AI"""
+        """Generate comprehensive summary using Claude AI via OpenRouter"""
         try:
+            # Import OpenRouter client
+            from ...ai.openrouter_client import get_openrouter_client
+            
             # Build detailed prompt for Claude
             prompt = self._build_summary_prompt(
                 title, date, participants, duration, transcript
@@ -95,7 +96,7 @@ class MeetingProcessor:
             # Get OpenRouter client
             openrouter = await get_openrouter_client()
             
-            # Call Claude API
+            # Call Claude via OpenRouter
             response = await openrouter.chat_completion(
                 messages=[
                     {
@@ -205,7 +206,7 @@ Respond ONLY with the JSON object, no other text."""
                 parsed = json.loads(json_str)
                 
                 # Validate required fields
-                required_fields = ['summary', 'key_points', 'action_items', 
+                required_fields = ['summary', 'key_points', 'action_items',
                                  'topics', 'sentiment']
                 
                 for field in required_fields:
@@ -292,7 +293,9 @@ async def process_meeting(meeting_data: Dict[str, Any]) -> Dict[str, Any]:
 
 async def extract_action_items(transcript_text: str) -> List[Dict[str, Any]]:
     """Convenience function to extract just action items from transcript"""
-    processor = MeetingProcessor()
+    
+    # Import OpenRouter client
+    from ...ai.openrouter_client import get_openrouter_client
     
     # Build simplified prompt for action items only
     try:

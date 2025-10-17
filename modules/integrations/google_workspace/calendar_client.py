@@ -201,35 +201,35 @@ class CalendarClient:
                 end_time = datetime.fromisoformat(end['date'])
                 all_day = True
             
-            async with db_manager.get_connection() as conn:
-                await conn.execute('''
-                    INSERT INTO google_calendar_events
-                    (user_id, calendar_id, event_id, summary, description, location,
-                     start_time, end_time, all_day, attendees_count, creator_email, fetched_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                    ON CONFLICT (user_id, event_id) DO UPDATE SET
-                        summary = EXCLUDED.summary,
-                        description = EXCLUDED.description,
-                        location = EXCLUDED.location,
-                        start_time = EXCLUDED.start_time,
-                        end_time = EXCLUDED.end_time,
-                        attendees_count = EXCLUDED.attendees_count,
-                        fetched_at = NOW()
-                ''',
+            # FIX: Use db_manager.execute() instead of get_connection()
+            await db_manager.execute('''
+                INSERT INTO google_calendar_events
+                (user_id, calendar_id, event_id, summary, description, location,
+                 start_time, end_time, all_day, attendees_count, creator_email, fetched_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+                ON CONFLICT (user_id, event_id) DO UPDATE SET
+                    summary = EXCLUDED.summary,
+                    description = EXCLUDED.description,
+                    location = EXCLUDED.location,
+                    start_time = EXCLUDED.start_time,
+                    end_time = EXCLUDED.end_time,
+                    attendees_count = EXCLUDED.attendees_count,
+                    fetched_at = NOW()
+            ''',
                 self._user_id,
                 calendar_id,
                 event['id'],
-                event['summary'],
-                event['description'],
-                event['location'],
+                event.get('summary', ''),
+                event.get('description', ''),
+                event.get('location', ''),
                 start_time,
                 end_time,
                 all_day,
-                len(event['attendees']),
-                event['creator'].get('email', '')
-                )
+                len(event.get('attendees', [])),
+                event.get('creator', {}).get('email', '')
+            )
             
-            logger.debug(f"💾 Stored event: {event['summary']}")
+            logger.debug(f"💾 Stored event: {event.get('summary', 'Untitled')}")
             
         except Exception as e:
             logger.error(f"❌ Failed to store event data: {e}", exc_info=True)
