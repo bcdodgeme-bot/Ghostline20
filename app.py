@@ -78,7 +78,7 @@ from modules.integrations.telegram.notification_types.calendar_notifications imp
 from modules.integrations.telegram.notification_types.weather_notifications import WeatherNotificationHandler
 from modules.integrations.telegram.notification_types.email_notifications import EmailNotificationHandler
 from modules.integrations.telegram.notification_types.clickup_notifications import ClickUpNotificationHandler
-from modules.integrations.telegram.notification_types.bluesky_notifications import BlueSkyNotificationHandler
+from modules.integrations.telegram.notification_types.bluesky_notifications import BlueskyNotificationHandler
 from modules.integrations.telegram.notification_types.trends_notifications import TrendsNotificationHandler
 from modules.integrations.telegram.notification_types.analytics_notifications import AnalyticsNotificationHandler
 
@@ -309,7 +309,7 @@ async def startup_event():
         weather_handler = WeatherNotificationHandler(telegram_notification_manager)
         email_handler = EmailNotificationHandler(telegram_notification_manager)
         clickup_handler = ClickUpNotificationHandler(telegram_notification_manager)
-        bluesky_handler = BlueSkyNotificationHandler(telegram_notification_manager)
+        bluesky_handler = BlueskyNotificationHandler(telegram_notification_manager)  # lowercase "s"
         trends_handler = TrendsNotificationHandler(telegram_notification_manager)
         analytics_handler = AnalyticsNotificationHandler(telegram_notification_manager)
     

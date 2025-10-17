@@ -1510,10 +1510,10 @@ class SyntaxPrimeChat {
         const toggleBtn = document.getElementById('sidebarToggle');
         
         if (sidebar) {
-            sidebar.classList.toggle('collapsed');
+            sidebar.classList.toggle('open');
             
             // Update toggle button icon
-            if (sidebar.classList.contains('collapsed')) {
+            if (sidebar.classList.contains('open')) {
                 toggleBtn.innerHTML = `
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="3" y1="6" x2="21" y2="6"/>
