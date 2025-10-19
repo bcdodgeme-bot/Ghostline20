@@ -20,7 +20,7 @@ from datetime import datetime
 import json
 
 # ✅ FIXED: Import OpenRouter client from correct location
-from ai.openrouter_client import get_openrouter_client
+from modules.ai.openrouter_client import get_openrouter_client
 
 logger = logging.getLogger(__name__)
 
