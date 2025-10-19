@@ -3901,3 +3901,144 @@ Use `list reminders` to see your pending reminders.
     except Exception as e:
         logger.error(f"Failed to cancel reminder: {e}")
         return f"❌ **Error:** {str(e)}"
+
+#-- Section 16: Fathom Meeting Integration Functions - 10/19/25
+def detect_meeting_query(message: str) -> tuple[bool, str]:
+    """
+    Detect meeting-related queries
+    
+    Returns:
+        tuple: (is_meeting_query, query_type)
+        query_type: 'specific', 'recent', 'search', 'action_items'
+    """
+    meeting_keywords = [
+        "meeting", "meetings", "discussed", "talked about",
+        "action item", "action items", "follow up", "follow-up",
+        "what did we decide", "what was decided", "meeting notes",
+        "decompress", "debrief", "recap"
+    ]
+    
+    message_lower = message.lower()
+    
+    # Check if it's a meeting query
+    is_meeting = any(keyword in message_lower for keyword in meeting_keywords)
+    
+    if not is_meeting:
+        return (False, None)
+    
+    # Determine query type
+    if 'action item' in message_lower:
+        return (True, 'action_items')
+    elif any(word in message_lower for word in ['recent', 'latest', 'last', 'today', 'yesterday', 'this week']):
+        return (True, 'recent')
+    elif any(word in message_lower for word in ['search', 'find', 'look for']):
+        return (True, 'search')
+    else:
+        return (True, 'specific')
+
+async def search_meetings(
+    query: str,
+    user_id: str,
+    query_type: str = 'recent',
+    limit: int = 5
+) -> str:
+    """
+    Search meetings and return formatted context for AI
+    
+    Args:
+        query: User's search query
+        user_id: User ID
+        query_type: Type of search ('recent', 'specific', 'search', 'action_items')
+        limit: Max number of meetings to return
+    
+    Returns:
+        Formatted meeting context string
+    """
+    try:
+        from ..core.database import db_manager
+        
+        # Build appropriate query based on type
+        if query_type == 'recent':
+            sql = """
+                SELECT 
+                    title,
+                    meeting_date,
+                    duration_minutes,
+                    participants,
+                    ai_summary,
+                    key_points
+                FROM fathom_meetings
+                ORDER BY meeting_date DESC
+                LIMIT $1
+            """
+            meetings = await db_manager.fetch_all(sql, limit)
+        
+        elif query_type == 'action_items':
+            sql = """
+                SELECT DISTINCT
+                    m.title,
+                    m.meeting_date,
+                    m.ai_summary
+                FROM fathom_meetings m
+                WHERE m.ai_summary IS NOT NULL
+                ORDER BY m.meeting_date DESC
+                LIMIT $1
+            """
+            meetings = await db_manager.fetch_all(sql, limit)
+        
+        else:  # specific or search
+            # Simple text search in title and summary
+            search_term = f"%{query.lower()}%"
+            sql = """
+                SELECT 
+                    title,
+                    meeting_date,
+                    duration_minutes,
+                    participants,
+                    ai_summary,
+                    key_points
+                FROM fathom_meetings
+                WHERE 
+                    LOWER(title) LIKE $1
+                    OR LOWER(ai_summary) LIKE $1
+                ORDER BY meeting_date DESC
+                LIMIT $2
+            """
+            meetings = await db_manager.fetch_all(sql, search_term, limit)
+        
+        if not meetings or len(meetings) == 0:
+            return "\n\n📅 **Meeting Context:** No meetings found matching your query."
+        
+        # Format meetings for AI context
+        meeting_context = ["\n\n📅 **Recent Meeting Context:**\n"]
+        
+        for meeting in meetings:
+            meeting_text = [
+                f"\n**{meeting['title']}**",
+                f"Date: {meeting['meeting_date']}",
+                f"Duration: {meeting['duration_minutes']} minutes"
+            ]
+            
+            if meeting.get('participants'):
+                participants = meeting['participants']
+                if isinstance(participants, list) and len(participants) > 0:
+                    meeting_text.append(f"Participants: {', '.join([str(p) for p in participants[:5]])}")
+            
+            if meeting.get('ai_summary'):
+                meeting_text.append(f"\nSummary: {meeting['ai_summary']}")
+            
+            if meeting.get('key_points'):
+                key_points = meeting['key_points']
+                if isinstance(key_points, list) and len(key_points) > 0:
+                    meeting_text.append("\nKey Points:")
+                    for point in key_points[:3]:  # Limit to 3 points
+                        meeting_text.append(f"  • {point}")
+            
+            meeting_context.append("\n".join(meeting_text))
+            meeting_context.append("---")
+        
+        return "\n".join(meeting_context)
+    
+    except Exception as e:
+        logger.error(f"Failed to search meetings: {e}")
+        return "\n\n📅 **Meeting Context:** Unable to retrieve meeting information."

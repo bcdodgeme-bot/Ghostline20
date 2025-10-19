@@ -182,7 +182,8 @@ async def chat_with_ai(
                  detect_reminder_command, process_reminder_create,
                  process_reminder_list, process_reminder_cancel,
                  detect_email_detail_command, process_email_detail_command,
-                 detect_draft_creation_command, process_draft_creation_command # NEW 10/2/25
+                 detect_draft_creation_command, process_draft_creation_command, detect_meeting_query,
+                 search_meetings # NEW 10/2/25
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -328,6 +329,25 @@ Weather data powered by Tomorrow.io"""
             except Exception as e:
                 logger.error(f"❌ DEBUG: Weather processing failed: {e}")
                 special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
+        
+        # Check for meeting queries - NEW 10/19/25
+        is_meeting_query, meeting_query_type = detect_meeting_query(message)
+        if is_meeting_query:
+            logger.info(f"📅 Meeting query detected: {meeting_query_type}")
+            try:
+                meeting_context = await search_meetings(
+                    query=message,
+                    user_id=user_id,
+                    query_type=meeting_query_type,
+                    limit=5
+                )
+                
+                # Add meeting context to the message
+                full_message += meeting_context
+                logger.info(f"✅ Meeting context added to message")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to get meeting context: {e}")
         
         # 2. 🔵 Bluesky command detection (SECOND)
         elif detect_bluesky_command(message_content):

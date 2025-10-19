@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 class MeetingRecord:
     """Container for meeting data"""
     id: str
-    fathom_meeting_id: str
+    # ✅ FIXED: Use recording_id instead of meeting_id
+    fathom_recording_id: int
     title: str
     meeting_date: datetime
     duration_minutes: int
@@ -66,47 +67,60 @@ class FathomDatabaseManager:
     # MEETING STORAGE
     # ============================================================================
     
-    async def store_meeting(self, meeting_data: Dict[str, Any], 
+    async def store_meeting(self, recording_data: Dict[str, Any],
                           summary_data: Dict[str, Any]) -> str:
         """
         Store complete meeting data (details + summary + action items + topics)
         
         Args:
-            meeting_data: Raw meeting data from Fathom API
+            recording_data: Raw recording data from Fathom API
             summary_data: AI-generated summary and insights
             
         Returns:
             Meeting ID (UUID) from database
         """
         try:
-            # Extract meeting details
-            details = meeting_data.get('details', {})
-            transcript = meeting_data.get('transcript', {})
+            # ✅ FIXED: Extract from correct structure
+            details = recording_data.get('details', {})
+            transcript_data = recording_data.get('transcript', {})
             
-            meeting_id = details.get('id')
+            # ✅ FIXED: Use correct field names from Fathom API
+            recording_id = details.get('id')  # This is an integer
             title = details.get('title', 'Untitled Meeting')
-            meeting_date = datetime.fromisoformat(
-                details.get('start_time', datetime.now().isoformat())
-            )
-            duration = details.get('duration_minutes', 0)
-            participants = details.get('participants', [])
             
-            # Format transcript text
-            transcript_text = self._format_transcript_text(transcript)
+            # ✅ FIXED: Handle start_time properly
+            start_time_str = details.get('start_time', datetime.now().isoformat())
+            if isinstance(start_time_str, str):
+                # Remove 'Z' and parse
+                start_time_str = start_time_str.replace('Z', '+00:00')
+                meeting_date = datetime.fromisoformat(start_time_str)
+            else:
+                meeting_date = start_time_str
+            
+            # ✅ FIXED: Duration is in seconds, convert to minutes
+            duration_seconds = details.get('duration', 0)
+            duration_minutes = duration_seconds // 60
+            
+            # ✅ FIXED: Extract participant names from attendees
+            attendees = details.get('attendees', [])
+            participants = [att.get('name', 'Unknown') for att in attendees]
+            
+            # ✅ FIXED: Transcript is plain text, not segments
+            transcript_text = transcript_data.get('transcript', '')
             
             # Extract summary components
             ai_summary = summary_data.get('summary', '')
             key_points = summary_data.get('key_points', [])
             sentiment = summary_data.get('sentiment', 'neutral')
             
-            # Store main meeting record
+            # ✅ FIXED: Use recording_id (BIGINT) instead of meeting_id
             query = '''
                 INSERT INTO fathom_meetings 
-                (fathom_meeting_id, title, meeting_date, duration_minutes,
+                (recording_id, title, meeting_date, duration_minutes,
                  participants, transcript_text, ai_summary, key_points,
                  sentiment, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-                ON CONFLICT (fathom_meeting_id) 
+                ON CONFLICT (recording_id) 
                 DO UPDATE SET
                     title = EXCLUDED.title,
                     ai_summary = EXCLUDED.ai_summary,
@@ -117,10 +131,10 @@ class FathomDatabaseManager:
             
             result = await self.db.fetch_one(
                 query,
-                meeting_id,
+                recording_id,
                 title,
                 meeting_date,
-                duration,
+                duration_minutes,
                 participants,
                 transcript_text,
                 ai_summary,
@@ -148,7 +162,7 @@ class FathomDatabaseManager:
             logger.error(f"❌ Failed to store meeting: {e}")
             raise
     
-    async def _store_action_items(self, meeting_id: str, 
+    async def _store_action_items(self, meeting_id: str,
                                  action_items: List[Dict[str, Any]]) -> None:
         """Store action items extracted from meeting"""
         try:
@@ -174,7 +188,7 @@ class FathomDatabaseManager:
         except Exception as e:
             logger.error(f"❌ Failed to store action items: {e}")
     
-    async def _store_topics(self, meeting_id: str, 
+    async def _store_topics(self, meeting_id: str,
                           topics: List[Dict[str, Any]]) -> None:
         """Store topics discussed in meeting"""
         try:
@@ -203,7 +217,7 @@ class FathomDatabaseManager:
     # ============================================================================
     
     async def get_meeting_by_id(self, meeting_id: str) -> Optional[Dict[str, Any]]:
-        """Get complete meeting data by ID"""
+        """Get complete meeting data by database ID"""
         try:
             query = '''
                 SELECT * FROM fathom_meetings
@@ -227,6 +241,35 @@ class FathomDatabaseManager:
             
         except Exception as e:
             logger.error(f"❌ Failed to get meeting: {e}")
+            return None
+    
+    # ✅ ADDED: New method to get meeting by recording_id
+    async def get_meeting_by_recording_id(self, recording_id: int) -> Optional[Dict[str, Any]]:
+        """Get complete meeting data by Fathom recording_id"""
+        try:
+            query = '''
+                SELECT * FROM fathom_meetings
+                WHERE recording_id = $1
+            '''
+            
+            result = await self.db.fetch_one(query, recording_id)
+            
+            if not result:
+                return None
+            
+            meeting = dict(result)
+            meeting_id = str(meeting['id'])
+            
+            # Get action items
+            meeting['action_items'] = await self._get_action_items(meeting_id)
+            
+            # Get topics
+            meeting['topics'] = await self._get_topics(meeting_id)
+            
+            return meeting
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get meeting by recording_id: {e}")
             return None
     
     async def _get_action_items(self, meeting_id: str) -> List[Dict[str, Any]]:
@@ -264,8 +307,9 @@ class FathomDatabaseManager:
     async def get_recent_meetings(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent meetings ordered by date"""
         try:
+            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
-                SELECT id, fathom_meeting_id, title, meeting_date,
+                SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
                        key_points, created_at
                 FROM fathom_meetings
@@ -280,16 +324,16 @@ class FathomDatabaseManager:
             logger.error(f"❌ Failed to get recent meetings: {e}")
             return []
     
-    async def search_meetings(self, query_text: str, 
+    async def search_meetings(self, query_text: str,
                             limit: int = 10) -> List[Dict[str, Any]]:
         """
         Search meetings by keywords in title, summary, or transcript
         Uses PostgreSQL full-text search for better results
         """
         try:
-            # Search in title, summary, key points, and transcript
+            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
-                SELECT id, fathom_meeting_id, title, meeting_date,
+                SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
                        key_points, created_at,
                        ts_rank(to_tsvector('english', 
@@ -318,8 +362,9 @@ class FathomDatabaseManager:
                                         end_date: datetime) -> List[Dict[str, Any]]:
         """Get meetings within a date range"""
         try:
+            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
-                SELECT id, fathom_meeting_id, title, meeting_date,
+                SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
                        key_points, created_at
                 FROM fathom_meetings
@@ -357,7 +402,7 @@ class FathomDatabaseManager:
             logger.error(f"❌ Failed to get pending action items: {e}")
             return []
     
-    async def update_action_item_status(self, item_id: str, 
+    async def update_action_item_status(self, item_id: str,
                                        status: str) -> bool:
         """Update action item status (pending/completed/cancelled)"""
         try:
@@ -422,36 +467,8 @@ class FathomDatabaseManager:
     # HELPER METHODS
     # ============================================================================
     
-    def _format_transcript_text(self, transcript: Dict[str, Any]) -> str:
-        """Format transcript segments into readable text"""
-        try:
-            segments = transcript.get('segments', [])
-            
-            if not segments:
-                return ""
-            
-            lines = []
-            current_speaker = None
-            
-            for segment in segments:
-                speaker = segment.get('speaker', 'Unknown')
-                text = segment.get('text', '').strip()
-                
-                if not text:
-                    continue
-                
-                # Add speaker label when speaker changes
-                if speaker != current_speaker:
-                    lines.append(f"\n[{speaker}]")
-                    current_speaker = speaker
-                
-                lines.append(text)
-            
-            return "\n".join(lines).strip()
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to format transcript: {e}")
-            return ""
+    # ✅ REMOVED: _format_transcript_text() - no longer needed
+    # Transcript is already plain text from Fathom
     
     async def health_check(self) -> Dict[str, Any]:
         """Check database health and connectivity"""
@@ -484,11 +501,11 @@ class FathomDatabaseManager:
             }
 
 # Convenience functions for external use
-async def store_fathom_meeting(meeting_data: Dict[str, Any],
+async def store_fathom_meeting(recording_data: Dict[str, Any],
                               summary_data: Dict[str, Any]) -> str:
     """Convenience function to store meeting"""
     db = FathomDatabaseManager()
-    return await db.store_meeting(meeting_data, summary_data)
+    return await db.store_meeting(recording_data, summary_data)
 
 async def search_meeting_history(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """Convenience function to search meetings"""

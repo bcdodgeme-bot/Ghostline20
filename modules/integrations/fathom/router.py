@@ -30,6 +30,8 @@ from pydantic import BaseModel
 from .fathom_handler import FathomHandler
 from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
+from modules.integrations.telegram.notification_manager import NotificationManager
+from modules.integrations.telegram.bot_client import TelegramBotClient
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +115,21 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.info(f"   Event type: {event_type}")
         logger.info(f"   Meeting ID: {meeting_id}")
         
-        # Only process meeting.ended events
-        if event_type != 'meeting.ended':
+        # Process transcript, summary, or action_items events
+        # We'll wait for 'summary' event since that means everything is ready
+        if event_type not in ['transcript', 'summary', 'action_items']:
             logger.info(f"⏭️ Ignoring event type: {event_type}")
             return WebhookResponse(
                 success=True,
                 message=f"Event type {event_type} ignored"
+            )
+        
+        # Only process on 'summary' event to avoid duplicate processing
+        if event_type != 'summary':
+            logger.info(f"⏭️ Waiting for summary event, got: {event_type}")
+            return WebhookResponse(
+                success=True,
+                message=f"Acknowledged {event_type}, waiting for summary"
             )
         
         if not meeting_id:
@@ -193,6 +204,89 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
         db_meeting_id = await database_manager.store_meeting(meeting_data, summary_data)
         
         logger.info(f"✅ Meeting processing complete: {db_meeting_id}")
+        
+        # Step 4: Send Telegram notification with summary
+        try:
+            logger.info("   📱 Sending Telegram notification...")
+            
+            # Initialize Telegram notification manager
+            telegram_bot = TelegramBotClient()
+            notification_manager = NotificationManager(telegram_bot)
+            
+            # Extract meeting details for notification
+            details = meeting_data.get('details', {})
+            title = details.get('title', 'Untitled Meeting')
+            meeting_date = details.get('start_time', 'Date not available')
+            duration = details.get('duration_minutes', 0)
+            participants = details.get('participants', [])
+            
+            # Format participants list
+            if participants:
+                participants_text = ", ".join([str(p) for p in participants[:5]])  # Limit to 5 to avoid huge list
+                if len(participants) > 5:
+                    participants_text += f" + {len(participants) - 5} more"
+            else:
+                participants_text = "No participants listed"
+            
+            # Extract summary components
+            summary_text = summary_data.get('summary', 'Summary not available')
+            key_points = summary_data.get('key_points', [])
+            action_items = summary_data.get('action_items', [])
+            
+            # Build formatted Telegram message
+            message_parts = [
+                f"✅ *Meeting Processed: {title}*",
+                "",
+                f"📅 {meeting_date} | ⏱️ {duration} minutes",
+                f"👥 Participants: {participants_text}",
+                "",
+                "📝 *SUMMARY:*",
+                summary_text,
+            ]
+            
+            # Add key points if available
+            if key_points:
+                message_parts.append("")
+                message_parts.append("🎯 *KEY POINTS:*")
+                for point in key_points[:5]:  # Limit to 5 points
+                    message_parts.append(f"• {point}")
+            
+            # Add action items if available
+            if action_items:
+                message_parts.append("")
+                message_parts.append("✅ *ACTION ITEMS:*")
+                for item in action_items[:5]:  # Limit to 5 items
+                    if isinstance(item, dict):
+                        task_text = item.get('text', 'Unknown task')
+                        assigned = item.get('assigned_to', 'Unassigned')
+                        message_parts.append(f"• {task_text} - {assigned}")
+                    else:
+                        message_parts.append(f"• {item}")
+            
+            message_parts.append("")
+            message_parts.append("---")
+            message_parts.append("💬 Ready to paste into Slack")
+            
+            # Join all parts into final message
+            notification_text = "\n".join(message_parts)
+            
+            # Send notification
+            result = await notification_manager.send_notification(
+                user_id="b7c60682-4815-4d9d-8ebe-66c6cd24eff9",
+                notification_type="fathom",
+                notification_subtype="meeting_processed",
+                message_text=notification_text
+            )
+            
+            if result.get('success'):
+                logger.info("   ✅ Telegram notification sent successfully")
+            else:
+                logger.warning(f"   ⚠️ Telegram notification failed: {result.get('error')}")
+                
+        except Exception as telegram_error:
+            # Don't fail the whole process if Telegram fails
+            logger.error(f"   ❌ Telegram notification error: {telegram_error}")
+            logger.info("   ℹ️ Meeting still processed successfully, only notification failed")
         
     except Exception as e:
         logger.error(f"❌ Background processing failed for {meeting_id}: {e}")

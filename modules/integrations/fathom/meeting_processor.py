@@ -19,6 +19,9 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
 
+# ✅ FIXED: Import OpenRouter client from correct location
+from ai.openrouter_client import get_openrouter_client
+
 logger = logging.getLogger(__name__)
 
 class MeetingProcessor:
@@ -32,44 +35,48 @@ class MeetingProcessor:
         
         logger.info("✅ Meeting processor initialized with Claude 3.5 Sonnet via OpenRouter")
     
-    async def generate_summary(self, meeting_data: Dict[str, Any]) -> Dict[str, Any]:
+    # ✅ FIXED: Updated to handle actual Fathom data structure
+    async def generate_summary(self, recording_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generate comprehensive AI summary from meeting data
+        Generate comprehensive AI summary from recording data
         
         Args:
-            meeting_data: Complete meeting data from Fathom API
+            recording_data: Complete recording data from Fathom API
+                          (includes both details and transcript)
             
         Returns:
             Dict with summary, action items, topics, sentiment, etc.
         """
         try:
-            # Extract meeting details
-            details = meeting_data.get('details', {})
-            transcript = meeting_data.get('transcript', {})
+            # ✅ FIXED: Extract from correct structure
+            # recording_data has: 'recording_id', 'details', 'transcript'
+            details = recording_data.get('details', {})
+            transcript_data = recording_data.get('transcript', {})
             
+            # ✅ FIXED: Extract fields that actually exist in Fathom response
             title = details.get('title', 'Untitled Meeting')
-            meeting_date = details.get('start_time', '')
-            participants = details.get('participants', [])
-            duration = details.get('duration_minutes', 0)
+            start_time = details.get('start_time', '')
+            duration = details.get('duration', 0)  # Duration in seconds
+            participants = details.get('attendees', [])  # 'attendees' not 'participants'
             
-            # Format transcript for AI processing
-            transcript_text = self._format_transcript(transcript)
+            # ✅ FIXED: Get transcript text directly (it's already formatted)
+            transcript_text = transcript_data.get('transcript', '')
             
             if not transcript_text:
                 logger.warning("⚠️ No transcript text available")
                 return self._create_empty_summary()
             
-            logger.info(f"📝 Processing meeting: {title}")
-            logger.info(f"   Duration: {duration} minutes")
+            logger.info(f"🔍 Processing meeting: {title}")
+            logger.info(f"   Duration: {duration // 60} minutes")
             logger.info(f"   Participants: {len(participants)}")
             logger.info(f"   Transcript: {len(transcript_text)} characters")
             
             # Generate AI summary using Claude
             summary_result = await self._generate_ai_summary(
                 title=title,
-                date=meeting_date,
+                date=start_time,
                 participants=participants,
-                duration=duration,
+                duration=duration // 60,  # Convert to minutes
                 transcript=transcript_text
             )
             
@@ -81,13 +88,16 @@ class MeetingProcessor:
             return self._create_empty_summary(error=str(e))
     
     async def _generate_ai_summary(self, title: str, date: str,
-                                  participants: List[str], duration: int,
+                                  participants: List[Dict], duration: int,
                                   transcript: str) -> Dict[str, Any]:
         """Generate comprehensive summary using Claude AI"""
         try:
+            # ✅ FIXED: Extract participant names from attendee objects
+            participant_names = [p.get('name', 'Unknown') for p in participants]
+            
             # Build detailed prompt for Claude
             prompt = self._build_summary_prompt(
-                title, date, participants, duration, transcript
+                title, date, participant_names, duration, transcript
             )
             
             # Get OpenRouter client
@@ -222,37 +232,8 @@ Respond ONLY with the JSON object, no other text."""
             logger.error(f"Response text: {ai_text[:500]}")
             return self._create_empty_summary()
     
-    def _format_transcript(self, transcript: Dict[str, Any]) -> str:
-        """Format transcript into clean text for AI processing"""
-        try:
-            segments = transcript.get('segments', [])
-            
-            if not segments:
-                return ""
-            
-            # Format as: [Speaker] Text
-            formatted_lines = []
-            current_speaker = None
-            
-            for segment in segments:
-                speaker = segment.get('speaker', 'Unknown')
-                text = segment.get('text', '').strip()
-                
-                if not text:
-                    continue
-                
-                # Add speaker label when speaker changes
-                if speaker != current_speaker:
-                    formatted_lines.append(f"\n[{speaker}]")
-                    current_speaker = speaker
-                
-                formatted_lines.append(text)
-            
-            return "\n".join(formatted_lines).strip()
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to format transcript: {e}")
-            return ""
+    # ✅ REMOVED: _format_transcript() method - no longer needed
+    # Fathom's transcript is already formatted as plain text
     
     def _get_default_value(self, field: str) -> Any:
         """Get default value for a missing field"""
@@ -283,10 +264,10 @@ Respond ONLY with the JSON object, no other text."""
         }
 
 # Convenience functions for external use
-async def process_meeting(meeting_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Convenience function to process a meeting"""
+async def process_meeting(recording_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convenience function to process a recording"""
     processor = MeetingProcessor()
-    return await processor.generate_summary(meeting_data)
+    return await processor.generate_summary(recording_data)
 
 async def extract_action_items(transcript_text: str) -> List[Dict[str, Any]]:
     """Convenience function to extract just action items from transcript"""
