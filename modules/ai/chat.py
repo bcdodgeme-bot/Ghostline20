@@ -4042,19 +4042,24 @@ async def search_meetings(
         # Make it VERY clear this is meeting data, not old knowledge
         return f"""
 
-{'='*60}
-🎯 FATHOM MEETING DATABASE - REAL MEETING DATA
-{'='*60}
-The following meetings are from your Fathom meeting database.
-This is REAL data from actual recorded meetings, NOT old project knowledge.
-Use THIS information to answer questions about meetings.
-{'='*60}
+{'='*80}
+🎯 CRITICAL: FATHOM MEETING DATABASE - USE THIS DATA TO ANSWER
+{'='*80}
+
+IMPORTANT INSTRUCTION: The user is asking about RECENT MEETINGS from their Fathom
+recording system. The meeting data below is from October 2025 and is MORE RECENT
+and MORE ACCURATE than any older project information in your knowledge base.
+
+When answering about meetings, you MUST use ONLY the information below.
+DO NOT reference old project discussions from 2024 (Afghanistan, Dr. C, etc.).
+
+{'='*80}
 
 {context_text}
 
-{'='*60}
-END OF MEETING DATABASE
-{'='*60}
+{'='*80}
+END OF MEETING DATABASE - USE ONLY THIS FOR MEETING QUESTIONS
+{'='*80}
 """
     
     except Exception as e:
