@@ -4037,7 +4037,25 @@ async def search_meetings(
             meeting_context.append("\n".join(meeting_text))
             meeting_context.append("---")
         
-        return "\n".join(meeting_context)
+        context_text = "\n".join(meeting_context)
+        
+        # Make it VERY clear this is meeting data, not old knowledge
+        return f"""
+
+{'='*60}
+🎯 FATHOM MEETING DATABASE - REAL MEETING DATA
+{'='*60}
+The following meetings are from your Fathom meeting database.
+This is REAL data from actual recorded meetings, NOT old project knowledge.
+Use THIS information to answer questions about meetings.
+{'='*60}
+
+{context_text}
+
+{'='*60}
+END OF MEETING DATABASE
+{'='*60}
+"""
     
     except Exception as e:
         logger.error(f"Failed to search meetings: {e}")
