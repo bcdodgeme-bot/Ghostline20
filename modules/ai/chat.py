@@ -3955,7 +3955,7 @@ async def search_meetings(
         Formatted meeting context string
     """
     try:
-        from ..core.database import db_manager
+        from modules.core.database import db_manager
         
         # Build appropriate query based on type
         if query_type == 'recent':
