@@ -750,6 +750,11 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         }
                     ]
                     
+                    # DEBUG: Log what's actually in image_attachments
+                    logger.info(f"🔍 DEBUG: image_attachments contents:")
+                    for idx, img in enumerate(image_attachments):
+                        logger.info(f"🔍 DEBUG [{idx}]: filename={img.get('filename')}, type={img.get('type')}, media_type={img.get('media_type')}")
+                    
                     # Add each image as a content block
                     for img in image_attachments:
                         content_blocks.append({

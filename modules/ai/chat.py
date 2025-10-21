@@ -4098,28 +4098,34 @@ async def search_meetings(
             return "\n\n📅 **Meeting Context:** No meetings found matching your query."
         
         # Format meetings for AI context
-        meeting_context = ["\n\n📅 **Recent Meeting Context:**\n"]
+        if meeting_date:
+            # If we searched by date, make it VERY clear we found meetings on/near that date
+            meeting_context = [f"\n\n📅 **Meetings Found Near {meeting_date.strftime('%B %d, %Y')}:**\n"]
+        else:
+            meeting_context = ["\n\n📅 **Meeting Search Results:**\n"]
         
         for meeting in meetings:
             meeting_text = [
                 f"\n**{meeting['title']}**",
-                f"Date: {meeting['meeting_date']}",
-                f"Duration: {meeting['duration_minutes']} minutes"
+                f"📅 Date: {meeting['meeting_date']}",
+                f"⏱️ Duration: {meeting['duration_minutes']} minutes"
             ]
             
             if meeting.get('participants'):
                 participants = meeting['participants']
                 if isinstance(participants, list) and len(participants) > 0:
-                    meeting_text.append(f"Participants: {', '.join([str(p) for p in participants[:5]])}")
+                    meeting_text.append(f"👥 Participants: {', '.join([str(p) for p in participants[:5]])}")
             
             if meeting.get('ai_summary'):
-                meeting_text.append(f"\nSummary: {meeting['ai_summary']}")
+                # Show MORE of the summary so AI can make better matches
+                summary = meeting['ai_summary']
+                meeting_text.append(f"\n📝 Summary: {summary}")
             
             if meeting.get('key_points'):
                 key_points = meeting['key_points']
                 if isinstance(key_points, list) and len(key_points) > 0:
-                    meeting_text.append("\nKey Points:")
-                    for point in key_points[:3]:  # Limit to 3 points
+                    meeting_text.append("\n🔑 Key Points:")
+                    for point in key_points[:5]:  # Show more key points
                         meeting_text.append(f"  • {point}")
             
             meeting_context.append("\n".join(meeting_text))
@@ -4128,18 +4134,30 @@ async def search_meetings(
         context_text = "\n".join(meeting_context)
         
         # Make it VERY clear this is meeting data, not old knowledge
-        return f"""
-
-{'='*80}
-🎯 CRITICAL: FATHOM MEETING DATABASE - USE THIS DATA TO ANSWER
-{'='*80}
-
-IMPORTANT INSTRUCTION: The user is asking about RECENT MEETINGS from their Fathom
+        if meeting_date:
+            instruction = f"""
+CRITICAL INSTRUCTION: The user asked about a meeting on or around {meeting_date.strftime('%B %d, %Y')}.
+The meetings below were found within ±3 days of that date. Use these meetings to answer
+the user's question. If the user mentioned a topic (like 'HubSpot'), search the summaries
+below for that topic and use that meeting in your answer.
+"""
+        else:
+            instruction = """
+CRITICAL INSTRUCTION: The user is asking about RECENT MEETINGS from their Fathom
 recording system. The meeting data below is from October 2025 and is MORE RECENT
 and MORE ACCURATE than any older project information in your knowledge base.
 
 When answering about meetings, you MUST use ONLY the information below.
 DO NOT reference old project discussions from 2024 (Afghanistan, Dr. C, etc.).
+"""
+        
+        return f"""
+
+{'='*80}
+🎯 FATHOM MEETING DATABASE - USE THIS DATA TO ANSWER
+{'='*80}
+
+{instruction}
 
 {'='*80}
 
