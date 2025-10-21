@@ -4254,18 +4254,30 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
         return f"""
 
 {'='*80}
-🎯 RECENT MEETING CONTEXT - AVAILABLE FOR REFERENCE
+⚠️ CRITICAL: FATHOM MEETING DATABASE - RECORDED MEETINGS
 {'='*80}
 
-The following meetings occurred in the last {days} days. Use this information
-to answer questions about recent discussions, decisions, or action items.
+SYSTEM INSTRUCTION: The user has Fathom meeting recordings integrated into this system.
+The following {len(meetings)} meeting(s) from the PAST {days} days are COMPLETED meetings
+that were recorded and stored in the PostgreSQL database. This is REAL DATA from actual
+recorded meetings with transcripts and AI summaries.
+
+IMPORTANT DISTINCTIONS:
+- These are PAST meetings that already happened (Fathom recordings)
+- For FUTURE meetings or today's schedule, use Google Calendar integration
+- For questions about "what meetings did I have" or "what was discussed" → use this Fathom data
+- For questions about "what meetings do I have today/tomorrow" → use Google Calendar
+
+DO NOT make up or hallucinate meeting information. If the user asks about PAST meetings
+or discussions, use ONLY the Fathom data below. If you don't see a meeting they're 
+asking about in this list, say you don't have a Fathom recording of it.
 
 {'='*80}
 
 {context_text}
 
 {'='*80}
-END OF RECENT MEETING CONTEXT
+⚠️ END FATHOM MEETING DATA - PAST MEETINGS ONLY
 {'='*80}
 """
     
