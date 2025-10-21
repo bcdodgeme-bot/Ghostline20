@@ -658,27 +658,22 @@ All systems operational and ready to assist!"""
                 
                 # Search knowledge base if requested
                 if include_knowledge:
-                    # NEW 10/21/25: Check if this is a meeting query
-                    if is_meeting_query_mode:
-                        logger.info("📅 DEBUG: Skipping knowledge search - meeting query mode active")
+                    logger.info("🔍 DEBUG: Searching knowledge base...")
+                    try:
+                        knowledge_results = await knowledge_engine.search_knowledge(
+                            query=message_content,
+                            personality_id=personality_id,
+                            limit=5
+                        )
+                        knowledge_sources = knowledge_results
+                        logger.info(f"✅ DEBUG: Knowledge search completed: {len(knowledge_sources)} sources found")
+                    except Exception as e:
+                        logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
                         knowledge_sources = []
-                    else:
-                        logger.info("🔍 DEBUG: Searching knowledge base...")
-                        try:
-                            knowledge_results = await knowledge_engine.search_knowledge(
-                                query=message_content,
-                                personality_id=personality_id,
-                                limit=5
-                            )
-                            knowledge_sources = knowledge_results
-                            logger.info(f"✅ DEBUG: Knowledge search completed: {len(knowledge_sources)} sources found")
-                        except Exception as e:
-                            logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
-                            knowledge_sources = []
                 else:
                     logger.info("⭐ DEBUG: Skipping knowledge search (disabled)")
                     knowledge_sources = []
-                
+                        
                 # Get RSS marketing context for writing assistance (integration #3)
                 rss_context = ""
                 if detect_rss_command(message_content) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
