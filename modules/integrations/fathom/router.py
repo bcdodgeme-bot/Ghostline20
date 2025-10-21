@@ -82,62 +82,93 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
     1. Verifies webhook signature
     2. Queues background processing
     3. Returns immediately (Fathom expects fast response)
+
+    Receive webhooks from Fathom when meetings end
+    ENHANCED DEBUG VERSION - Logs everything
     """
     try:
-        logger.info("📥 Fathom webhook received")
+        logger.info("=" * 80)
+        logger.info("📥 FATHOM WEBHOOK RECEIVED")
+        logger.info("=" * 80)
+        
+        # Log ALL headers
+        logger.info("🔍 ALL REQUEST HEADERS:")
+        for header_name, header_value in request.headers.items():
+            logger.info(f"   {header_name}: {header_value}")
         
         # Get headers for signature verification
         timestamp = request.headers.get("x-fathom-timestamp") or request.headers.get("X-Fathom-Timestamp")
         signature = request.headers.get("x-fathom-signature") or request.headers.get("X-Fathom-Signature")
         
+        logger.info(f"\n🔐 SIGNATURE INFO:")
         logger.info(f"   Timestamp: {timestamp}")
         logger.info(f"   Signature: {'Present' if signature else 'Missing'}")
         
-        # Get raw body for signature verification
+        # Get raw body
         body = await request.body()
+        logger.info(f"\n📦 RAW BODY ({len(body)} bytes):")
+        logger.info(f"   First 1000 chars: {body[:1000].decode('utf-8', errors='ignore')}")
         
-        # Verify webhook signature
+        # Try to parse as JSON
+        try:
+            webhook_data = json.loads(body.decode('utf-8'))
+            logger.info(f"\n✅ JSON PARSED SUCCESSFULLY")
+            logger.info(f"   Top-level keys: {list(webhook_data.keys())}")
+            logger.info(f"\n📋 FULL WEBHOOK DATA:")
+            logger.info(json.dumps(webhook_data, indent=2, default=str))
+        except json.JSONDecodeError as e:
+            logger.error(f"\n❌ JSON PARSE FAILED: {e}")
+            logger.error(f"   Raw body: {body.decode('utf-8', errors='ignore')}")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        
+        # Verify webhook signature (if present)
         if timestamp and signature:
             is_valid = fathom_handler.verify_webhook_signature(body, timestamp, signature)
-            
             if not is_valid:
                 logger.error("❌ Webhook signature verification failed")
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
+            logger.info("✅ Signature verified")
         else:
             logger.warning("⚠️ No signature headers - verification skipped")
         
-        # Parse webhook data
-        webhook_data = json.loads(body.decode('utf-8'))
+        # Try multiple possible field names for event type
+        event_type = (
+            webhook_data.get('event_type') or
+            webhook_data.get('event') or
+            webhook_data.get('type') or
+            webhook_data.get('action') or
+            'unknown'
+        )
         
-        event_type = webhook_data.get('event_type', 'unknown')
-        meeting_id = webhook_data.get('meeting_id')
+        # Try multiple possible field names for meeting/recording ID
+        meeting_id = (
+            webhook_data.get('meeting_id') or
+            webhook_data.get('recording_id') or
+            webhook_data.get('call_id') or
+            webhook_data.get('id') or
+            None
+        )
         
+        logger.info(f"\n🎯 EXTRACTED DATA:")
         logger.info(f"   Event type: {event_type}")
         logger.info(f"   Meeting ID: {meeting_id}")
         
-        # Process transcript, summary, or action_items events
-        # We'll wait for 'summary' event since that means everything is ready
-        if event_type not in ['transcript', 'summary', 'action_items']:
-            logger.info(f"⏭️ Ignoring event type: {event_type}")
-            return WebhookResponse(
-                success=True,
-                message=f"Event type {event_type} ignored"
-            )
-        
-        # Only process on 'summary' event to avoid duplicate processing
-        if event_type != 'summary':
-            logger.info(f"⏭️ Waiting for summary event, got: {event_type}")
-            return WebhookResponse(
-                success=True,
-                message=f"Acknowledged {event_type}, waiting for summary"
-            )
-        
+        # For now, let's accept ANY event and try to process it
+        # Remove the strict event type filtering temporarily for debugging
         if not meeting_id:
-            logger.error("❌ No meeting_id in webhook")
-            raise HTTPException(status_code=400, detail="Missing meeting_id")
+            logger.error("❌ No meeting/recording ID found in webhook")
+            logger.error(f"   Available keys: {list(webhook_data.keys())}")
+            # Still return success to avoid webhook retries
+            return WebhookResponse(
+                success=True,
+                message="No meeting ID found - webhook logged for debugging"
+            )
         
-        # Queue background processing
-        # This allows us to return immediately to Fathom
+        # Queue background processing for ANY webhook with an ID
+        logger.info(f"\n🚀 QUEUING BACKGROUND PROCESSING")
+        logger.info(f"   Meeting ID: {meeting_id}")
+        logger.info(f"   Event type: {event_type}")
+        
         background_tasks.add_task(
             process_meeting_webhook,
             meeting_id,
@@ -145,11 +176,12 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         
         logger.info(f"✅ Meeting {meeting_id} queued for processing")
+        logger.info("=" * 80)
         
         return WebhookResponse(
             success=True,
             meeting_id=meeting_id,
-            message="Meeting queued for processing"
+            message=f"Meeting {meeting_id} queued for processing"
         )
         
     except json.JSONDecodeError as e:
@@ -158,6 +190,8 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
     
     except Exception as e:
         logger.error(f"❌ Webhook processing error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

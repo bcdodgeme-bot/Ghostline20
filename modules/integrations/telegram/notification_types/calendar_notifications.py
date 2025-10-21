@@ -5,7 +5,7 @@ Sends proactive calendar event reminders
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
 from ....core.database import db_manager
@@ -93,6 +93,12 @@ class CalendarNotificationHandler:
         if isinstance(start_time, str):
             start_time = datetime.fromisoformat(start_time)
         
+        # FIX: Use timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        if start_time.tzinfo is None:
+            # If start_time is naive, assume UTC
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        
         minutes_until = (start_time - datetime.now()).total_seconds() / 60
         
         # Check if we're within a reminder window
@@ -136,6 +142,12 @@ class CalendarNotificationHandler:
         start_time = event['start_time']
         if isinstance(start_time, str):
             start_time = datetime.fromisoformat(start_time)
+            
+        # FIX: Use timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+    
         
         description = event.get('description', '')
         location = event.get('location', '')
