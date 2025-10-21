@@ -117,14 +117,8 @@ async def chat_with_ai(
                 if file_info['analysis'].get('description'):
                     file_context += f"   {file_info['analysis']['description']}\n"
                     
-                if file_info['file_type'] not in ['.png', '.jpg', '.jpeg', '.gif']:
-                    extracted_text = file_info['analysis'].get('extracted_text', '')
-                    if extracted_text and len(extracted_text.strip()) > 0:
-                        file_context += f"\n**Content:**\n{extracted_text}\n"
-                        logger.info(f"✅ Added extracted content for {file_info['filename']}: {len(extracted_text)} chars")
-                    else:
-                        logger.warning(f"⚠️ No content extracted from {file_info['filename']}")
-
+                if file_info['file_type'] in ['.png', '.jpg', '.jpeg', '.gif']:
+                    # This is an IMAGE - encode for vision API
                     try:
                         # Read the image file and encode as base64
                         with open(file_info['file_path'], 'rb') as img_file:
@@ -149,6 +143,15 @@ async def chat_with_ai(
                             
                     except Exception as e:
                         logger.error(f"Failed to encode image {file_info['filename']}: {e}")
+                
+                else:
+                    # This is NOT an image - extract text content
+                    extracted_text = file_info['analysis'].get('extracted_text', '')
+                    if extracted_text and len(extracted_text.strip()) > 0:
+                        file_context += f"\n**Content:**\n{extracted_text}\n"
+                        logger.info(f"✅ Added extracted content for {file_info['filename']}: {len(extracted_text)} chars")
+                    else:
+                        logger.warning(f"⚠️ No content extracted from {file_info['filename']}")
                         
             if len(image_attachments) > 0:
                 logger.info(f"📸 Total images ready for vision analysis: {len(image_attachments)}")
