@@ -117,7 +117,14 @@ async def chat_with_ai(
                 if file_info['analysis'].get('description'):
                     file_context += f"   {file_info['analysis']['description']}\n"
                     
-                if file_info['file_type'] in ['.png', '.jpg', '.jpeg', '.gif']:
+                if file_info['file_type'] not in ['.png', '.jpg', '.jpeg', '.gif']:
+                    extracted_text = file_info['analysis'].get('extracted_text', '')
+                    if extracted_text and len(extracted_text.strip()) > 0:
+                        file_context += f"\n**Content:**\n{extracted_text}\n"
+                        logger.info(f"✅ Added extracted content for {file_info['filename']}: {len(extracted_text)} chars")
+                    else:
+                        logger.warning(f"⚠️ No content extracted from {file_info['filename']}")
+
                     try:
                         # Read the image file and encode as base64
                         with open(file_info['file_path'], 'rb') as img_file:
@@ -153,6 +160,13 @@ async def chat_with_ai(
     # Combine message with file context
     full_message = message + file_context
     
+    # DEBUG: Log the full message to verify file context is included
+    logger.info(f"📝 DEBUG: Full message length: {len(full_message)} chars")
+    logger.info(f"📝 DEBUG: File context length: {len(file_context)} chars")
+    if len(file_context) > 50:  # If we have file context
+        logger.info(f"📝 DEBUG: File context preview: {file_context[:200]}...")
+
+    
     start_time = time.time()
     thread_id = thread_id or str(uuid.uuid4())
     
@@ -183,7 +197,7 @@ async def chat_with_ai(
                  process_reminder_list, process_reminder_cancel,
                  detect_email_detail_command, process_email_detail_command,
                  detect_draft_creation_command, process_draft_creation_command, detect_meeting_query,
-                 search_meetings # NEW 10/2/25
+                 search_meetings, get_recent_meetings_context # NEW 10/2/25
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
         except Exception as e:
@@ -221,6 +235,24 @@ async def chat_with_ai(
                     title=None  # Will be auto-generated from first message
                 )
                 logger.info(f"✅ DEBUG: New thread created: {thread_id}")
+                
+                # NEW 10/20/25: For new conversations, automatically add recent meeting context
+                logger.info(f"📅 New conversation - loading recent meeting context")
+                try:
+                    recent_meeting_context = await search_meetings(
+                        query="recent meetings",
+                        user_id=user_id,
+                        query_type='recent',
+                        limit=5
+                    )
+                    
+                    # Add to the message so AI has this context from the start
+                    full_message += "\n\n" + recent_meeting_context
+                    logger.info(f"✅ Added recent meeting context to new conversation")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to add meeting context to new conversation: {e}")
+                
             else:
                 # Verify existing thread exists
                 logger.info(f"🔍 DEBUG: Verifying existing thread: {thread_id}")
@@ -253,7 +285,7 @@ async def chat_with_ai(
             raise
         
         # Build message content
-        message_content = message
+        message_content = full_message
         logger.info(f"🔍 DEBUG: Processing message content: '{message_content[:100]}...'")
         
         # INTEGRATION ORDER: Check for special commands in the specified order
@@ -330,21 +362,52 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: Weather processing failed: {e}")
                 special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
         
+        # NEW 10/20/25: Always try to add recent meeting context for every message
+        # This ensures meetings are available even if query detection misses them
+        try:
+            recent_context = await get_recent_meetings_context(
+                user_id=user_id,
+                days=7,
+                limit=5
+            )
+            if recent_context:  # Only add if there are actually recent meetings
+                full_message += recent_context
+                logger.info(f"✅ Added proactive recent meeting context")
+        except Exception as e:
+            logger.error(f"❌ Failed to add proactive meeting context: {e}")
+        
         # Check for meeting queries - NEW 10/19/25
         is_meeting_query, meeting_query_type = detect_meeting_query(message)
+        
+        # NEW: Also check if there are recent meetings (last 7 days) even if not explicitly asked
+        should_add_recent_context = False
+        
         if is_meeting_query:
             logger.info(f"📅 Meeting query detected: {meeting_query_type}")
+            should_add_recent_context = True
+        else:
+            # NEW: If the message is a question or seems to reference recent events,
+            # proactively add recent meeting context
+            question_indicators = ['what', 'when', 'who', 'where', 'why', 'how', 'tell me', 'show me', 'find']
+            is_question = any(indicator in message.lower() for indicator in question_indicators)
+            
+            if is_question and len(message.split()) > 3:  # Only for substantive questions
+                logger.info(f"📅 Question detected - proactively checking recent meetings")
+                should_add_recent_context = True
+                meeting_query_type = 'recent'
+        
+        if should_add_recent_context:
             try:
                 meeting_context = await search_meetings(
                     query=message,
                     user_id=user_id,
-                    query_type=meeting_query_type,
+                    query_type=meeting_query_type or 'recent',
                     limit=5
                 )
                 
                 # Add meeting context to the message
                 full_message += meeting_context
-                logger.info(f"✅ Meeting context added to message")
+                logger.info(f"✅ Meeting context added to message (type: {meeting_query_type})")
                 
             except Exception as e:
                 logger.error(f"❌ Failed to get meeting context: {e}")

@@ -3905,23 +3905,53 @@ Use `list reminders` to see your pending reminders.
 #-- Section 16: Fathom Meeting Integration Functions - 10/19/25
 def detect_meeting_query(message: str) -> tuple[bool, str]:
     """
-    Detect meeting-related queries
+    Detect meeting-related queries with improved sensitivity
     
     Returns:
         tuple: (is_meeting_query, query_type)
         query_type: 'specific', 'recent', 'search', 'action_items'
     """
+    # Expanded keywords for better detection
     meeting_keywords = [
         "meeting", "meetings", "discussed", "talked about",
         "action item", "action items", "follow up", "follow-up",
         "what did we decide", "what was decided", "meeting notes",
-        "decompress", "debrief", "recap"
+        "decompress", "debrief", "recap", "call", "calls",
+        "conversation", "session", "discussion", "chat with",
+        "spoke with", "talked with", "mentioned", "said in",
+        "brought up", "covered", "went over", "reviewed"
+    ]
+    
+    # Temporal indicators that suggest meeting context
+    temporal_keywords = [
+        "yesterday", "today", "last week", "this week",
+        "last month", "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday",
+        "morning", "afternoon", "ago", "recent"
+    ]
+    
+    # Date patterns (October 15, Oct 15, 10/15, etc)
+    import re
+    date_patterns = [
+        r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b',
+        r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}\b',
+        r'\b\d{1,2}/\d{1,2}\b',
+        r'\b\d{1,2}-\d{1,2}\b'
     ]
     
     message_lower = message.lower()
     
-    # Check if it's a meeting query
-    is_meeting = any(keyword in message_lower for keyword in meeting_keywords)
+    # Check for date patterns
+    has_date = any(re.search(pattern, message_lower, re.IGNORECASE) for pattern in date_patterns)
+    
+    # Check for temporal keywords
+    has_temporal = any(word in message_lower for word in temporal_keywords)
+    
+    # Check for meeting keywords
+    has_meeting_keyword = any(keyword in message_lower for keyword in meeting_keywords)
+    
+    # NEW LOGIC: If there's a date OR temporal reference, assume it might be about a meeting
+    is_meeting = has_meeting_keyword or has_date or has_temporal
     
     if not is_meeting:
         return (False, None)
@@ -3956,6 +3986,8 @@ async def search_meetings(
     """
     try:
         from modules.core.database import db_manager
+        import re
+        from datetime import datetime, timedelta
         
         # Build appropriate query based on type
         if query_type == 'recent':
@@ -3987,24 +4019,80 @@ async def search_meetings(
             meetings = await db_manager.fetch_all(sql, limit)
         
         else:  # specific or search
-            # Simple text search in title and summary
-            search_term = f"%{query.lower()}%"
-            sql = """
-                SELECT 
-                    title,
-                    meeting_date,
-                    duration_minutes,
-                    participants,
-                    ai_summary,
-                    key_points
-                FROM fathom_meetings
-                WHERE 
-                    LOWER(title) LIKE $1
-                    OR LOWER(ai_summary) LIKE $1
-                ORDER BY meeting_date DESC
-                LIMIT $2
-            """
-            meetings = await db_manager.fetch_all(sql, search_term, limit)
+            # NEW: Try to extract dates from the query
+            meeting_date = None
+            query_lower = query.lower()
+            
+            # Try to parse dates like "October 15", "Oct 15", etc.
+            date_patterns = {
+                r'(january|jan)\s+(\d{1,2})': (1, None),
+                r'(february|feb)\s+(\d{1,2})': (2, None),
+                r'(march|mar)\s+(\d{1,2})': (3, None),
+                r'(april|apr)\s+(\d{1,2})': (4, None),
+                r'(may)\s+(\d{1,2})': (5, None),
+                r'(june|jun)\s+(\d{1,2})': (6, None),
+                r'(july|jul)\s+(\d{1,2})': (7, None),
+                r'(august|aug)\s+(\d{1,2})': (8, None),
+                r'(september|sep|sept)\s+(\d{1,2})': (9, None),
+                r'(october|oct)\s+(\d{1,2})': (10, None),
+                r'(november|nov)\s+(\d{1,2})': (11, None),
+                r'(december|dec)\s+(\d{1,2})': (12, None),
+            }
+            
+            for pattern, (month, _) in date_patterns.items():
+                match = re.search(pattern, query_lower, re.IGNORECASE)
+                if match:
+                    day = int(match.group(2))
+                    # Assume current year or last year if month hasn't happened yet this year
+                    current_year = datetime.now().year
+                    try:
+                        meeting_date = datetime(current_year, month, day)
+                        # If the date is in the future, try last year
+                        if meeting_date > datetime.now():
+                            meeting_date = datetime(current_year - 1, month, day)
+                    except ValueError:
+                        # Invalid date, skip
+                        pass
+                    break
+            
+            # If we found a date, search by date range (±3 days)
+            if meeting_date:
+                start_date = meeting_date - timedelta(days=3)
+                end_date = meeting_date + timedelta(days=3)
+                
+                sql = """
+                    SELECT 
+                        title,
+                        meeting_date,
+                        duration_minutes,
+                        participants,
+                        ai_summary,
+                        key_points
+                    FROM fathom_meetings
+                    WHERE meeting_date BETWEEN $1 AND $2
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (meeting_date - $3)))
+                    LIMIT $4
+                """
+                meetings = await db_manager.fetch_all(sql, start_date, end_date, meeting_date, limit)
+            else:
+                # Fallback: Simple text search in title and summary
+                search_term = f"%{query.lower()}%"
+                sql = """
+                    SELECT 
+                        title,
+                        meeting_date,
+                        duration_minutes,
+                        participants,
+                        ai_summary,
+                        key_points
+                    FROM fathom_meetings
+                    WHERE 
+                        LOWER(title) LIKE $1
+                        OR LOWER(ai_summary) LIKE $1
+                    ORDER BY meeting_date DESC
+                    LIMIT $2
+                """
+                meetings = await db_manager.fetch_all(sql, search_term, limit)
         
         if not meetings or len(meetings) == 0:
             return "\n\n📅 **Meeting Context:** No meetings found matching your query."
@@ -4065,3 +4153,104 @@ END OF MEETING DATABASE - USE ONLY THIS FOR MEETING QUESTIONS
     except Exception as e:
         logger.error(f"Failed to search meetings: {e}")
         return "\n\n📅 **Meeting Context:** Unable to retrieve meeting information."
+
+async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 5) -> str:
+    """
+    Get recent meetings from the last N days - always available context
+    
+    This function is called proactively to ensure meetings are available
+    even when the query doesn't explicitly mention them.
+    
+    Args:
+        user_id: User ID
+        days: How many days back to search (default 7)
+        limit: Max number of meetings to return
+    
+    Returns:
+        Formatted meeting context string or empty string if no meetings
+    """
+    try:
+        from modules.core.database import db_manager
+        from datetime import datetime, timedelta
+        
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        sql = """
+            SELECT 
+                title,
+                meeting_date,
+                duration_minutes,
+                participants,
+                ai_summary,
+                key_points
+            FROM fathom_meetings
+            WHERE meeting_date >= $1
+            ORDER BY meeting_date DESC
+            LIMIT $2
+        """
+        
+        meetings = await db_manager.fetch_all(sql, start_date, limit)
+        
+        if not meetings or len(meetings) == 0:
+            logger.info(f"📅 No recent meetings found in last {days} days")
+            return ""
+        
+        logger.info(f"📅 Found {len(meetings)} meetings from last {days} days")
+        
+        # Format meetings for AI context
+        meeting_context = [f"\n\n📅 **Available Meeting Context (Last {days} Days):**\n"]
+        
+        for meeting in meetings:
+            meeting_text = [
+                f"\n**{meeting['title']}**",
+                f"Date: {meeting['meeting_date']}",
+                f"Duration: {meeting['duration_minutes']} minutes"
+            ]
+            
+            if meeting.get('participants'):
+                participants = meeting['participants']
+                if isinstance(participants, list) and len(participants) > 0:
+                    meeting_text.append(f"Participants: {', '.join([str(p) for p in participants[:5]])}")
+            
+            if meeting.get('ai_summary'):
+                # Truncate long summaries for context
+                summary = meeting['ai_summary']
+                if len(summary) > 500:
+                    summary = summary[:500] + "..."
+                meeting_text.append(f"\nSummary: {summary}")
+            
+            if meeting.get('key_points'):
+                key_points = meeting['key_points']
+                if isinstance(key_points, list) and len(key_points) > 0:
+                    meeting_text.append("\nKey Points:")
+                    for point in key_points[:3]:  # Limit to 3 points
+                        meeting_text.append(f"  • {point}")
+            
+            meeting_context.append("\n".join(meeting_text))
+            meeting_context.append("---")
+        
+        context_text = "\n".join(meeting_context)
+        
+        return f"""
+
+{'='*80}
+🎯 RECENT MEETING CONTEXT - AVAILABLE FOR REFERENCE
+{'='*80}
+
+The following meetings occurred in the last {days} days. Use this information
+to answer questions about recent discussions, decisions, or action items.
+
+{'='*80}
+
+{context_text}
+
+{'='*80}
+END OF RECENT MEETING CONTEXT
+{'='*80}
+"""
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to get recent meetings context: {e}")
+        return ""
