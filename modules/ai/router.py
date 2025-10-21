@@ -295,6 +295,7 @@ async def chat_with_ai(
         special_response = None
         model_used = "integration_response"
         knowledge_sources = []
+        is_meeting_query_mode = False  # NEW: Flag to skip knowledge base for meeting queries
         
         # Initialize context_info for special responses (BUG FIX #1)
         context_info = {
@@ -364,56 +365,6 @@ Weather data powered by Tomorrow.io"""
             except Exception as e:
                 logger.error(f"❌ DEBUG: Weather processing failed: {e}")
                 special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
-        
-        # NEW 10/20/25: Always try to add recent meeting context for every message
-        # This ensures meetings are available even if query detection misses them
-        try:
-            recent_context = await get_recent_meetings_context(
-                user_id=user_id,
-                days=7,
-                limit=5
-            )
-            if recent_context:  # Only add if there are actually recent meetings
-                full_message += recent_context
-                logger.info(f"✅ Added proactive recent meeting context")
-        except Exception as e:
-            logger.error(f"❌ Failed to add proactive meeting context: {e}")
-        
-        # Check for meeting queries - NEW 10/19/25
-        is_meeting_query, meeting_query_type = detect_meeting_query(message)
-        
-        # NEW: Also check if there are recent meetings (last 7 days) even if not explicitly asked
-        should_add_recent_context = False
-        
-        if is_meeting_query:
-            logger.info(f"📅 Meeting query detected: {meeting_query_type}")
-            should_add_recent_context = True
-        else:
-            # NEW: If the message is a question or seems to reference recent events,
-            # proactively add recent meeting context
-            question_indicators = ['what', 'when', 'who', 'where', 'why', 'how', 'tell me', 'show me', 'find']
-            is_question = any(indicator in message.lower() for indicator in question_indicators)
-            
-            if is_question and len(message.split()) > 3:  # Only for substantive questions
-                logger.info(f"📅 Question detected - proactively checking recent meetings")
-                should_add_recent_context = True
-                meeting_query_type = 'recent'
-        
-        if should_add_recent_context:
-            try:
-                meeting_context = await search_meetings(
-                    query=message,
-                    user_id=user_id,
-                    query_type=meeting_query_type or 'recent',
-                    limit=5
-                )
-                
-                # Add meeting context to the message
-                full_message += meeting_context
-                logger.info(f"✅ Meeting context added to message (type: {meeting_query_type})")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to get meeting context: {e}")
         
         # 2. 🔵 Bluesky command detection (SECOND)
         elif detect_bluesky_command(message_content):
@@ -620,7 +571,50 @@ Weather data powered by Tomorrow.io"""
                     import traceback
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                     special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
-            
+        
+        # 10.5 📅 Fathom Meeting Detection (ELEVENTH) - NEW 10/21/25
+        logger.info("📅 DEBUG: Checking for meeting queries...")
+        
+        # Always try to add recent meeting context proactively
+        try:
+            recent_context = await get_recent_meetings_context(
+                user_id=user_id,
+                days=7,
+                limit=5
+            )
+            if recent_context:
+                full_message += recent_context
+                logger.info(f"✅ Added proactive recent meeting context")
+        except Exception as e:
+            logger.error(f"❌ Failed to add proactive meeting context: {e}")
+        
+        # Check if this is an explicit meeting query
+        is_meeting_query, meeting_query_type = detect_meeting_query(message)
+        
+        if is_meeting_query:
+            logger.info(f"📅 Meeting query detected: {meeting_query_type}")
+            try:
+                meeting_context = await search_meetings(
+                    query=message,
+                    user_id=user_id,
+                    query_type=meeting_query_type,
+                    limit=5
+                )
+                
+                # Add targeted meeting search results
+                full_message += meeting_context
+                logger.info(f"✅ Meeting context added (type: {meeting_query_type})")
+                
+                # Set flag to skip knowledge base - meetings are the authority
+                special_response = None  # Allow normal AI processing but...
+                is_meeting_query_mode = True  # ...skip old knowledge base
+                model_used = "meeting_query"
+                knowledge_sources = []
+                logger.info(f"📅 Suppressing knowledge base for meeting query")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to get meeting context: {e}")
+        
     # 11. 🏥 Health Check command detection (NINTH)
         elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
@@ -664,21 +658,26 @@ All systems operational and ready to assist!"""
                 
                 # Search knowledge base if requested
                 if include_knowledge:
-                    logger.info("🔍 DEBUG: Searching knowledge base...")
-                    try:
-                        knowledge_results = await knowledge_engine.search_knowledge(
-                            query=message_content,
-                            personality_id=personality_id,
-                            limit=5
-                        )
-                        knowledge_sources = knowledge_results
-                        logger.info(f"✅ DEBUG: Knowledge search completed: {len(knowledge_sources)} sources found")
-                    except Exception as e:
-                        logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
-                        knowledge_sources = []
-                else:
-                    logger.info("⭐ DEBUG: Skipping knowledge search (disabled)")
-                    knowledge_sources = []
+                                     # NEW 10/21/25: Check if this is a meeting query
+                                    if is_meeting_query_mode:
+                                        logger.info("📅 DEBUG: Skipping knowledge search - meeting query mode active")
+                                        knowledge_sources = []
+                                    else:
+                                        logger.info("🔍 DEBUG: Searching knowledge base...")
+                                        try:
+                                            knowledge_results = await knowledge_engine.search_knowledge(
+                                                query=message_content,
+                                                personality_id=personality_id,
+                                                limit=5
+                                            )
+                                            knowledge_sources = knowledge_results
+                                            logger.info(f"✅ DEBUG: Knowledge search completed: {len(knowledge_sources)} sources found")
+                                        except Exception as e:
+                                            logger.error(f"❌ DEBUG: Knowledge search failed: {e}")
+                                            knowledge_sources = []
+                                else:
+                                    logger.info("⭐ DEBUG: Skipping knowledge search (disabled)")
+                                    knowledge_sources = []
                 
                 # Get RSS marketing context for writing assistance (integration #3)
                 rss_context = ""
