@@ -2389,20 +2389,15 @@ Type `intelligence status` to see detected situations."""
         elif 'digest' in message_lower:
             logger.info(f"🧠 Manual daily digest triggered by user")
             
-            # Generate and send digest
-            await orchestrator.generate_and_send_daily_digest()
+            # Generate digest
+            digest = await orchestrator.generate_daily_digest(user_id)
             
-            return """📊 **Daily Intelligence Digest**
+            return f"""📊 **Daily Intelligence Digest**
 
-✅ Digest generated and sent to Telegram
+{digest}
 
-The digest includes:
-- Situations from the last 24 hours
-- Your response patterns (acted vs dismissed)
-- Learning improvements
-- System insights
-
-Check your Telegram for the full report."""
+💡 This is what the system has observed in the last 24 hours."""
+            
         
         # Command 4: What Did You Notice / Context Check
         elif 'notice' in message_lower or 'context check' in message_lower:
