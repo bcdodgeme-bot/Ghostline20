@@ -2389,14 +2389,37 @@ Type `intelligence status` to see detected situations."""
         elif 'digest' in message_lower:
             logger.info(f"🧠 Manual daily digest triggered by user")
             
-            # Generate digest
-            digest = await orchestrator.generate_daily_digest(user_id)
-            
-            return f"""📊 **Daily Intelligence Digest**
+            try:
+                # Generate digest
+                digest = await orchestrator.generate_daily_digest(user_id)
+                
+                if "Error generating digest" in digest:
+                    # System returned error message
+                    return """📊 **Daily Intelligence Digest**
+
+⚠️ No situations have been detected yet.
+
+The digest will show:
+- Situations detected in last 24 hours
+- Your action patterns
+- Priority breakdown
+- Learning insights
+
+Come back after the system has collected some data! Type `run intelligence` to trigger a cycle."""
+                
+                return f"""📊 **Daily Intelligence Digest**
 
 {digest}
 
-💡 This is what the system has observed in the last 24 hours."""
+💡 This summarizes the intelligence system's observations."""
+            
+            except Exception as e:
+                logger.error(f"Daily digest error: {e}", exc_info=True)
+                return f"""📊 **Daily Intelligence Digest**
+
+❌ Error generating digest: {str(e)}
+
+The digest requires the `contextual_situations` table. This will be fixed when you update the database schema."""
             
         
         # Command 4: What Did You Notice / Context Check
