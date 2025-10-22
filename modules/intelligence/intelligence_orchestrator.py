@@ -229,14 +229,14 @@ class IntelligenceOrchestrator:
         """
         # Run all collectors in parallel
         collector_tasks = [
-            self.calendar_collector.collect(user_id),
-            self.email_collector.collect(user_id),
-            self.meeting_collector.collect(user_id),
-            self.conversation_collector.collect(user_id),
-            self.trend_collector.collect(user_id),
-            self.weather_collector.collect(user_id),
-            self.knowledge_collector.collect(user_id),
-            self.action_item_collector.collect(user_id)
+            self.calendar_collector.collect_signals(),
+            self.email_collector.collect_signals(),
+            self.meeting_collector.collect_signals(),
+            self.conversation_collector.collect_signals(),
+            self.trend_collector.collect_signals(),
+            self.weather_collector.collect_signals(),
+            self.knowledge_collector.collect_signals(),
+            self.action_item_collector.collect_signals()
         ]
         
         results = await asyncio.gather(*collector_tasks, return_exceptions=True)
