@@ -40,7 +40,7 @@ from modules.integrations.bluesky import router as bluesky_router
 from modules.integrations.bluesky import get_integration_info as bluesky_integration_info, check_module_health as bluesky_module_health
 
 #-- NEW Section 2i: Intelligence Hub Integration - added 10/22/25
-from modules.intelligence.orchestrator import IntelligenceOrchestrator
+from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
 from zoneinfo import ZoneInfo
 
 #-- NEW Section 2c: RSS Learning Integration - added 9/25/25

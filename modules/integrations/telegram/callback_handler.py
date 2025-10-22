@@ -918,7 +918,7 @@ class CallbackHandler:
             - action1/action2: User clicked suggested action
         """
         try:
-            from ...intelligence.orchestrator import IntelligenceOrchestrator
+            from ...intelligence.intelligence_orchestrator import IntelligenceOrchestrator
             
             user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
             orchestrator = IntelligenceOrchestrator(user_id)
