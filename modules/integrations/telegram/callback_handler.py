@@ -1,12 +1,15 @@
 """
 Telegram Callback Handler - Button Click Processing
 Processes inline keyboard button clicks and updates notification state
+UPDATED: Added Contextual Intelligence Layer handlers
 """
 
 import os
 import logging
+import json
 from typing import Dict, Any, Optional
 from datetime import datetime
+from uuid import UUID
 
 from .bot_client import TelegramBotClient
 from .database_manager import TelegramDatabaseManager
@@ -56,6 +59,8 @@ class CallbackHandler:
             - "prayer:snooze:uuid:10"
             - "bluesky:good_match:uuid:account_id"
             - "reminder:done:uuid"
+            - "content:draft_bluesky:opportunity_id:account_id"  # NEW
+            - "content:post_now:queue_id:account_id"  # NEW
         
         Args:
             callback_query_id: Telegram callback query ID
@@ -119,6 +124,18 @@ class CallbackHandler:
                 result = await self._handle_trends_callback(
                     action, notification_id, message_id, extra_params
                 )
+            
+            # ====== NEW: Contextual Intelligence Layer handlers ======
+            elif notification_type == 'content':
+                result = await self._handle_content_callback(
+                    action, notification_id, message_id, extra_params
+                )
+            
+            elif notification_type == 'engagement':
+                result = await self._handle_engagement_callback(
+                    action, notification_id, message_id, extra_params
+                )
+            # ====== END NEW ======
             
             else:
                 logger.error(f"Unknown notification type: {notification_type}")
@@ -524,6 +541,355 @@ class CallbackHandler:
             return {"success": True, "ack_text": "Dismissed"}
         
         return {"success": False, "error": "Unknown Trends action"}
+    
+    # ========================================================================
+    # CONTEXTUAL INTELLIGENCE: CONTENT CALLBACKS (NEW)
+    # ========================================================================
+    
+    async def _handle_content_callback(
+        self,
+        action: str,
+        notification_id: str,
+        message_id: int,
+        params: list
+    ) -> Dict[str, Any]:
+        """
+        Handle content draft callbacks (Contextual Intelligence Layer)
+        
+        Actions:
+            - draft_bluesky: Generate Bluesky post draft
+            - post_now: Post approved content
+            - edit: Request to edit draft
+            - save: Save draft for later
+            - dismiss: Reject draft
+        """
+        
+        if action == 'draft_bluesky':
+            # Generate Bluesky draft from trend opportunity
+            opportunity_id = notification_id
+            account_id = params[0] if params else 'bcdodge'
+            
+            try:
+                # Import content generator
+                import sys
+                sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                from modules.content.content_generator import get_content_generator
+                
+                database_url = os.getenv('DATABASE_URL')
+                generator = await get_content_generator(database_url)
+                
+                result = await generator.generate_bluesky_post(
+                    opportunity_id=UUID(opportunity_id),
+                    account_id=account_id
+                )
+                
+                if not result['success']:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"❌ Failed to generate draft: {result.get('error', 'Unknown error')}",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "❌ Generation failed"}
+                
+                # Build draft notification message
+                message = f"📝 *Draft Bluesky Post* (@{account_id})\n\n"
+                message += f"{result['preview']}\n\n"
+                message += f"_Confidence: {int(result['recommendation_score'] * 100)}%_"
+                
+                # New buttons for draft approval
+                buttons = {
+                    'inline_keyboard': [
+                        [
+                            {'text': '✅ Post Now', 'callback_data': f"content:post_now:{result['queue_id']}:{account_id}"},
+                            {'text': '✏️ Edit', 'callback_data': f"content:edit:{result['queue_id']}"}
+                        ],
+                        [
+                            {'text': '💾 Save', 'callback_data': f"content:save:{result['queue_id']}"},
+                            {'text': '❌ Dismiss', 'callback_data': f"content:dismiss:{result['queue_id']}"}
+                        ]
+                    ]
+                }
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    message,
+                    reply_markup=buttons
+                )
+                
+                return {"success": True, "ack_text": "✅ Draft generated!"}
+            
+            except Exception as e:
+                logger.error(f"Draft generation failed: {e}")
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Generation error: {str(e)}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "❌ Error"}
+        
+        elif action == 'post_now':
+            # Post content to Bluesky
+            queue_id = notification_id
+            account_id = params[0] if params else 'bcdodge'
+            
+            try:
+                import asyncpg
+                from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
+                
+                database_url = os.getenv('DATABASE_URL')
+                conn = await asyncpg.connect(database_url)
+                
+                try:
+                    # Get content from queue
+                    content = await conn.fetchrow('''
+                        SELECT 
+                            id, content_type, business_area,
+                            generated_content, trend_opportunity_id
+                        FROM content_recommendation_queue
+                        WHERE id = $1
+                    ''', UUID(queue_id))
+                    
+                    if not content:
+                        await self.bot_client.edit_message(
+                            message_id,
+                            "❌ Content not found",
+                            reply_markup=None
+                        )
+                        return {"success": False, "ack_text": "❌ Not found"}
+                    
+                    generated = json.loads(content['generated_content'])
+                    post_text = generated.get('text', '')
+                    
+                    # Post to Bluesky
+                    bluesky_client = get_bluesky_multi_client()
+                    post_result = await bluesky_client.create_post(
+                        account_id=account_id,
+                        text=post_text
+                    )
+                    
+                    if not post_result.get('success'):
+                        await self.bot_client.edit_message(
+                            message_id,
+                            "❌ Bluesky posting failed",
+                            reply_markup=None
+                        )
+                        return {"success": False, "ack_text": "❌ Post failed"}
+                    
+                    post_uri = post_result.get('uri')
+                    
+                    # Update queue
+                    await conn.execute('''
+                        UPDATE content_recommendation_queue
+                        SET user_feedback = 'posted', posted_at = NOW(), updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(queue_id))
+                    
+                    # Track in analytics
+                    await conn.execute('''
+                        INSERT INTO bluesky_post_analytics (
+                            post_uri, account_id, business_area, post_text,
+                            source_type, source_id, posted_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                    ''', post_uri, account_id, content['business_area'],
+                        post_text, 'trend_opportunity', content['trend_opportunity_id'])
+                    
+                    # Record learning
+                    await conn.execute('''
+                        INSERT INTO contextual_learnings (
+                            learning_type, pattern_description, evidence_type,
+                            confidence_score, situation_context, can_act_on
+                        ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ''', 'content_approval',
+                        f'User posted content about: {generated.get("keyword")}',
+                        'explicit_feedback', 0.9,
+                        json.dumps({'keyword': generated.get('keyword'), 'action': 'posted'}),
+                        True)
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"✅ *Posted to @{account_id}!*\n\n{post_text}\n\n[View Post]({post_result.get('url', '#')})",
+                        reply_markup=None
+                    )
+                    
+                    return {"success": True, "ack_text": "✅ Posted!"}
+                
+                finally:
+                    await conn.close()
+            
+            except Exception as e:
+                logger.error(f"Post now failed: {e}")
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Posting error: {str(e)}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "❌ Error"}
+        
+        elif action == 'edit':
+            queue_id = notification_id
+            await self.bot_client.edit_message(
+                message_id,
+                f"✏️ To edit this draft, use:\n\n`/edit {queue_id}`\n\nI'll help you refine the content!",
+                reply_markup=None
+            )
+            return {"success": True, "ack_text": "Edit in chat"}
+        
+        elif action == 'save':
+            queue_id = notification_id
+            try:
+                import asyncpg
+                database_url = os.getenv('DATABASE_URL')
+                conn = await asyncpg.connect(database_url)
+                try:
+                    await conn.execute('''
+                        UPDATE content_recommendation_queue
+                        SET user_feedback = 'saved_for_later', updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(queue_id))
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "💾 *Draft Saved*\n\nI'll remind you about this later!",
+                        reply_markup=None
+                    )
+                    return {"success": True, "ack_text": "💾 Saved"}
+                finally:
+                    await conn.close()
+            except Exception as e:
+                logger.error(f"Save failed: {e}")
+                return {"success": False, "ack_text": "❌ Error"}
+        
+        elif action == 'dismiss':
+            queue_id = notification_id
+            try:
+                import asyncpg
+                database_url = os.getenv('DATABASE_URL')
+                conn = await asyncpg.connect(database_url)
+                try:
+                    # Mark as dismissed
+                    await conn.execute('''
+                        UPDATE content_recommendation_queue
+                        SET user_feedback = 'dismissed', updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(queue_id))
+                    
+                    # Record negative learning
+                    content = await conn.fetchrow('''
+                        SELECT generated_content FROM content_recommendation_queue WHERE id = $1
+                    ''', UUID(queue_id))
+                    
+                    if content:
+                        generated = json.loads(content['generated_content'])
+                        await conn.execute('''
+                            INSERT INTO contextual_learnings (
+                                learning_type, pattern_description, evidence_type,
+                                confidence_score, situation_context, can_act_on
+                            ) VALUES ($1, $2, $3, $4, $5, $6)
+                        ''', 'content_rejection',
+                            f'User dismissed content about: {generated.get("keyword")}',
+                            'explicit_feedback', 0.7,
+                            json.dumps({'keyword': generated.get('keyword'), 'action': 'dismissed'}),
+                            False)
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "✅ Dismissed (AI learning from your feedback)",
+                        reply_markup=None
+                    )
+                    return {"success": True, "ack_text": "✅ Dismissed"}
+                finally:
+                    await conn.close()
+            except Exception as e:
+                logger.error(f"Dismiss failed: {e}")
+                return {"success": False, "ack_text": "❌ Error"}
+        
+        return {"success": False, "error": "Unknown content action"}
+    
+    # ========================================================================
+    # CONTEXTUAL INTELLIGENCE: ENGAGEMENT CALLBACKS (NEW)
+    # ========================================================================
+    
+    async def _handle_engagement_callback(
+        self,
+        action: str,
+        notification_id: str,
+        message_id: int,
+        params: list
+    ) -> Dict[str, Any]:
+        """
+        Handle Bluesky engagement callbacks (Contextual Intelligence Layer)
+        
+        Actions:
+            - view: View conversation
+            - draft_reply: Generate reply
+            - like: Like the post
+            - skip: Skip this opportunity
+        """
+        
+        if action == 'view':
+            # Return Bluesky URL
+            post_uri = ':'.join([notification_id] + params)
+            
+            try:
+                parts = post_uri.replace('at://', '').split('/')
+                if len(parts) >= 3:
+                    did = parts[0]
+                    post_id = parts[2]
+                    url = f"https://bsky.app/profile/{did}/post/{post_id}"
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"🔗 [View Conversation]({url})",
+                        reply_markup=None
+                    )
+                    return {"success": True, "ack_text": "Opening..."}
+            except Exception as e:
+                logger.error(f"View failed: {e}")
+            
+            return {"success": False, "ack_text": "❌ Invalid link"}
+        
+        elif action == 'draft_reply':
+            await self.bot_client.edit_message(
+                message_id,
+                "🚧 Reply drafting coming soon!",
+                reply_markup=None
+            )
+            return {"success": True, "ack_text": "Coming soon"}
+        
+        elif action == 'like':
+            await self.bot_client.edit_message(
+                message_id,
+                "❤️ Like feature coming soon!",
+                reply_markup=None
+            )
+            return {"success": True, "ack_text": "Coming soon"}
+        
+        elif action == 'skip':
+            opportunity_id = notification_id
+            try:
+                import asyncpg
+                database_url = os.getenv('DATABASE_URL')
+                conn = await asyncpg.connect(database_url)
+                try:
+                    await conn.execute('''
+                        UPDATE bluesky_engagement_opportunities
+                        SET user_response = 'dismissed', updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(opportunity_id))
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "⏭️ Skipped",
+                        reply_markup=None
+                    )
+                    return {"success": True, "ack_text": "Skipped"}
+                finally:
+                    await conn.close()
+            except Exception as e:
+                logger.error(f"Skip failed: {e}")
+                return {"success": False, "ack_text": "❌ Error"}
+        
+        return {"success": False, "error": "Unknown engagement action"}
 
 
 # Global instance
