@@ -99,7 +99,7 @@ class CalendarNotificationHandler:
             # If start_time is naive, assume UTC
             start_time = start_time.replace(tzinfo=timezone.utc)
         
-        minutes_until = (start_time - datetime.now()).total_seconds() / 60
+        minutes_until = (start_time - datetime.now(timezone.utc)).total_seconds() / 60
         
         # Check if we're within a reminder window
         for reminder_min in self.reminder_minutes:
@@ -154,7 +154,7 @@ class CalendarNotificationHandler:
         attendees_count = event.get('attendees_count', 0)
         
         # Calculate time until event
-        minutes_until = int((start_time - datetime.now()).total_seconds() / 60)
+        minutes_until = int((start_time - datetime.now(timezone.utc)).total_seconds() / 60)
         
         # Format time
         time_str = start_time.strftime("%I:%M %p").lstrip('0')

@@ -142,13 +142,16 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         
         # Try multiple possible field names for meeting/recording ID
         meeting_id = (
-            webhook_data.get('meeting_id') or
             webhook_data.get('recording_id') or
+            webhook_data.get('meeting_id') or
             webhook_data.get('call_id') or
-            webhook_data.get('id') or
-            None
+            webhook_data.get('id')
         )
         
+        # Convert to string if it's an integer
+        if meeting_id:
+            meeting_id = str(meeting_id)
+                
         logger.info(f"\n🎯 EXTRACTED DATA:")
         logger.info(f"   Event type: {event_type}")
         logger.info(f"   Meeting ID: {meeting_id}")
