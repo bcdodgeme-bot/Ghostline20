@@ -666,7 +666,10 @@ async def intelligence_cycle_task():
                 logger.info("🧠 Running intelligence cycle...")
                 
                 # Initialize orchestrator
-                orchestrator = IntelligenceOrchestrator(USER_ID)
+                orchestrator = IntelligenceOrchestrator(
+                    db_manager=db_manager,
+                        user_id=USER_ID
+                    )
                 
                 # Run the cycle
                 result = await orchestrator.run_intelligence_cycle()
@@ -705,7 +708,10 @@ async def daily_intelligence_digest_task():
                     logger.info("📊 Sending daily intelligence digest...")
                     
                     # Initialize orchestrator
-                    orchestrator = IntelligenceOrchestrator(USER_ID)
+                    orchestrator = IntelligenceOrchestrator(
+                        db_manager=db_manager,
+                        user_id=USER_ID
+                    )
                     
                     # Generate and send digest
                     await orchestrator.generate_and_send_daily_digest()

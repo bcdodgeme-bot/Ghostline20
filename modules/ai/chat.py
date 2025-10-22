@@ -2316,7 +2316,7 @@ async def handle_intelligence_command(message: str, user_id: str) -> str:
         
         # Command 1: Status / Active Situations
         if 'status' in message_lower or 'active situations' in message_lower:
-            situations = await orchestrator.manager.get_active_situations()
+            situations = await orchestrator.situation_manager.get_active_situations()
             
             if not situations:
                 return """🧠 **Intelligence System Status**

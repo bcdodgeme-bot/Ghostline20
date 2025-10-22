@@ -925,16 +925,16 @@ class CallbackHandler:
             
             if action == 'dismiss':
                 # User dismissed the situation
-                await orchestrator.manager.record_user_response(
+                await orchestrator.situation_manager.record_user_response(
                     notification_id,
                     'dismissed',
                     'none'
                 )
                 
                 # Update learning system
-                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                situation = await orchestrator.situation_manager.get_situation_by_id(notification_id)
                 if situation:
-                    await orchestrator.manager.update_learning(
+                    await orchestrator.situation_manager.update_learning(
                         pattern_type=situation['situation_type'],
                         user_response='dismissed',
                         confidence_adjustment=-0.1
