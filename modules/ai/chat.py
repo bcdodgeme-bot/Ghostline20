@@ -2366,7 +2366,7 @@ Type `run intelligence` to trigger a manual scan."""
             logger.info(f"🧠 Manual intelligence cycle triggered by user")
             
             # Run the cycle
-            result = await orchestrator.run_intelligence_cycle()
+            result = await orchestrator.run_intelligence_cycle(user_id=user_id)
             
             signals_collected = result.get('signals_collected', 0)
             situations_detected = result.get('situations_detected', 0)

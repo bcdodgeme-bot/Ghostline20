@@ -64,11 +64,18 @@ class WeatherNotificationHandler:
             return False
     
     async def _get_current_weather(self) -> Optional[Dict[str, Any]]:
-        """Get current weather from readings"""
+        """Get latest weather reading from database + fetch forecast"""
         query = """
-        SELECT location, temperature, temperature_apparent, weather_description, 
-               humidity, wind_speed, weather_code, timestamp,
-               headache_risk_level, uv_risk_level
+        SELECT 
+            location,
+            temperature,
+            temperature_apparent,
+            humidity,
+            wind_speed,
+            weather_description,
+            headache_risk_level,
+            uv_risk_level,
+            timestamp
         FROM weather_readings
         WHERE user_id = $1
         ORDER BY timestamp DESC
@@ -80,6 +87,9 @@ class WeatherNotificationHandler:
         if not result:
             return None
         
+        # Get forecast from Tomorrow.io
+        forecast_summary = await self._get_forecast_summary()
+        
         return {
             'location': result['location'],
             'temperature': float(result['temperature']),
@@ -89,7 +99,8 @@ class WeatherNotificationHandler:
             'wind_speed': float(result['wind_speed']) if result['wind_speed'] else 0,
             'headache_risk': result['headache_risk_level'],
             'uv_risk': result['uv_risk_level'],
-            'timestamp': result['timestamp']
+            'timestamp': result['timestamp'],
+            'forecast': forecast_summary  # NEW: Add forecast
         }
     
     async def _should_notify_weather(self, weather_data: Dict[str, Any]) -> bool:
@@ -146,6 +157,7 @@ class WeatherNotificationHandler:
         wind_speed = weather_data['wind_speed']
         headache_risk = weather_data.get('headache_risk', None)
         uv_risk = weather_data.get('uv_risk', None)
+        forecast = weather_data.get('forecast', None)
         
         # Weather emoji based on condition
         emoji = self._get_weather_emoji(condition)
@@ -195,6 +207,73 @@ class WeatherNotificationHandler:
         )
         
         logger.info(f"✅ Sent weather notification: {location} - {temp}°F, {condition}")
+    
+    async def _get_forecast_summary(self) -> Optional[str]:
+        """
+        Get brief forecast summary from Tomorrow.io
+        Returns a short text forecast for the next 24-48 hours
+        """
+        try:
+            from modules.integrations.weather.tomorrow_client import TomorrowClient
+            
+            client = TomorrowClient()
+            
+            # Get 2-day forecast
+            forecast_data = await client.get_weather_forecast(days=2)
+            
+            if not forecast_data or len(forecast_data) == 0:
+                return None
+            
+            # Weather code mappings (simplified)
+            WEATHER_CODES = {
+                1000: "Clear", 1100: "Mostly Clear", 1101: "Partly Cloudy",
+                1102: "Mostly Cloudy", 1001: "Cloudy", 2000: "Fog",
+                4000: "Drizzle", 4001: "Rain", 4200: "Light Rain",
+                4201: "Heavy Rain", 5000: "Snow", 5100: "Light Snow",
+                5101: "Heavy Snow", 8000: "Thunderstorm"
+            }
+            
+            # Format brief forecast
+            tomorrow = forecast_data[0] if len(forecast_data) > 0 else None
+            day_after = forecast_data[1] if len(forecast_data) > 1 else None
+            
+            forecast_lines = []
+            
+            if tomorrow:
+                values = tomorrow.get('values', {})
+                temp_min_c = values.get('temperatureMin', 0)
+                temp_max_c = values.get('temperatureMax', 0)
+                temp_min_f = temp_min_c * 9/5 + 32
+                temp_max_f = temp_max_c * 9/5 + 32
+                weather_code = values.get('weatherCodeMax', 1000)
+                condition = WEATHER_CODES.get(weather_code, "Unknown")
+                precip_prob = values.get('precipitationProbabilityAvg', 0)
+                
+                forecast_lines.append(
+                    f"Tomorrow: {condition}, {temp_min_f:.0f}-{temp_max_f:.0f}°F"
+                )
+                
+                if precip_prob > 30:
+                    forecast_lines.append(f"  {precip_prob:.0f}% chance of precipitation")
+            
+            if day_after:
+                values = day_after.get('values', {})
+                temp_min_c = values.get('temperatureMin', 0)
+                temp_max_c = values.get('temperatureMax', 0)
+                temp_min_f = temp_min_c * 9/5 + 32
+                temp_max_f = temp_max_c * 9/5 + 32
+                weather_code = values.get('weatherCodeMax', 1000)
+                condition = WEATHER_CODES.get(weather_code, "Unknown")
+                
+                forecast_lines.append(
+                    f"Day After: {condition}, {temp_min_f:.0f}-{temp_max_f:.0f}°F"
+                )
+            
+            return "\n".join(forecast_lines) if forecast_lines else None
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch forecast: {e}")
+            return None
     
     def _get_weather_emoji(self, condition: str) -> str:
         """Get emoji based on weather condition"""
