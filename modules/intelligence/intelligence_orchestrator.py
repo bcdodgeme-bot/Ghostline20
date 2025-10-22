@@ -76,40 +76,14 @@ class IntelligenceOrchestrator:
         self.user_id = user_id
         
         # Initialize all context collectors
-        self.calendar_collector = CalendarCollector(
-            db_manager=db_manager,
-            calendar_service=google_calendar_service
-        )
-        
-        self.email_collector = EmailCollector(
-            db_manager=db_manager,
-            gmail_service=gmail_service
-        )
-        
-        self.meeting_collector = MeetingCollector(
-            db_manager=db_manager
-        )
-        
-        self.conversation_collector = ConversationCollector(
-            db_manager=db_manager
-        )
-        
-        self.trend_collector = TrendCollector(
-            db_manager=db_manager
-        )
-        
-        self.weather_collector = WeatherCollector(
-            db_manager=db_manager,
-            weather_service=weather_service
-        )
-        
-        self.knowledge_collector = KnowledgeCollector(
-            db_manager=db_manager
-        )
-        
-        self.action_item_collector = ActionItemCollector(
-            db_manager=db_manager
-        )
+        self.calendar_collector = CalendarCollector(db_manager=db_manager)
+        self.email_collector = EmailCollector(db_manager=db_manager)
+        self.meeting_collector = MeetingCollector(db_manager=db_manager)
+        self.conversation_collector = ConversationCollector(db_manager=db_manager)
+        self.trend_collector = TrendCollector(db_manager=db_manager)
+        self.weather_collector = WeatherCollector(db_manager=db_manager)
+        self.knowledge_collector = KnowledgeCollector(db_manager=db_manager)
+        self.action_item_collector = ActionItemCollector(db_manager=db_manager)
         
         # Initialize intelligence modules
         self.situation_detector = SituationDetector()
