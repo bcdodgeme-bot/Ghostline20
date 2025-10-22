@@ -2406,50 +2406,23 @@ Check your Telegram for the full report."""
         
         # Command 4: What Did You Notice / Context Check
         elif 'notice' in message_lower or 'context check' in message_lower:
-            # Get recent signals (last 24h)
-            from datetime import datetime, timedelta
-            cutoff_time = datetime.now() - timedelta(hours=24)
+            # Get runtime stats from orchestrator
+            stats = orchestrator.get_runtime_stats()
             
-            # Get signals by type
-            all_signals = await orchestrator.get_recent_signals(cutoff_time)
+            total_signals = stats.get('total_signals_collected', 0)
+            total_situations = stats.get('total_situations_detected', 0)
+            last_run = stats.get('last_run_time', 'Never')
+            avg_signals = stats.get('avg_signals_per_run', 0)
             
-            if not all_signals:
-                return """🧠 **Recent Context**
+            return f"""🧠 **Intelligence System Statistics**
 
-📊 No new signals collected in the last 24 hours.
+📊 **Overall Activity:**
+- Total Signals Collected: {total_signals}
+- Total Situations Detected: {total_situations}
+- Average Signals Per Run: {avg_signals:.1f}
+- Last Cycle: {last_run}
 
-The system monitors continuously. Check back later or type `run intelligence` to trigger a manual scan."""
-            
-            # Group signals by source
-            signal_groups = {}
-            for signal in all_signals:
-                source = signal.get('signal_source', 'unknown')
-                if source not in signal_groups:
-                    signal_groups[source] = []
-                signal_groups[source].append(signal)
-            
-            response = "🧠 **Recent Context (Last 24 Hours)**\n\n"
-            
-            # Format by source
-            source_names = {
-                'meeting_action_items': '📝 Meetings',
-                'conversation_topics': '💬 Conversations',
-                'trending_keywords': '📈 Trends',
-                'calendar_patterns': '📅 Calendar',
-                'email_patterns': '📧 Email',
-                'content_opportunities': '🎯 Content',
-                'engagement_opportunities': '👥 Engagement',
-                'reminder_patterns': '⏰ Reminders'
-            }
-            
-            for source, signals in signal_groups.items():
-                source_name = source_names.get(source, source.replace('_', ' ').title())
-                response += f"**{source_name}**: {len(signals)} signal(s)\n"
-            
-            response += f"\n💡 Total signals: {len(all_signals)}\n"
-            response += "\nType `intelligence status` to see actionable situations detected from these signals."
-            
-            return response
+💡 Type `run intelligence` to collect fresh signals, or `intelligence status` to see active situations."""
         
         # Default: Show help
         else:
