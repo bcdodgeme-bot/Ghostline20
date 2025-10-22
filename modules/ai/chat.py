@@ -2263,6 +2263,224 @@ async def get_or_create_system_thread(memory_manager) -> str:
         logger.error(f"Failed to create system thread: {e}")
         raise
 
+#-- Section 12.5: Intelligence System Commands - 10/22/25
+def detect_intelligence_command(message: str) -> bool:
+    """
+    Detect if user is asking about the intelligence system
+    
+    Keywords:
+    - "intelligence status", "active situations"
+    - "what did you notice", "context check"
+    - "run intelligence", "intelligence cycle"
+    - "daily digest"
+    - "situations"
+    """
+    intelligence_keywords = [
+        "intelligence status", "intelligence system",
+        "active situations", "situations",
+        "what did you notice", "what have you noticed",
+        "context check", "check context",
+        "run intelligence", "intelligence cycle",
+        "daily digest", "intelligence digest",
+        "intelligence report"
+    ]
+    
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in intelligence_keywords)
+
+
+async def handle_intelligence_command(message: str, user_id: str) -> str:
+    """
+    Handle intelligence system commands
+    
+    Commands:
+    1. "intelligence status" or "active situations"
+       - Show all active situations
+       
+    2. "run intelligence" or "run intelligence cycle"
+       - Manually trigger intelligence cycle
+       
+    3. "daily digest"
+       - Generate and send digest immediately
+       
+    4. "what did you notice" or "context check"
+       - Show recent signals from last 24h
+    """
+    try:
+        from ..intelligence.orchestrator import IntelligenceOrchestrator
+        
+        # Initialize orchestrator
+        orchestrator = IntelligenceOrchestrator(user_id)
+        
+        message_lower = message.lower()
+        
+        # Command 1: Status / Active Situations
+        if 'status' in message_lower or 'active situations' in message_lower:
+            situations = await orchestrator.manager.get_active_situations()
+            
+            if not situations:
+                return """🧠 **Intelligence System Status**
+
+✅ System operational
+📊 No active situations detected
+
+The intelligence system is monitoring:
+- 📧 Email patterns
+- 📅 Calendar events
+- 💬 Conversation topics
+- 📈 Trending keywords
+- 🎯 Content opportunities
+- 👥 Engagement opportunities
+- 📝 Meeting action items
+- ⏰ Reminder patterns
+
+Type `run intelligence` to trigger a manual scan."""
+            
+            # Format active situations
+            response = f"🧠 **Active Situations** ({len(situations)} found)\n\n"
+            
+            # Sort by priority (highest first)
+            situations.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
+            
+            # Show top 5
+            for idx, situation in enumerate(situations[:5], 1):
+                title = situation.get('situation_type', 'Unknown').replace('_', ' ').title()
+                priority = situation.get('priority_score', 0)
+                confidence = situation.get('confidence_score', 0)
+                action_count = len(situation.get('suggested_actions', []))
+                
+                response += f"**{idx}. {title}**\n"
+                response += f"Priority: {priority}/10 | Confidence: {int(confidence*100)}%\n"
+                response += f"Suggested Actions: {action_count}\n"
+                response += "---\n\n"
+            
+            if len(situations) > 5:
+                response += f"_...and {len(situations) - 5} more situations_\n\n"
+            
+            response += "💡 These situations were detected automatically based on patterns in your data."
+            
+            return response
+        
+        # Command 2: Run Intelligence Cycle
+        elif 'run intelligence' in message_lower or 'run cycle' in message_lower:
+            logger.info(f"🧠 Manual intelligence cycle triggered by user")
+            
+            # Run the cycle
+            result = await orchestrator.run_intelligence_cycle()
+            
+            signals_collected = result.get('signals_collected', 0)
+            situations_detected = result.get('situations_detected', 0)
+            situations_expired = result.get('situations_expired', 0)
+            notifications_sent = result.get('notifications_sent', 0)
+            
+            return f"""🧠 **Intelligence Cycle Complete**
+
+📊 **Results:**
+- Signals Collected: {signals_collected}
+- Situations Detected: {situations_detected}
+- Situations Expired: {situations_expired}
+- Notifications Sent: {notifications_sent}
+
+✅ System has analyzed your recent activity and identified actionable patterns.
+
+Type `intelligence status` to see detected situations."""
+        
+        # Command 3: Daily Digest
+        elif 'digest' in message_lower:
+            logger.info(f"🧠 Manual daily digest triggered by user")
+            
+            # Generate and send digest
+            await orchestrator.generate_and_send_daily_digest()
+            
+            return """📊 **Daily Intelligence Digest**
+
+✅ Digest generated and sent to Telegram
+
+The digest includes:
+- Situations from the last 24 hours
+- Your response patterns (acted vs dismissed)
+- Learning improvements
+- System insights
+
+Check your Telegram for the full report."""
+        
+        # Command 4: What Did You Notice / Context Check
+        elif 'notice' in message_lower or 'context check' in message_lower:
+            # Get recent signals (last 24h)
+            from datetime import datetime, timedelta
+            cutoff_time = datetime.now() - timedelta(hours=24)
+            
+            # Get signals by type
+            all_signals = await orchestrator.get_recent_signals(cutoff_time)
+            
+            if not all_signals:
+                return """🧠 **Recent Context**
+
+📊 No new signals collected in the last 24 hours.
+
+The system monitors continuously. Check back later or type `run intelligence` to trigger a manual scan."""
+            
+            # Group signals by source
+            signal_groups = {}
+            for signal in all_signals:
+                source = signal.get('signal_source', 'unknown')
+                if source not in signal_groups:
+                    signal_groups[source] = []
+                signal_groups[source].append(signal)
+            
+            response = "🧠 **Recent Context (Last 24 Hours)**\n\n"
+            
+            # Format by source
+            source_names = {
+                'meeting_action_items': '📝 Meetings',
+                'conversation_topics': '💬 Conversations',
+                'trending_keywords': '📈 Trends',
+                'calendar_patterns': '📅 Calendar',
+                'email_patterns': '📧 Email',
+                'content_opportunities': '🎯 Content',
+                'engagement_opportunities': '👥 Engagement',
+                'reminder_patterns': '⏰ Reminders'
+            }
+            
+            for source, signals in signal_groups.items():
+                source_name = source_names.get(source, source.replace('_', ' ').title())
+                response += f"**{source_name}**: {len(signals)} signal(s)\n"
+            
+            response += f"\n💡 Total signals: {len(all_signals)}\n"
+            response += "\nType `intelligence status` to see actionable situations detected from these signals."
+            
+            return response
+        
+        # Default: Show help
+        else:
+            return """🧠 **Intelligence System Commands**
+
+Available commands:
+
+1️⃣ **intelligence status**
+   View active situations requiring attention
+
+2️⃣ **run intelligence**
+   Manually trigger intelligence cycle
+
+3️⃣ **daily digest**
+   Generate and send daily intelligence report
+
+4️⃣ **what did you notice**
+   Show recent signals collected (24h)
+
+📚 **How it works:**
+The Intelligence Hub continuously monitors your:
+- Meetings, emails, calendar
+- Conversations and trends
+- Content & engagement opportunities
+
+It detects patterns and suggests actions automatically."""
+    
+    except Exception as e:
+        logger.error(f"Intelligence command error: {e}")
+        return f"❌ **Intelligence System Error**\n\n{str(e)}\n\nThe intelligence system may not be fully initialized yet."
+
 #-- Section 13: Module Information Functions - 9/26/25 (Updated 9/28/25)
 def get_integration_info():
     """Get information about the chat integration helper module"""

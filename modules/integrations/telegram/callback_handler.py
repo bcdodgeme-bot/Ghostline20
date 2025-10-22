@@ -135,6 +135,11 @@ class CallbackHandler:
                 result = await self._handle_engagement_callback(
                     action, notification_id, message_id, extra_params
                 )
+                
+            elif notification_type == 'situation':
+                result = await self._handle_situation_callback(
+                    action, notification_id, message_id, extra_params
+                )
             # ====== END NEW ======
             
             else:
@@ -891,6 +896,150 @@ class CallbackHandler:
         
         return {"success": False, "error": "Unknown engagement action"}
 
+# ========================================================================
+    # INTELLIGENCE SYSTEM: SITUATION CALLBACKS (NEW - 10/22/25)
+    # ========================================================================
+    
+    async def _handle_situation_callback(
+        self,
+        action: str,
+        notification_id: str,
+        message_id: int,
+        params: list
+    ) -> Dict[str, Any]:
+        """
+        Handle situation callbacks from Intelligence Hub
+        
+        Callback format: situation:action:situation_id[:optional_params]
+        
+        Actions:
+            - dismiss: User dismissed situation
+            - details: User wants more information
+            - action1/action2: User clicked suggested action
+        """
+        try:
+            from ...intelligence.orchestrator import IntelligenceOrchestrator
+            
+            user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+            orchestrator = IntelligenceOrchestrator(user_id)
+            
+            if action == 'dismiss':
+                # User dismissed the situation
+                await orchestrator.manager.record_user_response(
+                    notification_id,
+                    'dismissed',
+                    'none'
+                )
+                
+                # Update learning system
+                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                if situation:
+                    await orchestrator.manager.update_learning(
+                        pattern_type=situation['situation_type'],
+                        user_response='dismissed',
+                        confidence_adjustment=-0.1
+                    )
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    "✅ Situation dismissed (AI learning from your feedback)",
+                    reply_markup=None
+                )
+                
+                return {
+                    "success": True,
+                    "ack_text": "Dismissed"
+                }
+            
+            elif action == 'details':
+                # User wants more details
+                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                
+                if not situation:
+                    return {"success": False, "error": "Situation not found"}
+                
+                # Format detailed view
+                details = f"""🧠 **Situation Details**
+
+**Type:** {situation['situation_type'].replace('_', ' ').title()}
+**Priority:** {situation['priority_score']}/10
+**Confidence:** {int(situation['confidence_score']*100)}%
+
+**Context:**
+{situation.get('context_summary', 'No additional context')}
+
+**Detected:** {situation['detected_at'].strftime('%b %d at %I:%M %p')}
+"""
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    details,
+                    reply_markup=None
+                )
+                
+                return {
+                    "success": True,
+                    "ack_text": "Details shown"
+                }
+            
+            elif action.startswith('action'):
+                # User clicked an action button (action1, action2, etc.)
+                action_index = int(action.replace('action', '')) - 1
+                
+                # Execute the action via orchestrator
+                callback_data = f"situation:{action}:{notification_id}"
+                if params:
+                    callback_data += ":" + ":".join(params)
+                
+                result = await orchestrator.handle_situation_callback(
+                    callback_data,
+                    user_id
+                )
+                
+                # Record user response
+                await orchestrator.manager.record_user_response(
+                    notification_id,
+                    'acted',
+                    f'action_{action_index + 1}'
+                )
+                
+                # Update learning (positive reinforcement)
+                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                if situation:
+                    await orchestrator.manager.update_learning(
+                        pattern_type=situation['situation_type'],
+                        user_response='acted',
+                        confidence_adjustment=0.05
+                    )
+                
+                if result.get('success'):
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"✅ {result.get('message', 'Action executed successfully')}",
+                        reply_markup=None
+                    )
+                    
+                    return {
+                        "success": True,
+                        "ack_text": "Action executed"
+                    }
+                else:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"❌ {result.get('message', 'Action failed')}",
+                        reply_markup=None
+                    )
+                    
+                    return {
+                        "success": False,
+                        "ack_text": "Action failed"
+                    }
+            
+            return {"success": False, "error": "Unknown situation action"}
+        
+        except Exception as e:
+            logger.error(f"Situation callback error: {e}")
+            return {"success": False, "error": str(e)}
 
 # Global instance
 _callback_handler = None

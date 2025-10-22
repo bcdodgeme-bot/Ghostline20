@@ -106,8 +106,8 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         
         # Get raw body
         body = await request.body()
-        logger.info(f"\n📦 RAW BODY ({len(body)} bytes):")
-        logger.info(f"   First 1000 chars: {body[:1000].decode('utf-8', errors='ignore')}")
+        #logger.info(f"\n📦 RAW BODY ({len(body)} bytes):")
+        #logger.info(f"   First 1000 chars: {body[:1000].decode('utf-8', errors='ignore')}")
         
         # Try to parse as JSON
         try:

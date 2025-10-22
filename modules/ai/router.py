@@ -187,6 +187,7 @@ async def chat_with_ai(
                  detect_weather_request, get_weather_for_user,get_weather_forecast_for_user, 
                  detect_prayer_command, process_prayer_command,
                  detect_prayer_notification_command, process_prayer_notification_command,
+                 detect_intelligence_command, handle_intelligence_command,
                  detect_location_command, process_location_command,
                  detect_bluesky_command, process_bluesky_command,
                  detect_rss_command, get_rss_marketing_context,
@@ -452,6 +453,16 @@ Weather data powered by Tomorrow.io"""
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer notification command processing failed: {e}")
                 special_response = f"🔔 **Prayer Notification Error**\n\nUnable to process notification request: {str(e)}"
+        
+        # 5.2 🧠 Intelligence System Commands (FIFTH-B) - added 10/22/25
+        elif detect_intelligence_command(message_content):
+            logger.info("🧠 DEBUG: Intelligence system command detected")
+            try:
+                special_response = await handle_intelligence_command(message_content, user_id)
+                logger.info("✅ DEBUG: Intelligence command processed successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Intelligence command processing failed: {e}")
+                special_response = f"🧠 **Intelligence System Error**\n\nError: {str(e)}"
         
         # 5.2 📍 Location Detection Commands (FIFTH-B)
         elif detect_location_command(message_content):

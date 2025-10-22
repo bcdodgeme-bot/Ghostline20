@@ -39,6 +39,10 @@ from modules.integrations.weather import get_integration_info as weather_integra
 from modules.integrations.bluesky import router as bluesky_router
 from modules.integrations.bluesky import get_integration_info as bluesky_integration_info, check_module_health as bluesky_module_health
 
+#-- NEW Section 2i: Intelligence Hub Integration - added 10/22/25
+from modules.intelligence.orchestrator import IntelligenceOrchestrator
+from zoneinfo import ZoneInfo
+
 #-- NEW Section 2c: RSS Learning Integration - added 9/25/25
 from modules.integrations.rss_learning import router as rss_learning_router
 from modules.integrations.rss_learning import get_integration_info as rss_learning_integration_info, check_module_health as rss_learning_module_health, start_rss_service
@@ -344,6 +348,8 @@ async def startup_event():
         asyncio.create_task(bluesky_notification_task())
         asyncio.create_task(trends_notification_task())
         asyncio.create_task(analytics_notification_task())
+        asyncio.create_task(intelligence_cycle_task())
+        asyncio.create_task(daily_intelligence_digest_task())
 
         
     except Exception as e:
@@ -645,6 +651,79 @@ async def analytics_notification_task():
         except Exception as e:
             logger.error(f"Analytics notification error: {e}")
             await asyncio.sleep(60)
+
+async def intelligence_cycle_task():
+    """
+    Run complete intelligence cycle every 4 hours
+    Collects signals, detects situations, sends notifications
+    """
+    logger.info("🧠 Intelligence cycle task started")
+    
+    while True:
+        try:
+            # Check kill switch
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                logger.info("🧠 Running intelligence cycle...")
+                
+                # Initialize orchestrator
+                orchestrator = IntelligenceOrchestrator(USER_ID)
+                
+                # Run the cycle
+                result = await orchestrator.run_intelligence_cycle()
+                
+                logger.info(f"✅ Intelligence cycle complete: {result['signals_collected']} signals, "
+                          f"{result['situations_detected']} situations, "
+                          f"{result['notifications_sent']} notifications sent")
+            else:
+                logger.info("🧠 Intelligence cycle skipped (kill switch disabled)")
+            
+            # Wait 4 hours
+            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
+            
+        except Exception as e:
+            logger.error(f"Intelligence cycle error: {e}")
+            await asyncio.sleep(300)  # Retry after 5 minutes on error
+
+
+async def daily_intelligence_digest_task():
+    """
+    Send daily intelligence digest at 8 AM Eastern Time
+    Summary of situations, user responses, and learnings
+    """
+    logger.info("📊 Daily intelligence digest task started")
+    
+    while True:
+        try:
+            # Get current time in Eastern timezone
+            eastern = ZoneInfo('America/New_York')
+            now = datetime.now(eastern)
+            
+            # Check if it's 8 AM (with 5-minute window)
+            if now.hour == 8 and now.minute < 5:
+                # Check kill switch
+                if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                    logger.info("📊 Sending daily intelligence digest...")
+                    
+                    # Initialize orchestrator
+                    orchestrator = IntelligenceOrchestrator(USER_ID)
+                    
+                    # Generate and send digest
+                    await orchestrator.generate_and_send_daily_digest()
+                    
+                    logger.info("✅ Daily digest sent successfully")
+                    
+                    # Sleep until next day (23 hours to ensure we catch tomorrow's window)
+                    await asyncio.sleep(82800)  # 23 hours
+                else:
+                    logger.info("📊 Daily digest skipped (kill switch disabled)")
+                    await asyncio.sleep(82800)  # Sleep until tomorrow
+            else:
+                # Not 8 AM yet, check again in 5 minutes
+                await asyncio.sleep(300)
+            
+        except Exception as e:
+            logger.error(f"Daily digest error: {e}")
+            await asyncio.sleep(300)  # Retry after 5 minutes on error
 
 #-- Section 11: API Status and Health Endpoints - updated 9/28/25 with Voice & Image
 @app.get("/health")
