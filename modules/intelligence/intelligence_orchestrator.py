@@ -23,14 +23,14 @@ import json
 
 # Import all our intelligence modules
 from modules.intelligence.context_collectors import (
-    CalendarCollector,
-    EmailCollector,
-    MeetingCollector,
-    ConversationCollector,
-    TrendCollector,
-    WeatherCollector,
-    KnowledgeCollector,
-    ActionItemCollector
+    CalendarContextCollector as CalendarCollector,
+    EmailContextCollector as EmailCollector,
+    MeetingContextCollector as MeetingCollector,
+    ConversationContextCollector as ConversationCollector,
+    TrendContextCollector as TrendCollector,
+    WeatherContextCollector as WeatherCollector,
+    KnowledgeContextCollector as KnowledgeCollector,
+    PerformanceContextCollector as ActionItemCollector
 )
 
 from modules.intelligence.situation_detector import SituationDetector
