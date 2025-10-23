@@ -2311,12 +2311,12 @@ async def handle_intelligence_command(message: str, user_id: str) -> str:
         
         # Initialize orchestrator
         from ...core.database import db_manager
-            from uuid import UUID
+        from uuid import UUID
             
-            orchestrator = IntelligenceOrchestrator(
-                db_manager=db_manager,
-                user_id=UUID(user_id) if isinstance(user_id, str) else user_id
-            )
+        orchestrator = IntelligenceOrchestrator(
+            db_manager=db_manager,
+            user_id=UUID(user_id) if isinstance(user_id, str) else user_id
+        )
         
         message_lower = message.lower()
         
