@@ -2307,7 +2307,7 @@ async def handle_intelligence_command(message: str, user_id: str) -> str:
        - Show recent signals from last 24h
     """
     try:
-        from ..intelligence.intelligence_orchestrator import IntelligenceOrchestrator
+        from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
         
         # Initialize orchestrator
         from ...core.database import db_manager
