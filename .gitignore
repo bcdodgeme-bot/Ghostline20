@@ -76,3 +76,6 @@ modules/integrations/fathom/__pycache__/meeting_processor.cpython-311.pyc
 modules/integrations/fathom/__pycache__/router.cpython-311.pyc
 modules/integrations/fathom/__pycache__/__init__.cpython-311.pyc
 apply_bug_fixes_CORRECT.py
+fix_orchestrator_init.py
+modules/ai/chat.py.backup2
+modules/integrations/telegram/callback_handler.py.backup2

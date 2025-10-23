@@ -921,7 +921,13 @@ class CallbackHandler:
             from ...intelligence.intelligence_orchestrator import IntelligenceOrchestrator
             
             user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
-            orchestrator = IntelligenceOrchestrator(user_id)
+            from ....core.database import db_manager
+            from uuid import UUID
+            
+            orchestrator = IntelligenceOrchestrator(
+                db_manager=db_manager,
+                user_id=UUID(user_id) if isinstance(user_id, str) else user_id
+            )
             
             if action == 'dismiss':
                 # User dismissed the situation
