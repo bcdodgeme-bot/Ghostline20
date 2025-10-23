@@ -194,7 +194,7 @@ class WeatherNotificationHandler:
             'location': location,
             'temperature': temp,
             'condition': condition,
-            'cached_at': weather_data.get('cached_at', datetime.now(timezone.utc)).isoformat() if isinstance(weather_data.get('cached_at'), datetime) else str(weather_data.get('cached_at', datetime.now(timezone.utc)))
+            'cached_at': weather_data['cached_at'].isoformat() if isinstance(weather_data['cached_at'], datetime) else str(weather_data['cached_at'])
         }
         
         # Send via notification manager

@@ -11,7 +11,7 @@ Created: 10/22/25
 
 import logging
 from uuid import UUID, uuid4
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import json
@@ -104,7 +104,7 @@ class ContextCollector:
         Returns:
             New ContextSignal object
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         return ContextSignal(
             signal_id=uuid4(),
             source=self.collector_name.replace('ContextCollector', '').lower(),
@@ -200,7 +200,7 @@ class MeetingContextCollector(ContextCollector):
             
             action_items = await self.db.fetch_all(action_items_query, lookback_time)
             
-            now = datetime.now(timezone.utc)
+            now = datetime.utcnow()
             
             for item in action_items:
                 due_date = item['due_date']
@@ -793,7 +793,7 @@ class CalendarContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of calendar data source"""
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.utcnow()
             
             # Count total events
             total_events = await self.db.fetch_one(
@@ -1794,7 +1794,7 @@ class WeatherContextCollector(ContextCollector):
                 ORDER BY forecast_time ASC
             """
             
-            now = datetime.now(timezone.utc)
+            now = datetime.utcnow()
             next_24h = now + timedelta(hours=24)
             
             try:

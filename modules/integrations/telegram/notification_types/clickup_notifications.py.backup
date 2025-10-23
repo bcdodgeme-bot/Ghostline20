@@ -89,7 +89,7 @@ class ClickUpNotificationHandler:
         AND status NOT IN ('complete', 'closed')
         AND (
             due_date < NOW() + INTERVAL '24 hours'  -- Due in next 24 hours or overdue
-            OR (priority::text = 'urgent' OR priority = 1)
+            OR priority = 'urgent'
         )
         ORDER BY 
             CASE WHEN due_date < NOW() THEN 0 ELSE 1 END,  -- Overdue first
