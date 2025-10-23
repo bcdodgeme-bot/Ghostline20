@@ -2308,9 +2308,9 @@ async def handle_intelligence_command(message: str, user_id: str) -> str:
     """
     try:
         from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
-        
+
         # Initialize orchestrator
-        from ...core.database import db_manager
+        from modules.core.database import db_manager  # ← ABSOLUTE IMPORT
         from uuid import UUID
             
         orchestrator = IntelligenceOrchestrator(
