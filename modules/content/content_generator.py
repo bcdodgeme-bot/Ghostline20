@@ -17,7 +17,12 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from modules.ai.openrouter_client import get_openrouter_client
 
-logging.basicConfig(level=logging.INFO)
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(stream=sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 

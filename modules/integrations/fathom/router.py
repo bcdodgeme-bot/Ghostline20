@@ -204,28 +204,44 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
 async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any]):
     """
     Background task to process meeting webhook
-    This runs asynchronously after webhook returns
+    Uses data directly from webhook instead of fetching from API
     
     Steps:
-    1. Fetch meeting details + transcript from Fathom
+    1. Extract data from webhook payload
     2. Generate AI summary using Claude
     3. Store everything in PostgreSQL
+    4. Send Telegram notification
     """
     try:
         logger.info(f"🔄 Processing meeting: {meeting_id}")
         
-        # Step 1: Fetch complete meeting data from Fathom API
-        logger.info("   📥 Fetching meeting data from Fathom...")
-        meeting_data = await fathom_handler.get_complete_meeting_data(meeting_id)
+        # Step 1: Use webhook data directly (it has everything we need!)
+        logger.info("   📦 Using data from webhook payload...")
         
-        # Check for errors
-        if 'error' in meeting_data.get('details', {}):
-            logger.error(f"❌ Failed to fetch meeting details: {meeting_data['details']['error']}")
-            return
+        # Format the webhook data into the structure our code expects
+        meeting_data = {
+            'recording_id': webhook_data.get('recording_id'),
+            'fetched_at': datetime.now().isoformat(),
+            'details': {
+                'id': webhook_data.get('recording_id'),
+                'title': webhook_data.get('title') or webhook_data.get('meeting_title', 'Untitled Meeting'),
+                'start_time': webhook_data.get('recording_start_time'),
+                'end_time': webhook_data.get('recording_end_time'),
+                'duration': 0,  # Will calculate from times
+                'attendees': [
+                    {'name': inv.get('name') or inv.get('email', 'Unknown')}
+                    for inv in webhook_data.get('calendar_invitees', [])
+                ],
+                'url': webhook_data.get('url'),
+                'share_url': webhook_data.get('share_url')
+            },
+            'transcript': {
+                'transcript': webhook_data.get('transcript', '')  # Already formatted text
+            }
+        }
         
-        if 'error' in meeting_data.get('transcript', {}):
-            logger.error(f"❌ Failed to fetch transcript: {meeting_data['transcript']['error']}")
-            return
+        logger.info(f"   ✅ Extracted: {meeting_data['details']['title']}")
+        logger.info(f"   📄 Transcript: {len(meeting_data['transcript']['transcript'])} chars")
         
         # Step 2: Generate AI summary using Claude
         logger.info("   🤖 Generating AI summary with Claude...")
@@ -235,6 +251,8 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
         if 'error' in summary_data:
             logger.error(f"❌ AI summary generation failed: {summary_data['error']}")
             # Continue anyway - we can store meeting without summary
+        else:
+            logger.info("   ✅ AI summary generated")
         
         # Step 3: Store in database
         logger.info("   💾 Storing in database...")
@@ -251,52 +269,39 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
             notification_manager = NotificationManager(telegram_bot)
             
             # Extract meeting details for notification
-            details = meeting_data.get('details', {})
-            title = details.get('title', 'Untitled Meeting')
-            meeting_date = details.get('start_time', 'Date not available')
-            duration = details.get('duration_minutes', 0)
-            participants = details.get('participants', [])
+            title = meeting_data['details']['title']
+            meeting_date = meeting_data['details'].get('start_time', 'Date unknown')
             
-            # Format participants list
-            if participants:
-                participants_text = ", ".join([str(p) for p in participants[:5]])  # Limit to 5 to avoid huge list
-                if len(participants) > 5:
-                    participants_text += f" + {len(participants) - 5} more"
-            else:
-                participants_text = "No participants listed"
+            # Build notification message
+            message_parts = []
+            message_parts.append(f"📝 *New Meeting Processed*")
+            message_parts.append(f"")
+            message_parts.append(f"*{title}*")
+            message_parts.append(f"📅 {meeting_date}")
+            message_parts.append(f"")
             
-            # Extract summary components
-            summary_text = summary_data.get('summary', 'Summary not available')
-            key_points = summary_data.get('key_points', [])
-            action_items = summary_data.get('action_items', [])
-            
-            # Build formatted Telegram message
-            message_parts = [
-                f"✅ *Meeting Processed: {title}*",
-                "",
-                f"📅 {meeting_date} | ⏱️ {duration} minutes",
-                f"👥 Participants: {participants_text}",
-                "",
-                "📝 *SUMMARY:*",
-                summary_text,
-            ]
+            # Add summary if available
+            if summary_data.get('summary'):
+                summary_preview = summary_data['summary'][:300]
+                if len(summary_data['summary']) > 300:
+                    summary_preview += "..."
+                message_parts.append(f"*Summary:*")
+                message_parts.append(summary_preview)
+                message_parts.append("")
             
             # Add key points if available
-            if key_points:
-                message_parts.append("")
-                message_parts.append("🎯 *KEY POINTS:*")
-                for point in key_points[:5]:  # Limit to 5 points
+            if summary_data.get('key_points'):
+                message_parts.append(f"*Key Points:*")
+                for point in summary_data['key_points'][:3]:  # First 3 points
                     message_parts.append(f"• {point}")
+                message_parts.append("")
             
             # Add action items if available
-            if action_items:
-                message_parts.append("")
-                message_parts.append("✅ *ACTION ITEMS:*")
-                for item in action_items[:5]:  # Limit to 5 items
+            if summary_data.get('action_items'):
+                message_parts.append(f"*Action Items:*")
+                for item in summary_data['action_items'][:3]:  # First 3 items
                     if isinstance(item, dict):
-                        task_text = item.get('text', 'Unknown task')
-                        assigned = item.get('assigned_to', 'Unassigned')
-                        message_parts.append(f"• {task_text} - {assigned}")
+                        message_parts.append(f"• {item.get('text', item)}")
                     else:
                         message_parts.append(f"• {item}")
             

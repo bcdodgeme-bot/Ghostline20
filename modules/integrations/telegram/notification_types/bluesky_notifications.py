@@ -73,7 +73,7 @@ class BlueskyNotificationHandler:
                bluesky_engagement_potential, created_at,
                related_rss_insights
         FROM trend_opportunities
-        WHERE bluesky_engagement_potential > 0.5
+        WHERE bluesky_engagement_potential > 0.25
         AND processed = false
         AND created_at > NOW() - INTERVAL '4 hours'
         ORDER BY bluesky_engagement_potential DESC, trend_score_at_alert DESC

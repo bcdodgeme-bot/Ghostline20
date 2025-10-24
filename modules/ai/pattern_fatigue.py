@@ -353,6 +353,7 @@ class PatternFatigueTracker:
                 AND pattern_type = $2
                 AND last_used >= NOW() - INTERVAL '%s days'
                 AND pattern_content ILIKE '%s'
+            )    
             """ % (days, '%' + content[:50] + '%')
             
             result = await db_manager.fetch_one(query, user_id, pattern_type)

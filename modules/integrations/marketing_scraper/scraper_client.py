@@ -38,19 +38,15 @@ def debug_log(message: str, level: str = "info", verbose_only: bool = False):
     
     if level == "error":
         prefix = f"❌ SCRAPER ERROR [{timestamp}]"
-        print(f"{prefix} {message}")
-        logger.error(message)
+        logger.error(f"{prefix} {message}")
     elif level == "warning":
         prefix = f"⚠️  SCRAPER WARN [{timestamp}]"
-        print(f"{prefix} {message}")
-        logger.warning(message)
+        logger.warning(f"{prefix} {message}")
     elif level == "success":
         prefix = f"✅ SCRAPER SUCCESS [{timestamp}]"
-        print(f"{prefix} {message}")
-        logger.info(message)
+        logger.info(f"{prefix} {message}")
     else:
-        print(f"{prefix} {message}")
-        logger.info(message)
+        logger.info(f"{prefix} {message}")
 
 #-- Section 3: Main MarketingScraperClient Class - 9/26/25
 class MarketingScraperClient:

@@ -106,7 +106,7 @@ class IPLocationDetector:
         # Handle automatic IP detection
         url = service['url'].format(ip=ip_address or '')
         if not ip_address:
-            url = url.replace('/', '')  # Remove trailing slash for auto-detection
+            url = url.rstrip('/')  # Remove only trailing slash for auto-detection
         
         timeout = httpx.Timeout(10.0)  # 10 second timeout
         

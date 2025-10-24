@@ -28,11 +28,12 @@ from .trends_client import GoogleTrendsClient
 from .database_manager import TrendsDatabase
 
 # Configure logging
+import sys
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
+        logging.StreamHandler(stream=sys.stdout),
         logging.FileHandler('trends_monitoring.log', mode='a')
     ]
 )

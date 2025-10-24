@@ -576,15 +576,20 @@ async def check_module_health() -> Dict[str, Any]:
     info_manager = GoogleTrendsIntegrationInfo()
     health = await info_manager.check_module_health()
     
+    # Check if health is a dict or an object
+    if isinstance(health, dict):
+        return health
+    
+    # If it's an object, convert to dict
     return {
-        'healthy': health.healthy,
-        'components_available': health.components_available,
-        'components_total': health.components_total,
-        'database_connected': health.database_connected,
-        'data_quality_score': health.data_quality_score,
-        'last_monitoring_cycle': health.last_monitoring_cycle.isoformat() if health.last_monitoring_cycle else None,
-        'critical_issues': health.critical_issues,
-        'warnings': health.warnings
+        'healthy': getattr(health, 'healthy', False),
+        'components_available': getattr(health, 'components_available', 0),
+        'components_total': getattr(health, 'components_total', 0),
+        'database_connected': getattr(health, 'database_connected', False),
+        'data_quality_score': getattr(health, 'data_quality_score', 0.0),
+        'last_monitoring_cycle': health.last_monitoring_cycle.isoformat() if hasattr(health, 'last_monitoring_cycle') and health.last_monitoring_cycle else None,
+        'critical_issues': getattr(health, 'critical_issues', []),
+        'warnings': getattr(health, 'warnings', [])
     }
 
 async def get_system_statistics() -> Dict[str, Any]:

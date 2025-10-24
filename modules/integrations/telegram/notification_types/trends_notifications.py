@@ -67,7 +67,7 @@ class TrendsNotificationHandler:
                momentum_change_percent, created_at, processed,
                related_rss_insights, bluesky_engagement_potential
         FROM trend_opportunities
-        WHERE urgency_level IN ('high', 'medium')
+        WHERE urgency_level IN ('high', 'medium', 'low')
         AND processed = false
         AND created_at > NOW() - INTERVAL '4 hours'
         ORDER BY 
@@ -139,7 +139,7 @@ class TrendsNotificationHandler:
             
             # Show Bluesky potential if high
             bluesky_potential = trend.get('bluesky_engagement_potential', 0)
-            if bluesky_potential > 0.5:
+            if bluesky_potential > 0.25:
                 pct = int(bluesky_potential * 100)
                 message += f"🦋 Bluesky engagement potential: {pct}%\n\n"
             

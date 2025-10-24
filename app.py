@@ -106,11 +106,13 @@ from modules.core.auth import AuthManager, get_current_user
 import logging
 
 # Set up logging configuration
+import sys
+
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed from INFO to DEBUG
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()  # Outputs to console/Railway logs
+        logging.StreamHandler(stream=sys.stdout)  # Explicitly use stdout, not stderr
     ]
 )
 
@@ -339,6 +341,7 @@ async def startup_event():
         logger.info("✅ Telegram notification system initialized")
         
         # Start background notification tasks
+        asyncio.create_task(weather_collection_task())
         asyncio.create_task(prayer_notification_task())
         asyncio.create_task(reminder_notification_task())
         asyncio.create_task(calendar_notification_task())
@@ -579,6 +582,38 @@ async def calendar_notification_task():
             logger.error(f"Calendar notification error: {e}")
             await asyncio.sleep(60)
 
+async def weather_collection_task():
+    """Collect weather data from Tomorrow.io every 2 hours"""
+    logger.info("🌡️ Weather collection task started")
+    while True:
+        try:
+            # Import weather components
+            from modules.integrations.weather.tomorrow_client import TomorrowClient
+            from modules.integrations.weather.weather_processor import WeatherProcessor
+            
+            # Initialize
+            client = TomorrowClient()
+            processor = WeatherProcessor()
+            
+            # Fetch current weather from Tomorrow.io
+            weather_data = await client.get_current_weather()
+            
+            # Store in database
+            reading_id = await processor.store_weather_reading(
+                user_id=USER_ID,
+                weather_data=weather_data,
+                location=None  # Uses default location
+            )
+            
+            logger.info(f"✅ Weather data collected and stored (reading_id: {reading_id})")
+            
+            # Sleep for 2 hours
+            await asyncio.sleep(7200)
+            
+        except Exception as e:
+            logger.error(f"Weather collection error: {e}")
+            await asyncio.sleep(300)  # Retry after 5 minutes on error
+
 async def weather_notification_task():
     """Check for weather notifications every 2 hours"""
     logger.info("🌤️ Weather notification task started")
@@ -714,7 +749,7 @@ async def daily_intelligence_digest_task():
                     )
                     
                     # Generate and send digest
-                    await orchestrator.generate_and_send_daily_digest()
+                    await orchestrator.run_daily_digest()
                     
                     logger.info("✅ Daily digest sent successfully")
                     
@@ -741,13 +776,12 @@ async def health_check():
 @app.get("/api/health/voice")
 async def voice_health():
     """Voice Synthesis integration health check"""
-    return voice_module_health()
+    return await voice_module_health()
 
-# NEW: Image Generation health check endpoint - added 9/28/25
 @app.get("/api/health/image")
 async def image_health():
     """Image Generation integration health check"""
-    return image_module_health()
+    return await image_module_health()
 
 # Google Trends health check endpoint - added 9/27/25
 @app.get("/api/health/trends")

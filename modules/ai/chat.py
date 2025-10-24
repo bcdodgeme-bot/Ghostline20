@@ -16,6 +16,7 @@ import pytz
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import logging
+import warnings
 import httpx
 import os
 database_url = os.getenv('DATABASE_URL')
@@ -51,6 +52,9 @@ from ..integrations.google_trends.opportunity_training import OpportunityTrainin
 from ..integrations.google_trends.integration_info import check_module_health
 
 logger = logging.getLogger(__name__)
+# Suppress PDF font parsing warnings (Issue 5E fix)
+warnings.filterwarnings('ignore', message='.*FontBBox.*')
+warnings.filterwarnings('ignore', category=UserWarning, module='pdfminer')
 
 # File upload configuration
 UPLOAD_DIR = Path("/home/app/uploads/chat_files")
@@ -2234,11 +2238,6 @@ async def post_system_message_to_chat(message: str, message_type: str = "system_
             thread_id=system_thread_id,
             role="assistant",  # System messages appear as assistant responses
             content=message,
-            metadata={
-                "type": message_type,
-                "timestamp": datetime.now().isoformat(),
-                "source": "prayer_notification_service"
-            }
         )
         
         logger.info(f"✅ System message posted to chat: {system_message_id}")
@@ -4267,6 +4266,7 @@ async def search_meetings(
                             meeting_date = datetime(current_year - 1, month, day)
                     except ValueError:
                         # Invalid date, skip
+                        meeting_date = None
                         pass
                     break
             
@@ -4313,7 +4313,7 @@ async def search_meetings(
             return "\n\n📅 **Meeting Context:** No meetings found matching your query."
         
         # Format meetings for AI context
-        if meeting_date:
+        if meeting_date and isinstance(meeting_date, datetime):
             # If we searched by date, make it VERY clear we found meetings on/near that date
             meeting_context = [f"\n\n📅 **Meetings Found Near {meeting_date.strftime('%B %d, %Y')}:**\n"]
         else:
@@ -4349,7 +4349,7 @@ async def search_meetings(
         context_text = "\n".join(meeting_context)
         
         # Make it VERY clear this is meeting data, not old knowledge
-        if meeting_date:
+        if meeting_date and isinstance(meeting_date, datetime):
             instruction = f"""
 CRITICAL INSTRUCTION: The user asked about a meeting on or around {meeting_date.strftime('%B %d, %Y')}.
 The meetings below were found within ±3 days of that date. Use these meetings to answer

@@ -673,7 +673,7 @@ class CalendarContextCollector(ContextCollector):
                         expires_hours=int(hours_until) + 2  # Expires shortly after event
                     ))
                     
-                    logger.info(f"Urgent: Event in {hours_until:.1f}h - {event['event_title']}")
+                    logger.info(f"Urgent: Event in {hours_until:.1f}h - {event['event_title'] or 'Untitled Event'}")
                 
                 # Signal 2: Event within 48 hours (MEDIUM PRIORITY)
                 elif hours_until <= 48:
@@ -693,7 +693,7 @@ class CalendarContextCollector(ContextCollector):
                         expires_hours=int(hours_until) + 2
                     ))
                     
-                    logger.debug(f"Upcoming: Event in {hours_until:.1f}h - {event['event_title']}")
+                    logger.debug(f"Upcoming: Event in {hours_until:.1f}h - {event['event_title'] or 'Untitled Event'}")
                 
                 # Signal 3: Check if event needs preparation
                 # Look for keywords suggesting preparation is needed
@@ -714,7 +714,7 @@ class CalendarContextCollector(ContextCollector):
                         expires_hours=int(hours_until) - 2  # Expires before event with buffer
                     ))
                     
-                    logger.info(f"Prep needed: {event['event_title']} - {needs_prep['reason']}")
+                    logger.info(f"Prep needed: {event['event_title'] or 'Untitled Event'} - {needs_prep['reason']}")
             
             # Signal 4: Detect meeting clusters (multiple meetings same day)
             for event_date, day_events in events_by_date.items():
@@ -734,12 +734,12 @@ class CalendarContextCollector(ContextCollector):
                             'date': event_date.isoformat(),
                             'meeting_count': len(day_events),
                             'total_minutes': round(total_minutes),
-                            'first_meeting': day_events[0]['event_title'],
-                            'last_meeting': day_events[-1]['event_title'],
+                            'first_meeting': day_events[0]['event_title'] or 'Untitled Event',
+                            'last_meeting': day_events[-1]['event_title'] or 'Untitled Event',
                             'hours_until_first': round(hours_until_first, 1),
                             'events': [
                                 {
-                                    'title': e['event_title'],
+                                    'title': e['event_title'] or 'Untitled Event',
                                     'start': e['start_time'].isoformat()
                                 }
                                 for e in day_events
@@ -764,7 +764,7 @@ class CalendarContextCollector(ContextCollector):
         
         Returns dict with 'reason' and 'hours' if prep needed, None otherwise.
         """
-        title_lower = event['event_title'].lower()
+        title_lower = (event['event_title'] or '').lower()
         description_lower = (event['description'] or '').lower()
         
         # Keywords that suggest preparation needed

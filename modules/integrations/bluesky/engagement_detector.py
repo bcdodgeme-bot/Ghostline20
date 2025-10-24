@@ -12,7 +12,12 @@ import json
 import logging
 import os
 
-logging.basicConfig(level=logging.INFO)
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(stream=sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 
