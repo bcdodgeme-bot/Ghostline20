@@ -90,17 +90,22 @@ class WeatherNotificationHandler:
         # Get forecast from Tomorrow.io
         forecast_summary = await self._get_forecast_summary()
         
+        temp_c = float(result['temperature'])
+        feels_like_c = float(result['temperature_apparent'])
+        temp_f = (temp_c * 9/5) + 32
+        feels_like_f = (feels_like_c * 9/5) + 32
+        
         return {
             'location': result['location'],
-            'temperature': float(result['temperature']),
-            'feels_like': float(result['temperature_apparent']),
+            'temperature': temp_f,  # Now in Fahrenheit
+            'feels_like': feels_like_f,  # Now in Fahrenheit
             'condition': result['weather_description'],
             'humidity': int(result['humidity']) if result['humidity'] else 0,
             'wind_speed': float(result['wind_speed']) if result['wind_speed'] else 0,
             'headache_risk': result['headache_risk_level'],
             'uv_risk': result['uv_risk_level'],
             'timestamp': result['timestamp'],
-            'forecast': forecast_summary  # NEW: Add forecast
+            'forecast': forecast_summary 
         }
     
     async def _should_notify_weather(self, weather_data: Dict[str, Any]) -> bool:
