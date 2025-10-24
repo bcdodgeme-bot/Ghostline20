@@ -157,12 +157,15 @@ def register_with_app(app):
     # Add startup event
     @app.on_event("startup")
     async def startup_slack_clickup():
-        health = check_module_health()
-        if health['healthy']:
-            print(f"✅ {MODULE_NAME} integration loaded successfully")
-        else:
-            print(f"⚠️  {MODULE_NAME} integration loaded with warnings")
-            print(f"   Missing vars: {health['missing_vars']}")
+        try:
+            health = check_module_health()
+            if health['healthy']:
+                logger.info(f"✅ {MODULE_NAME} integration loaded successfully")
+            else:
+                logger.warning(f"⚠️  {MODULE_NAME} integration loaded with warnings")
+                logger.warning(f"   Missing vars: {health['missing_vars']}")
+        except Exception as e:
+            logger.error(f"❌ {MODULE_NAME} startup failed: {e}")
     
     return {
         'module': MODULE_NAME,
