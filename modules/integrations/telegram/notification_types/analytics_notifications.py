@@ -354,19 +354,27 @@ class AnalyticsNotificationHandler:
             SELECT COUNT(*) as count
             FROM google_calendar_events
             WHERE user_id = $1
-            AND DATE(start_time) = CURRENT_DATE + INTERVAL '1 day'
+            AND start_time::date = (CURRENT_DATE + INTERVAL '1 day')::date
             """
-            result = await self.db.fetch_one(query, self.user_id)
-            stats['events_tomorrow'] = result['count'] if result else 0
+            try:
+                result = await self.db.fetch_one(query, self.user_id)
+                stats['events_tomorrow'] = result['count'] if result else 0
+            except Exception as e:
+                logger.warning(f"Could not fetch tomorrow's events: {e}")
+                stats['events_tomorrow'] = 0
         else:
             query = """
-            SELECT COUNT(*) as count
+            SELECT COUNT(*) as count, MIN(start_time) as first_event
             FROM google_calendar_events
             WHERE user_id = $1
-            AND DATE(start_time) = CURRENT_DATE
+            AND start_time::date = CURRENT_DATE
             """
-            result = await self.db.fetch_one(query, self.user_id)
-            stats['events_today'] = result['count'] if result else 0
+            try:
+                result = await self.db.fetch_one(query, self.user_id)
+                stats['events_today'] = result['count'] if result else 0
+            except Exception as e:
+                logger.warning(f"Could not fetch today's events: {e}")
+                stats['events_today'] = 0
         
         # Website Analytics (if available)
         analytics = await self._get_analytics_summary(days=1)
@@ -413,11 +421,15 @@ class AnalyticsNotificationHandler:
         SELECT COUNT(*) as count
         FROM google_calendar_events
         WHERE user_id = $1
-        AND start_time >= CURRENT_DATE + INTERVAL '1 day'
-        AND start_time < CURRENT_DATE + INTERVAL '8 days'
+        AND start_time::date >= (CURRENT_DATE + INTERVAL '1 day')::date
+        AND start_time::date < (CURRENT_DATE + INTERVAL '8 days')::date
         """
-        result = await self.db.fetch_one(query, self.user_id)
-        stats['events_next_week'] = result['count'] if result else 0
+        try:
+            result = await self.db.fetch_one(query, self.user_id)
+            stats['events_next_week'] = result['count'] if result else 0
+        except Exception as e:
+            logger.warning(f"Could not fetch next week's events: {e}")
+            stats['events_next_week'] = 0
         
         # Website Analytics (last 7 days)
         analytics = await self._get_analytics_summary(days=7)

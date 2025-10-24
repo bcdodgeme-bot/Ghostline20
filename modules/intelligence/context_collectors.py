@@ -1737,8 +1737,8 @@ class WeatherContextCollector(ContextCollector):
             
             # Query 2: Check for pressure changes (headache trigger)
             pressure_change_query = """
-                SELECT 
-                    pressure,
+                SELECT
+                    pressure_surface_level,
                     timestamp,
                     created_at
                 FROM weather_readings
@@ -1753,14 +1753,20 @@ class WeatherContextCollector(ContextCollector):
             )
             
             if len(pressure_readings) >= 2:
-                # Calculate pressure change
-                current_pressure = pressure_readings[0]['pressure']
-                oldest_pressure = pressure_readings[-1]['pressure']
-                pressure_change = current_pressure - oldest_pressure
+                # Calculate pressure change - with None check
+                current_pressure = pressure_readings[0]['pressure_surface_level']
+                oldest_pressure = pressure_readings[-1]['pressure_surface_level']
+                
+                # Only calculate if both values exist
+                if current_pressure is not None and oldest_pressure is not None:
+                    pressure_change = current_pressure - oldest_pressure
+                else:
+                    logger.warning("Pressure readings contain None values, skipping pressure change calculation")
+                    pressure_change = None
                 
                 # Signal 4: Significant pressure drop (headache trigger)
                 # Pressure drop > 0.1 inHg (or 3.4 mb) is significant
-                if pressure_change < -0.1:  # Negative = dropping
+                if pressure_change is not None and pressure_change < -0.1: 
                     signals.append(self._create_signal(
                         signal_type='pressure_dropping',
                         data={
