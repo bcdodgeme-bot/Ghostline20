@@ -361,33 +361,39 @@ async def startup_event():
         logger.error(traceback.format_exc())
         
     # Check Slack-ClickUp integration health
-    integration_health = check_module_health()
-    if integration_health['healthy']:
-        print("✅ Slack-ClickUp integration loaded successfully")
-    else:
-        print("⚠️ Slack-ClickUp integration loaded with warnings")
-        print(f"   Missing vars: {integration_health['missing_vars']}")
+    try:
+        integration_health = check_module_health()
+        if integration_health['healthy']:
+            logger.info("✅ Slack-ClickUp integration loaded successfully")
+        else:
+            logger.warning("⚠️ Slack-ClickUp integration loaded with warnings")
+            logger.warning(f"   Missing vars: {integration_health['missing_vars']}")
+    except Exception as e:
+        logger.error(f"❌ Slack-ClickUp health check failed: {e}")
     
     # Check AI Brain health
-    ai_health = ai_module_health()
-    if ai_health['healthy']:
-        print("🧠 AI Brain loaded successfully")
-    else:
-        print("⚠️ AI Brain loaded with warnings")
-        print(f"   Missing vars: {ai_health['missing_vars']}")
+    try:
+        ai_health = ai_module_health()
+        if ai_health['healthy']:
+            logger.info("🧠 AI Brain loaded successfully")
+        else:
+            logger.warning("⚠️ AI Brain loaded with warnings")
+            logger.warning(f"   Missing vars: {ai_health['missing_vars']}")
+    except Exception as e:
+        logger.error(f"❌ AI Brain health check failed: {e}")
     
     # Check Chat system health
     try:
         chat_health = chat_module_health()
         if chat_health['healthy']:
-            print("💬 Chat system loaded successfully")
-            print(f"   🔎 File upload support: {chat_health.get('file_upload_support', True)}")
-            print(f"   📄 Max file size: {chat_health.get('max_file_size', '10MB')}")
+            logger.info("💬 Chat system loaded successfully")
+            logger.info(f"   🔎 File upload support: {chat_health.get('file_upload_support', True)}")
+            logger.info(f"   📄 Max file size: {chat_health.get('max_file_size', '10MB')}")
         else:
-            print("⚠️ Chat system loaded with warnings")
-            print(f"   Missing vars: {chat_health.get('missing_vars', [])}")
+            logger.warning("⚠️ Chat system loaded with warnings")
+            logger.warning(f"   Missing vars: {chat_health.get('missing_vars', [])}")
     except Exception as e:
-        print(f"⚠️ Chat system health check failed: {e}")
+        logger.error(f"❌ Chat system health check failed: {e}")
     
     # Check Weather integration health
     try:

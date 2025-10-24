@@ -5,8 +5,8 @@ Sends proactive weather updates and alerts
 """
 
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional
 
 from ....core.database import db_manager
 
@@ -194,7 +194,7 @@ class WeatherNotificationHandler:
             'location': location,
             'temperature': temp,
             'condition': condition,
-            'cached_at': weather_data.get('cached_at', datetime.now(timezone.utc)).isoformat() if isinstance(weather_data.get('cached_at'), datetime) else str(weather_data.get('cached_at', datetime.now(timezone.utc)))
+            'cached_at': weather_data.get('cached_at', datetime.utcnow()).isoformat() if isinstance(weather_data.get('cached_at'), datetime) else str(weather_data.get('cached_at', datetime.utcnow()))
         }
         
         # Send via notification manager

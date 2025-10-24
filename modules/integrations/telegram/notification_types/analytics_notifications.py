@@ -333,14 +333,20 @@ class AnalyticsNotificationHandler:
         stats['notifications_sent'] = result['count'] if result else 0
         
         # Tasks completed
+        # Tasks completed - using status column instead of completed_at
         query = f"""
         SELECT COUNT(*) as count
         FROM telegram_reminders
         WHERE user_id = $1
-        AND DATE(completed_at) = {target_date}
+        AND status = 'completed'
+        AND DATE(updated_at) = {target_date}
         """
-        result = await self.db.fetch_one(query, self.user_id)
-        stats['tasks_completed'] = result['count'] if result else 0
+        try:
+            result = await self.db.fetch_one(query, self.user_id)
+            stats['tasks_completed'] = result['count'] if result else 0
+        except Exception as e:
+            logger.warning(f"Could not fetch completed tasks: {e}")
+            stats['tasks_completed'] = 0
         
         # Calendar events
         if current_day:
@@ -382,10 +388,15 @@ class AnalyticsNotificationHandler:
         SELECT COUNT(*) as count
         FROM telegram_reminders
         WHERE user_id = $1
-        AND completed_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND status = 'completed'
+        AND updated_at >= DATE_TRUNC('week', CURRENT_DATE)
         """
-        result = await self.db.fetch_one(query, self.user_id)
-        stats['tasks_completed'] = result['count'] if result else 0
+        try:
+            result = await self.db.fetch_one(query, self.user_id)
+            stats['tasks_completed'] = result['count'] if result else 0
+        except Exception as e:
+            logger.warning(f"Could not fetch weekly completed tasks: {e}")
+            stats['tasks_completed'] = 0
         
         # AI conversations this week
         query = """
