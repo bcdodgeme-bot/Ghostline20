@@ -31,8 +31,8 @@ def get_integration_info() -> Dict[str, Any]:
             },
             "weather": {
                 "enabled_by_default": True,
-                "description": "Rain/UV/emergency weather alerts",
-                "polling_frequency": "Every 2 hours"
+                "description": "Multiple daily briefings + UV alerts (sun allergy threshold: UV 4+)",
+                "polling_frequency": "Every 30 minutes (notifications at 7-8 AM, 11 AM-1 PM, 5-6 PM + emergencies)"
             },
             "reminders": {
                 "enabled_by_default": True,

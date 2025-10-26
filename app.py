@@ -621,13 +621,13 @@ async def weather_collection_task():
             await asyncio.sleep(300)  # Retry after 5 minutes on error
 
 async def weather_notification_task():
-    """Check for weather notifications every 2 hours"""
+    """Check for weather notifications every 30 minutes (catches all time windows)"""
     logger.info("🌤️ Weather notification task started")
     while True:
         try:
             if await app.state.telegram_kill_switch.is_enabled(USER_ID):
                 await app.state.telegram_weather_handler.check_and_notify()
-            await asyncio.sleep(7200)  # 2 hours
+            await asyncio.sleep(1800)  # 30 minutes - ensures we catch 7-8 AM, 11-1 PM, 5-6 PM windows
         except Exception as e:
             logger.error(f"Weather notification error: {e}")
             await asyncio.sleep(60)

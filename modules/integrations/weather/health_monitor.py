@@ -18,8 +18,10 @@ class HealthMonitor:
     def __init__(self):
         # Health thresholds based on user requirements
         self.pressure_drop_threshold = 3.0  # mbar - headache trigger
-        self.uv_protection_threshold = 4.0  # UV index - sun sensitivity
-        self.severe_uv_threshold = 8.0      # UV index - stay indoors
+        self.uv_protection_threshold = 3.0  # UV index - consider protection
+        self.high_uv_threshold = 4.0        # UV index - sun allergy danger zone
+        self.very_high_uv_threshold = 6.0   # UV index - avoid direct sun
+        self.extreme_uv_threshold = 8.0     # UV index - stay indoors
     
     async def get_pressure_history(self, user_id: str, hours_back: int = 3) -> Optional[float]:
         """Get pressure reading from X hours ago"""
@@ -43,10 +45,12 @@ class HealthMonitor:
         """Calculate headache and UV risk levels"""
         
         # UV risk calculation (user's sun sensitivity threshold is 4.0)
-        if uv_index >= self.severe_uv_threshold:
+        if uv_index >= self.extreme_uv_threshold:
+            uv_risk = "extreme"
+        elif uv_index >= self.very_high_uv_threshold:
             uv_risk = "very_high"
-        elif uv_index >= 6:
-            uv_risk = "high" 
+        elif uv_index >= self.high_uv_threshold:
+            uv_risk = "high"
         elif uv_index >= self.uv_protection_threshold:
             uv_risk = "moderate"
         elif uv_index >= 1:
@@ -77,11 +81,13 @@ class HealthMonitor:
         
         # UV-based sun protection alerts
         uv_index = weather_data.get('uv_index', 0)
-        if uv_risk == "very_high":
-            alerts.append(f"EXTREME UV WARNING: Stay indoors (UV {uv_index})")
+        if uv_risk == "extreme":
+            alerts.append(f"🚨 EXTREME UV {uv_index}: Stay indoors!")
+        elif uv_risk == "very_high":
+            alerts.append(f"⚠️ VERY HIGH UV {uv_index}: Avoid direct sun")
         elif uv_risk == "high":
-            alerts.append(f"HIGH UV ALERT: Full sun protection required (UV {uv_index})")
+            alerts.append(f"☀️ HIGH UV {uv_index}: Full protection required (sun allergy threshold)")
         elif uv_risk == "moderate":
-            alerts.append(f"UV Protection needed: Use sunscreen (UV {uv_index})")
+            alerts.append(f"UV {uv_index}: Sun protection recommended")
         
         return alerts

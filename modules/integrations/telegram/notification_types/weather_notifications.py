@@ -112,48 +112,93 @@ class WeatherNotificationHandler:
         """
         Determine if weather conditions warrant a notification
         
-        Notify if:
-        - Significant weather event (rain, snow, storm)
-        - Extreme temperatures
-        - First update of the day
+        Multiple daily notifications at smart times:
+        - Morning Brief (7-8 AM): Daily overview
+        - Midday Check (11 AM - 1 PM): UV alert if 4+
+        - Evening Update (5-6 PM): Tomorrow's forecast
+        - Emergency Alerts (anytime): Severe weather, extreme temps, dangerous UV
         """
+        from datetime import datetime
+        
         condition = weather_data['condition'].lower()
         temp = weather_data['temperature']
+        uv_risk = weather_data.get('uv_risk', 'low')
+        now = datetime.now()
+        current_hour = now.hour
         
-        # Check for significant weather
+        # EMERGENCY ALERTS (anytime) - Always send immediately
         alert_conditions = ['rain', 'storm', 'snow', 'thunder', 'severe', 'warning']
         if any(alert in condition for alert in alert_conditions):
             return True
         
-        # Check for extreme temperatures
         if temp < 32 or temp > 95:
             return True
+            
+        # Dangerous UV (6+) - immediate alert
+        if uv_risk in ['very_high', 'extreme']:
+            return True
         
-        # Check if this is morning update (between 6-9 AM)
-        now = datetime.now()
-        if 6 <= now.hour <= 9:
-            # Check if we already sent today
-            already_sent = await self._check_if_sent_today()
-            if not already_sent:
+        # MORNING BRIEF (7-8 AM) - Send once per day
+        if 7 <= current_hour < 8:
+            already_sent_morning = await self._check_if_sent_in_window('morning')
+            if not already_sent_morning:
+                return True
+        
+        # MIDDAY UV CHECK (11 AM - 1 PM) - Only if UV is 4+
+        if 11 <= current_hour < 13:
+            if uv_risk in ['moderate', 'high', 'very_high', 'extreme']:
+                already_sent_midday = await self._check_if_sent_in_window('midday')
+                if not already_sent_midday:
+                    return True
+        
+        # EVENING UPDATE (5-6 PM) - Tomorrow's forecast
+        if 17 <= current_hour < 18:
+            already_sent_evening = await self._check_if_sent_in_window('evening')
+            if not already_sent_evening:
                 return True
         
         return False
     
-    async def _check_if_sent_today(self) -> bool:
-        """Check if weather notification was already sent today"""
+    async def _check_if_sent_in_window(self, window: str) -> bool:
+        """
+        Check if weather notification was already sent in a specific time window today
+        
+        Windows:
+        - morning: 7-8 AM
+        - midday: 11 AM - 1 PM  
+        - evening: 5-6 PM
+        """
+        from datetime import datetime, time
+        
+        # Define time windows
+        windows = {
+            'morning': (time(7, 0), time(8, 0)),
+            'midday': (time(11, 0), time(13, 0)),
+            'evening': (time(17, 0), time(18, 0))
+        }
+        
+        if window not in windows:
+            return False
+            
+        start_time, end_time = windows[window]
+        
         query = """
         SELECT COUNT(*) as count
         FROM telegram_notifications
         WHERE user_id = $1
         AND notification_type = 'weather'
         AND DATE(sent_at) = CURRENT_DATE
+        AND sent_at::time >= $2
+        AND sent_at::time < $3
         """
         
-        result = await self.db.fetch_one(query, self.user_id)
+        result = await self.db.fetch_one(query, self.user_id, start_time, end_time)
         return result['count'] > 0 if result else False
     
     async def _send_weather_notification(self, weather_data: Dict[str, Any]) -> None:
-        """Send weather notification"""
+        """Send weather notification with time-appropriate context"""
+        from datetime import datetime
+        
         location = weather_data['location']
         temp = weather_data['temperature']
         feels_like = weather_data['feels_like']
@@ -166,6 +211,19 @@ class WeatherNotificationHandler:
         
         # Weather emoji based on condition
         emoji = self._get_weather_emoji(condition)
+        
+        # Determine message type based on time of day
+        now = datetime.now()
+        current_hour = now.hour
+        
+        if 7 <= current_hour < 8:
+            message_header = f"{emoji} *Morning Weather Brief*\n\n"
+        elif 11 <= current_hour < 13:
+            message_header = f"☀️ *Midday UV Check*\n\n"
+        elif 17 <= current_hour < 18:
+            message_header = f"🌆 *Evening Weather Update*\n\n"
+        else:
+            message_header = f"{emoji} *Weather Alert*\n\n"
         
         # Build message
         message = f"{emoji} *Weather Update*\n\n"
@@ -182,8 +240,15 @@ class WeatherNotificationHandler:
         if headache_risk and headache_risk in ['medium', 'high']:
             message += f"\n\n🤕 *Headache Risk:* {headache_risk.upper()}"
             
-        if uv_risk and uv_risk in ['medium', 'high', 'very_high']:
-            message += f"\n\n☀️ *UV Risk:* {uv_risk.replace('_', ' ').upper()}"
+        # UV alerts (show for moderate and above - UV 3+)
+        if uv_risk and uv_risk in ['moderate', 'high', 'very_high', 'extreme']:
+            uv_emoji = {
+                'extreme': '🚨',
+                'very_high': '⚠️',
+                'high': '☀️',
+                'moderate': '🌤️'
+            }.get(uv_risk, '☀️')
+            message += f"\n{uv_emoji} *UV Alert:* {uv_risk.replace('_', ' ').title()}"
 
         # Add advisory if extreme conditions
         if temp < 32:
