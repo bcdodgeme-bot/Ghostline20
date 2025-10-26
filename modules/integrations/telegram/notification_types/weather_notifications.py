@@ -126,6 +126,8 @@ class WeatherNotificationHandler:
         now = datetime.now()
         current_hour = now.hour
         
+        logger.info(f"🌤️ Weather check at {now.strftime('%I:%M %p')} - Temp: {temp}°F, Condition: {condition}, UV: {uv_risk}")
+        
         # EMERGENCY ALERTS (anytime) - Always send immediately
         alert_conditions = ['rain', 'storm', 'snow', 'thunder', 'severe', 'warning']
         if any(alert in condition for alert in alert_conditions):

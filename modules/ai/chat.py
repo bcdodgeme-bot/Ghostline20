@@ -4203,6 +4203,9 @@ async def search_meetings(
         import re
         from datetime import datetime, timedelta
         
+        # Initialize meeting_date to None (used later for context formatting)
+        meeting_date = None
+        
         # Build appropriate query based on type
         if query_type == 'recent':
             sql = """
