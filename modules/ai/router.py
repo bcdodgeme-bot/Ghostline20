@@ -403,7 +403,7 @@ Weather data powered by Tomorrow.io"""
                 from ..integrations.bluesky.multi_account_client import get_bluesky_multi_client
                 
                 multi_client = get_bluesky_multi_client()
-                message_lower = message_content.lower()
+                message_lower = message.lower()
                 
                 if 'health' in message_lower:
                     try:
@@ -442,7 +442,7 @@ Weather data powered by Tomorrow.io"""
             # RSS is handled differently - it provides context rather than direct responses
             # We'll get the context and let the AI incorporate it naturally
             try:
-                rss_context = await get_rss_marketing_context(message_content)
+                rss_context = await get_rss_marketing_context(message)
                 logger.info("✅ DEBUG: RSS context retrieved, will process in AI section")
             except Exception as e:
                 logger.error(f"❌ DEBUG: RSS context retrieval failed: {e}")
@@ -451,7 +451,7 @@ Weather data powered by Tomorrow.io"""
         elif detect_scraper_command(message):
             logger.info("🔍 DEBUG: Marketing scraper command detected - processing...")
             try:
-                special_response = await process_scraper_command(message_content, user_id)
+                special_response = await process_scraper_command(message, user_id)
                 logger.info("✅ DEBUG: Scraper response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Scraper processing failed: {e}")
@@ -465,7 +465,7 @@ Weather data powered by Tomorrow.io"""
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
                 logger.info(f"🌍 DEBUG: Using IP address for location: {client_ip}")
                 
-                special_response = await process_prayer_command(message_content, user_id, client_ip)
+                special_response = await process_prayer_command(message, user_id, client_ip)
                 logger.info("✅ DEBUG: Prayer times response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer times processing failed: {e}")
@@ -476,7 +476,7 @@ Weather data powered by Tomorrow.io"""
             logger.info("🔔 DEBUG: Prayer notification command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
-                special_response = await process_prayer_notification_command(message_content, user_id, client_ip)
+                special_response = await process_prayer_notification_command(message, user_id, client_ip)
                 logger.info("✅ DEBUG: Prayer notification command response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer notification command processing failed: {e}")
@@ -486,7 +486,7 @@ Weather data powered by Tomorrow.io"""
         elif detect_intelligence_command(message):
             logger.info("🧠 DEBUG: Intelligence system command detected")
             try:
-                special_response = await handle_intelligence_command(message_content, user_id)
+                special_response = await handle_intelligence_command(message, user_id)
                 logger.info("✅ DEBUG: Intelligence command processed successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Intelligence command processing failed: {e}")
@@ -497,17 +497,17 @@ Weather data powered by Tomorrow.io"""
             logger.info("📍 DEBUG: Location command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
-                special_response = await process_location_command(message_content, user_id, client_ip)
+                special_response = await process_location_command(message, user_id, client_ip)
                 logger.info("✅ DEBUG: Location command response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Location command processing failed: {e}")
                 special_response = f"📍 **Location Detection Error**\n\nUnable to process location request: {str(e)}"
         
         # 5.3 🚫 Pattern Fatigue Complaints (FIFTH-C)
-        elif detect_pattern_complaint(message_content)[0]:
+        elif detect_pattern_complaint(message)[0]:
             logger.info("🚫 DEBUG: Pattern complaint detected")
             try:
-                is_complaint, pattern_type, complaint_text = detect_pattern_complaint(message_content)
+                is_complaint, pattern_type, complaint_text = detect_pattern_complaint(message)
                 special_response = await handle_pattern_complaint(user_id, pattern_type, complaint_text)
                 logger.info("✅ DEBUG: Pattern complaint handled successfully")
             except Exception as e:
@@ -518,7 +518,7 @@ Weather data powered by Tomorrow.io"""
         elif detect_trends_command(message)[0]:  # [0] gets the boolean from the tuple
             logger.info("📈 DEBUG: Google Trends command detected - processing...")
             try:
-                special_response = await process_trends_command(message_content, user_id)
+                special_response = await process_trends_command(message, user_id)
                 logger.info("✅ DEBUG: Google Trends response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Google Trends processing failed: {e}")
@@ -528,7 +528,7 @@ Weather data powered by Tomorrow.io"""
         elif detect_voice_command(message):
             logger.info("🎤 DEBUG: Voice synthesis command detected - processing...")
             try:
-                special_response = await process_voice_command(message_content, user_id)
+                special_response = await process_voice_command(message, user_id)
                 logger.info("✅ DEBUG: Voice synthesis response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Voice synthesis processing failed: {e}")
@@ -538,7 +538,7 @@ Weather data powered by Tomorrow.io"""
         elif detect_image_command(message):
             logger.info("🎨 DEBUG: Image generation command detected - processing...")
             try:
-                special_response = await process_image_command(message_content, user_id)
+                special_response = await process_image_command(message, user_id)
                 logger.info("✅ DEBUG: Image generation response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Image generation processing failed: {e}")
@@ -551,11 +551,11 @@ Weather data powered by Tomorrow.io"""
             
             try:
                 if command_type == 'create':
-                    special_response = await process_reminder_create(message_content, user_id)
+                    special_response = await process_reminder_create(message, user_id)
                 elif command_type == 'list':
                     special_response = await process_reminder_list(user_id)
                 elif command_type in ['cancel_one', 'cancel_all']:
-                    special_response = await process_reminder_cancel(message_content, user_id)
+                    special_response = await process_reminder_cancel(message, user_id)
                 else:
                     special_response = "⏰ Unknown reminder command"
                 
@@ -569,7 +569,7 @@ Weather data powered by Tomorrow.io"""
             logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
             try:
                 logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
-                special_response = await process_google_command(message_content, user_id, thread_id)
+                special_response = await process_google_command(message, user_id, thread_id)
                 logger.info("✅ DEBUG: Google Workspace response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Google Workspace processing failed: {e}")
@@ -655,7 +655,7 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ Failed to get meeting context: {e}")
         
     # 11. 🏥 Health Check command detection (NINTH)
-        elif any(term in message_content.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
+        elif any(term in message.lower() for term in ['health check', 'system status', 'system health', 'how are you feeling']):
             logger.info("🏥 DEBUG: Health check command detected - processing...")
             try:
                 from ..core.health import get_health_status
@@ -715,10 +715,10 @@ All systems operational and ready to assist!"""
                         
                 # Get RSS marketing context for writing assistance (integration #3)
                 rss_context = ""
-                if detect_rss_command(message) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
+                if detect_rss_command(message) or any(term in message.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
                     logger.info("📰 DEBUG: Adding RSS Learning context to AI response...")
                     try:
-                        rss_context = await get_rss_marketing_context(message_content)
+                        rss_context = await get_rss_marketing_context(message)
                         logger.info(f"✅ DEBUG: RSS context retrieved (length: {len(rss_context)} chars)")
                     except Exception as e:
                         logger.error(f"❌ DEBUG: RSS context failed: {e}")
