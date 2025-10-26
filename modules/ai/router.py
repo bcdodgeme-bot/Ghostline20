@@ -337,7 +337,7 @@ async def chat_with_ai(
         
         # 1. 🌦️ Weather command detection (FIRST)
         logger.info("🌦️ DEBUG: Checking for weather commands...")
-        is_weather, weather_type = detect_weather_request(message_content)
+        is_weather, weather_type = detect_weather_request(message)
 
         if is_weather:
             logger.info(f"✅ DEBUG: Weather command detected - type: {weather_type}")
