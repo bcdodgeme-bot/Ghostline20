@@ -55,7 +55,7 @@ class ClickUpNotificationHandler:
             # Group tasks by urgency
             overdue = [t for t in tasks if t['is_overdue']]
             due_soon = [t for t in tasks if t['due_soon'] and not t['is_overdue']]
-            high_priority = [t for t in tasks if t['priority'] == 'urgent' and not t['is_overdue']]
+            high_priority = [t for t in tasks if t.get('priority') == 1 and not t['is_overdue']]
             
             # Send appropriate notification
             if overdue:
@@ -95,10 +95,10 @@ class ClickUpNotificationHandler:
             CASE WHEN due_date < NOW() THEN 0 ELSE 1 END,  -- Overdue first
             due_date ASC NULLS LAST,
             CASE priority
-                WHEN 'urgent' THEN 0
-                WHEN 'high' THEN 1
-                WHEN 'normal' THEN 2
-                WHEN 'low' THEN 3
+                WHEN priority = 1 THEN 0  -- urgent
+                WHEN priority = 2 THEN 1  -- high
+                WHEN priority = 3 THEN 2  -- normal
+                WHEN priority = 4 THEN 3  -- low
                 ELSE 4
             END
         LIMIT 10
@@ -240,7 +240,7 @@ class ClickUpNotificationHandler:
                 COUNT(*) FILTER (WHERE status NOT IN ('complete', 'closed')) as active_count,
                 COUNT(*) FILTER (WHERE due_date < NOW() AND status NOT IN ('complete', 'closed')) as overdue_count,
                 COUNT(*) FILTER (WHERE due_date::date = CURRENT_DATE AND status NOT IN ('complete', 'closed')) as due_today_count,
-                COUNT(*) FILTER (WHERE priority = 'urgent' AND status NOT IN ('complete', 'closed')) as urgent_count
+                COUNT(*) FILTER (WHERE priority = 1 AND status NOT IN ('complete', 'closed')) as urgent_count
             FROM clickup_tasks
             WHERE user_id = $1
             """
