@@ -29,6 +29,8 @@ from .knowledge_query import get_knowledge_engine
 from .personality_engine import get_personality_engine
 from .feedback_processor import get_feedback_processor
 
+from modules.ai.memory_query_layer import build_memory_context
+
 logger = logging.getLogger(__name__)
 
 #-- Request/Response Models
@@ -169,6 +171,32 @@ async def chat_with_ai(
     if len(file_context) > 50:  # If we have file context
         logger.info(f"📝 DEBUG: File context preview: {file_context[:200]}...")
 
+    # ==============================================================================
+    # NEW 10/26/25: Database-driven memory query layer
+    # Loads context from ALL databases (meetings, emails, calendar, trends, etc.)
+    # Enables cross-thread memory and proactive intelligence
+    # ==============================================================================
+    logger.info("🧠 Loading memory context from databases...")
+    try:
+        memory_context = await build_memory_context(
+            user_id=user_id,
+            user_message=message,
+            thread_id=thread_id
+        )
+        
+        if memory_context:
+            # Add memory context BEFORE everything else
+            full_message = memory_context + "\n\n" + full_message
+            logger.info(f"✅ Added {len(memory_context)} chars of memory context")
+        else:
+            logger.info("ℹ️  No additional memory context needed")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to load memory context: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Continue without memory context (graceful degradation)
+    # ==============================================================================
     
     start_time = time.time()
     thread_id = thread_id or str(uuid.uuid4())

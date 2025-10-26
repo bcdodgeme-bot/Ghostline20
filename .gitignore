@@ -79,3 +79,4 @@ apply_bug_fixes_CORRECT.py
 fix_orchestrator_init.py
 modules/ai/chat.py.backup2
 modules/integrations/telegram/callback_handler.py.backup2
+modules/ai/__pycache__/memory_query_layer.cpython-311.pyc
