@@ -125,7 +125,6 @@ async def detect_context_level(user_id: str, thread_id: Optional[str]) -> str:
 
 async def query_conversations(
     user_id: str,
-    thread_id: str,
     days: int = 10,
     limit: int = 100,
     keywords: Optional[List[str]] = None,
