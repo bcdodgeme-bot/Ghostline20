@@ -396,7 +396,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
         
         # 2. 🔵 Bluesky command detection (SECOND)
-        elif detect_bluesky_command(message_content):
+        elif detect_bluesky_command(message):
             logger.info("🔵 DEBUG: Bluesky command detected - processing...")
             try:
                 # Import directly to avoid cache issues
@@ -437,7 +437,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🔵 **Bluesky Processing Error**\n\nError: {str(e)}"
         
         # 3. 📰 RSS Learning command detection (THIRD)
-        elif detect_rss_command(message_content):
+        elif detect_rss_command(message):
             logger.info("📰 DEBUG: RSS Learning command detected - processing...")
             # RSS is handled differently - it provides context rather than direct responses
             # We'll get the context and let the AI incorporate it naturally
@@ -448,7 +448,7 @@ Weather data powered by Tomorrow.io"""
                 logger.error(f"❌ DEBUG: RSS context retrieval failed: {e}")
         
         # 4. 🔍 Marketing Scraper command detection (FOURTH)
-        elif detect_scraper_command(message_content):
+        elif detect_scraper_command(message):
             logger.info("🔍 DEBUG: Marketing scraper command detected - processing...")
             try:
                 special_response = await process_scraper_command(message_content, user_id)
@@ -458,7 +458,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🔍 **Scraper Processing Error**\n\nError: {str(e)}"
         
         # 5. 🕌 Prayer Times command detection (FIFTH) - with IP location
-        elif detect_prayer_command(message_content):
+        elif detect_prayer_command(message):
             logger.info("🕌 DEBUG: Prayer times command detected - processing with IP location...")
             try:
                 # Get client IP address for location detection
@@ -472,7 +472,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🕌 **Prayer Times Processing Error**\n\nError: {str(e)}"
         
         # 5.1 🔔 Prayer Notification Management (FIFTH-A) - with IP location
-        elif detect_prayer_notification_command(message_content):
+        elif detect_prayer_notification_command(message):
             logger.info("🔔 DEBUG: Prayer notification command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
@@ -483,7 +483,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🔔 **Prayer Notification Error**\n\nUnable to process notification request: {str(e)}"
         
         # 5.2 🧠 Intelligence System Commands (FIFTH-B) - added 10/22/25
-        elif detect_intelligence_command(message_content):
+        elif detect_intelligence_command(message):
             logger.info("🧠 DEBUG: Intelligence system command detected")
             try:
                 special_response = await handle_intelligence_command(message_content, user_id)
@@ -493,7 +493,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🧠 **Intelligence System Error**\n\nError: {str(e)}"
         
         # 5.2 📍 Location Detection Commands (FIFTH-B)
-        elif detect_location_command(message_content):
+        elif detect_location_command(message):
             logger.info("📍 DEBUG: Location command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
@@ -515,7 +515,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = "I understand you want me to stop that pattern. I'll try to be less repetitive."
         
         # 6. 📈 Google Trends command detection (SIXTH)
-        elif detect_trends_command(message_content)[0]:  # [0] gets the boolean from the tuple
+        elif detect_trends_command(message)[0]:  # [0] gets the boolean from the tuple
             logger.info("📈 DEBUG: Google Trends command detected - processing...")
             try:
                 special_response = await process_trends_command(message_content, user_id)
@@ -525,7 +525,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"📈 **Google Trends Processing Error**\n\nError: {str(e)}"
         
         # 7. 🎤 Voice Synthesis command detection (SEVENTH) - NEW 9/28/25
-        elif detect_voice_command(message_content):
+        elif detect_voice_command(message):
             logger.info("🎤 DEBUG: Voice synthesis command detected - processing...")
             try:
                 special_response = await process_voice_command(message_content, user_id)
@@ -535,7 +535,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🎤 **Voice Synthesis Processing Error**\n\nError: {str(e)}"
         
         # 8. 🎨 Image Generation command detection (EIGHTH) - NEW 9/28/25
-        elif detect_image_command(message_content):
+        elif detect_image_command(message):
             logger.info("🎨 DEBUG: Image generation command detected - processing...")
             try:
                 special_response = await process_image_command(message_content, user_id)
@@ -545,8 +545,8 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🎨 **Image Generation Processing Error**\n\nError: {str(e)}"
         
         # 8.5. ⏰ Reminder commands - 10/16/25
-        elif detect_reminder_command(message_content):
-            command_type = detect_reminder_command(message_content)
+        elif detect_reminder_command(message):
+            command_type = detect_reminder_command(message)
             logger.info(f"⏰ DEBUG: Reminder command detected - type: {command_type}")
             
             try:
@@ -565,7 +565,7 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"⏰ **Reminder Error:** {str(e)}"
         
        # 9. 🔍 Google Workspace command detection (NINTH) - NEW 9/30/25
-        elif detect_google_command(message_content)[0]:
+        elif detect_google_command(message)[0]:
             logger.info("🔍 DEBUG: Google Workspace command detected - processing...")
             try:
                 logger.info(f"🔍 DEBUG: Calling process_google_command with user_id={user_id}")
@@ -579,12 +579,12 @@ Weather data powered by Tomorrow.io"""
                 special_response = f"🔍 **Google Workspace Processing Error**\n\nError: {str(e)}"
         
         # 10. 📧 Email Detail & Draft Commands (TENTH) - NEW 10/2/25
-        elif detect_email_detail_command(message_content)[0] or detect_draft_creation_command(message_content)[0]:
+        elif detect_email_detail_command(message)[0] or detect_draft_creation_command(message)[0]:
             logger.info("📧 DEBUG: Email or draft command detected - determining type...")
             
             # Get the actual detection results
-            is_email_cmd, action_type, email_num = detect_email_detail_command(message_content)
-            is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message_content)
+            is_email_cmd, action_type, email_num = detect_email_detail_command(message)
+            is_draft_cmd, draft_email_num, draft_instruction = detect_draft_creation_command(message)
             
             logger.info(f"🔍 DEBUG: Command check - email:{is_email_cmd}, draft:{is_draft_cmd}")
             
@@ -715,7 +715,7 @@ All systems operational and ready to assist!"""
                         
                 # Get RSS marketing context for writing assistance (integration #3)
                 rss_context = ""
-                if detect_rss_command(message_content) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
+                if detect_rss_command(message) or any(term in message_content.lower() for term in ['write', 'content', 'marketing', 'blog', 'email']):
                     logger.info("📰 DEBUG: Adding RSS Learning context to AI response...")
                     try:
                         rss_context = await get_rss_marketing_context(message_content)
