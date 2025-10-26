@@ -148,7 +148,7 @@ async def query_conversations(
         # Exclude current thread (to avoid duplication)
         if exclude_thread_id:
             param_count += 1
-            where_clauses.append(f"cm.thread_id != ${param_count}")
+            where_clauses.append(f"NOT (cm.thread_id = ${param_count} AND cm.created_at >= NOW() - INTERVAL '1 hour')")
             params.append(exclude_thread_id)
         
         # Keyword filter (if semantic search)

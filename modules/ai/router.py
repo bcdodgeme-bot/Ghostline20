@@ -170,15 +170,6 @@ async def chat_with_ai(
     logger.info(f"📝 DEBUG: File context length: {len(file_context)} chars")
     if len(file_context) > 50:  # If we have file context
         logger.info(f"📝 DEBUG: File context preview: {file_context[:200]}...")
-
-
-    start_time = time.time()
-    thread_id = thread_id or str(uuid.uuid4())
-    
-    # 🚨 CRITICAL DEBUG: Log everything
-    logger.info(f"🚀 CHAT START: Processing message '{message[:50]}...'")
-    logger.info(f"🔍 DEBUG: user_id={user_id}, personality={personality_id}")
-    logger.info(f"🧵 DEBUG: thread_id={thread_id}")
     
     # ==============================================================================
     # NEW 10/26/25: Database-driven memory query layer
@@ -206,6 +197,14 @@ async def chat_with_ai(
         logger.error(traceback.format_exc())
         # Continue without memory context (graceful degradation)
     # ==============================================================================
+    
+    start_time = time.time()
+    thread_id = thread_id or str(uuid.uuid4())
+    
+    # 🚨 CRITICAL DEBUG: Log everything
+    logger.info(f"🚀 CHAT START: Processing message '{message[:50]}...'")
+    logger.info(f"🔍 DEBUG: user_id={user_id}, personality={personality_id}")
+    logger.info(f"🧵 DEBUG: thread_id={thread_id}")
     
     try:
         # Import helper functions from chat.py
