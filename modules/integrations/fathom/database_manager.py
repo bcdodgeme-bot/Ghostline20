@@ -105,6 +105,9 @@ class FathomDatabaseManager:
             attendees = details.get('attendees', [])
             participants = [att.get('name', 'Unknown') for att in attendees]
             
+            # 🔧 FIX (Oct 27, 2025): Convert participants list to JSON string
+            participants_json = json.dumps(participants) if participants else json.dumps([])
+            
             # ✅ FIXED: Transcript is plain text, not segments
             transcript_text = transcript_data.get('transcript', '')
             
@@ -112,6 +115,9 @@ class FathomDatabaseManager:
             ai_summary = summary_data.get('summary', '')
             key_points = summary_data.get('key_points', [])
             sentiment = summary_data.get('sentiment', 'neutral')
+            
+            # 🔧 FIX (Oct 27, 2025): Convert key_points list to JSON string
+            key_points_json = json.dumps(key_points) if key_points else json.dumps([])
             
             # ✅ FIXED: Use recording_id (BIGINT) instead of meeting_id
             query = '''
@@ -135,10 +141,10 @@ class FathomDatabaseManager:
                 title,
                 meeting_date,
                 duration_minutes,
-                participants,
+                participants_json,
                 transcript_text,
                 ai_summary,
-                key_points,
+                key_points_json,
                 sentiment
             )
             
@@ -199,12 +205,16 @@ class FathomDatabaseManager:
             '''
             
             for topic in topics:
+                # 🔧 FIX (Oct 27, 2025): Convert keywords list to JSON string
+                keywords = topic.get('keywords', [])
+                keywords_json = json.dumps(keywords) if keywords else json.dumps([])
+                
                 await self.db.execute(
                     query,
                     meeting_id,
                     topic.get('name', ''),
                     topic.get('importance', 5),
-                    topic.get('keywords', [])
+                    keywords_json
                 )
             
             logger.info(f"✅ Stored {len(topics)} topics")
@@ -231,11 +241,21 @@ class FathomDatabaseManager:
             
             meeting = dict(result)
             
+            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            if meeting.get('participants') and isinstance(meeting['participants'], str):
+                try:
+                    meeting['participants'] = json.loads(meeting['participants'])
+                except:
+                    meeting['participants'] = []
+            
+            if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                try:
+                    meeting['key_points'] = json.loads(meeting['key_points'])
+                except:
+                    meeting['key_points'] = []
+            
             # Get action items
             meeting['action_items'] = await self._get_action_items(meeting_id)
-            
-            # Get topics
-            meeting['topics'] = await self._get_topics(meeting_id)
             
             return meeting
             
@@ -260,6 +280,22 @@ class FathomDatabaseManager:
             meeting = dict(result)
             meeting_id = str(meeting['id'])
             
+            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            if meeting.get('participants') and isinstance(meeting['participants'], str):
+                try:
+                    meeting['participants'] = json.loads(meeting['participants'])
+                except:
+                    meeting['participants'] = []
+            
+            if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                try:
+                    meeting['key_points'] = json.loads(meeting['key_points'])
+                except:
+                    meeting['key_points'] = []
+            
+            # Get action items
+            meeting['action_items'] = await self._get_action_items(meeting_id)
+            
             # Get action items
             meeting['action_items'] = await self._get_action_items(meeting_id)
             
@@ -282,7 +318,18 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, meeting_id)
-            return [dict(row) for row in results]
+            # 🔧 FIX (Oct 27, 2025): Parse keywords JSON back to list
+            topics = []
+            for row in results:
+                topic = dict(row)
+                if topic.get('keywords') and isinstance(topic['keywords'], str):
+                    try:
+                        topic['keywords'] = json.loads(topic['keywords'])
+                    except:
+                        topic['keywords'] = []
+                topics.append(topic)
+            
+            return topics
             
         except Exception as e:
             logger.error(f"❌ Failed to get action items: {e}")
@@ -318,7 +365,23 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, limit)
-            return [dict(row) for row in results]
+            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            meetings = []
+            for row in results:
+                meeting = dict(row)
+                if meeting.get('participants') and isinstance(meeting['participants'], str):
+                    try:
+                        meeting['participants'] = json.loads(meeting['participants'])
+                    except:
+                        meeting['participants'] = []
+                if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                    try:
+                        meeting['key_points'] = json.loads(meeting['key_points'])
+                    except:
+                        meeting['key_points'] = []
+                meetings.append(meeting)
+            
+            return meetings
             
         except Exception as e:
             logger.error(f"❌ Failed to get recent meetings: {e}")
@@ -352,7 +415,23 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, query_text, limit)
-            return [dict(row) for row in results]
+            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            meetings = []
+            for row in results:
+                meeting = dict(row)
+                if meeting.get('participants') and isinstance(meeting['participants'], str):
+                    try:
+                        meeting['participants'] = json.loads(meeting['participants'])
+                    except:
+                        meeting['participants'] = []
+                if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                    try:
+                        meeting['key_points'] = json.loads(meeting['key_points'])
+                    except:
+                        meeting['key_points'] = []
+                meetings.append(meeting)
+            
+            return meetings
             
         except Exception as e:
             logger.error(f"❌ Failed to search meetings: {e}")
@@ -373,7 +452,23 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, start_date, end_date)
-            return [dict(row) for row in results]
+            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            meetings = []
+            for row in results:
+                meeting = dict(row)
+                if meeting.get('participants') and isinstance(meeting['participants'], str):
+                    try:
+                        meeting['participants'] = json.loads(meeting['participants'])
+                    except:
+                        meeting['participants'] = []
+                if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                    try:
+                        meeting['key_points'] = json.loads(meeting['key_points'])
+                    except:
+                        meeting['key_points'] = []
+                meetings.append(meeting)
+            
+            return meetings
             
         except Exception as e:
             logger.error(f"❌ Failed to get meetings by date: {e}")

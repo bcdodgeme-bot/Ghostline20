@@ -119,6 +119,7 @@ class WeatherNotificationHandler:
         - Emergency Alerts (anytime): Severe weather, extreme temps, dangerous UV
         """
         from datetime import datetime
+        from zoneinfo import ZoneInfo
         
         condition = weather_data['condition'].lower()
         temp = weather_data['temperature']
