@@ -145,13 +145,13 @@ class MeetingContextCollector(ContextCollector):
             meetings_query = """
                 SELECT 
                     id,
-                    title as meeting_title,  ← Fixed!
+                    title as meeting_title, 
                     meeting_date,
                     duration_minutes,
-                    participants as attendees,  ← Also fixed! (it's 'participants' not 'attendees')
-                    ai_summary as summary,  ← Fixed!
-                    transcript_text IS NOT NULL as transcript_available,  ← Fixed!
-                    created_at as processed_at  ← Fixed!
+                    participants as attendees,
+                    ai_summary as summary,  
+                    transcript_text IS NOT NULL as transcript_available,  
+                    created_at as processed_at 
                 FROM fathom_meetings
                 WHERE processed_at >= $1
                 ORDER BY meeting_date DESC
