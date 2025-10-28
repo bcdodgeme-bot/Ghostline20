@@ -145,13 +145,13 @@ class MeetingContextCollector(ContextCollector):
             meetings_query = """
                 SELECT 
                     id,
-                    meeting_title,
+                    title as meeting_title,  ← Fixed!
                     meeting_date,
                     duration_minutes,
-                    attendees,
-                    summary,
-                    transcript_available,
-                    processed_at
+                    participants as attendees,  ← Also fixed! (it's 'participants' not 'attendees')
+                    ai_summary as summary,  ← Fixed!
+                    transcript_text IS NOT NULL as transcript_available,  ← Fixed!
+                    created_at as processed_at  ← Fixed!
                 FROM fathom_meetings
                 WHERE processed_at >= $1
                 ORDER BY meeting_date DESC
@@ -187,14 +187,13 @@ class MeetingContextCollector(ContextCollector):
                     ai.action_text,
                     ai.assigned_to,
                     ai.due_date,
+                    ai.priority,
                     ai.status,
-                    ai.created_at,
-                    fm.meeting_title,
-                    fm.meeting_date
+                    m.title as meeting_title
                 FROM meeting_action_items ai
-                JOIN fathom_meetings fm ON ai.meeting_id = fm.id
-                WHERE ai.status IN ('pending', 'in_progress')
-                AND fm.meeting_date >= $1
+                JOIN fathom_meetings m ON ai.meeting_id = m.id
+                WHERE ai.status = 'pending'
+                AND m.created_at >= $1
                 ORDER BY ai.due_date ASC NULLS LAST
             """
             
