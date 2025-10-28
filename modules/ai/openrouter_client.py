@@ -27,19 +27,16 @@ class OpenRouterClient:
         
         # BLOCKED: All ChatGPT models - Carl doesn't want this crap
         self.blocked_models = [
-            "openai/gpt-4o",
-            "openai/gpt-4o-mini",
-            "openai/gpt-4-turbo",
-            "openai/gpt-4",
-            "openai/gpt-3.5-turbo",
-            "openai/chatgpt-4o-latest",
-            "openai/o1-preview",
-            "openai/o1-mini"
+            "openai/gpt-5o",           # Block GPT-5o variants if/when they exist
+            "openai/gpt-5o-mini",
+            "openai/gpt-5-turbo",
         ]
         
         # Preferred models in order of preference
         self.preferred_models = [
+            "anthropic/claude-sonnet-4.5",
             "anthropic/claude-3.5-sonnet",
+            "openai/gpt-4o",
             "anthropic/claude-3-haiku",
             "meta-llama/llama-3.1-70b-instruct",
             "mistralai/mixtral-8x7b-instruct",

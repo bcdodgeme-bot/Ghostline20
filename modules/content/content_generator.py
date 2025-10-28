@@ -436,13 +436,15 @@ The post should be ready to publish as-is."""
 - Current trend score: {trend_data['trend_score'] if trend_data else 'N/A'}
 - Trend momentum: {trend_data['momentum'] if trend_data else 'unknown'}
 
-**Requirements:**
-- Blog title (compelling, SEO-friendly)
-- Introduction section (hook + overview)
-- 3-5 main content sections (each with 3-4 key points)
+**CRITICAL REQUIREMENTS:**
+- MINIMUM 1200 words (this is NON-NEGOTIABLE)
+- Target range: 1200-1800 words
+- Write in full paragraphs with complete sentences
+- Include compelling, SEO-friendly title
+- Strong introduction with hook
+- 3-5 detailed content sections with subheadings
 - Conclusion with clear call-to-action
-- Target word count: 1200-1800 words
-- 5-8 SEO keywords to target
+- Natural keyword integration throughout
 
 """
             
@@ -451,52 +453,59 @@ The post should be ready to publish as-is."""
                 for insight in rss_insights:
                     prompt += f"- {insight['insight_text']}\n"
             
-            prompt += """\n**Output Format (JSON):**
-{
-  "title": "Blog post title",
-  "introduction": {
-    "hook": "Opening sentence/question",
-    "overview": "What this post covers"
-  },
-  "sections": [
-    {
-      "heading": "Section title",
-      "points": ["Key point 1", "Key point 2", "Key point 3"]
-    }
-  ],
-  "conclusion": {
-    "summary": "Key takeaways",
-    "cta": "Call to action"
-  },
-  "target_word_count": 1500,
-  "seo_keywords": ["keyword1", "keyword2", "keyword3"]
-}"""
+            prompt += """\n**Output Format:**
+Write the complete blog post as formatted markdown with:
+
+# [Your SEO-Optimized Title Here]
+
+[Introduction paragraphs - 200-300 words with engaging hook]
+
+## [First Main Section Heading]
+
+[Full paragraphs explaining this section - 300-400 words]
+
+## [Second Main Section Heading]
+
+[Full paragraphs explaining this section - 300-400 words]
+
+[Continue for 3-5 main sections...]
+
+## [Conclusion Heading]
+
+[Conclusion paragraphs with clear CTA - 150-200 words]
+
+---
+SEO Keywords: keyword1, keyword2, keyword3, etc.
+
+REMINDER: This must be a COMPLETE blog post with full paragraphs, not an outline. Minimum 1200 words."""
             
             # Generate outline
             client = await self._get_client()
             response = await client.chat_completion(
                 messages=[
-                    {'role': 'system', 'content': 'You are an expert content strategist and SEO specialist.'},
+                    {'role': 'system', 'content': 'You are an expert blog writer who creates comprehensive, SEO-optimized content. You ALWAYS meet word count requirements and write in full paragraphs, never outlines.'},
                     {'role': 'user', 'content': prompt}
                 ],
-                model='anthropic/claude-3.5-sonnet',
-                max_tokens=2000,
+                model='anthropic/claude-3.5-sonnet',  # Force Claude for quality
+                max_tokens=4000,  # Increased for longer content
                 temperature=0.7
             )
             
-            outline_text = response['choices'][0]['message']['content'].strip()
-            
-            # Parse JSON (extract if wrapped in markdown code blocks)
-            if '```json' in outline_text:
-                outline_text = outline_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in outline_text:
-                outline_text = outline_text.split('```')[1].split('```')[0].strip()
-            
-            outline = json.loads(outline_text)
-            
-            logger.info(f"Generated blog outline: {outline['title']}")
-            
-            return outline
+            blog_content = response['choices'][0]['message']['content'].strip()
+
+            # Extract word count for verification
+            word_count = len(blog_content.split())
+
+            logger.info(f"Generated blog post: {word_count} words")
+
+            if word_count < 1000:
+                logger.warning(f"⚠️ Blog post only {word_count} words - below minimum!")
+
+            return {
+                'content': blog_content,
+                'word_count': word_count,
+                'success': word_count >= 1000
+            }
             
         except Exception as e:
             logger.error(f"Failed to generate blog outline: {e}")
@@ -550,7 +559,7 @@ Output only the introduction paragraphs, no headings or meta-commentary."""
             client = await self._get_client()
             intro_response = await client.chat_completion(
                 messages=[{'role': 'user', 'content': intro_prompt}],
-                model='anthropic/claude-3.5-sonnet',
+                model='anthropic/claude-sonnet-4-5-20250929',
                 max_tokens=500,
                 temperature=0.7
             )

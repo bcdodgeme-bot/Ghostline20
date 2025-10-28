@@ -429,7 +429,7 @@ class SituationDetector:
                 if not data['event']:
                     continue
                 
-                event_title = data['event'].data.get('event_title', '').lower()
+                event_title = (data['event'].data.get('event_title') or '').lower()
                 
                 # Simple keyword matching to find related action items
                 for action_signal in action_signals:

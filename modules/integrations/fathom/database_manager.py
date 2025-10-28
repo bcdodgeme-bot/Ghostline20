@@ -108,8 +108,8 @@ class FathomDatabaseManager:
             # 🔧 FIX (Oct 27, 2025): Convert participants list to JSON string
             participants_json = json.dumps(participants) if participants else json.dumps([])
             
-            # ✅ FIXED: Transcript is plain text, not segments
-            transcript_text = transcript_data.get('transcript', '')
+            # 🔧 FIX (Oct 28, 2025): Handle transcript that comes as list of segments
+            transcript_text = self._extract_transcript_text(transcript_data)
             
             # Extract summary components
             ai_summary = summary_data.get('summary', '')
@@ -167,6 +167,91 @@ class FathomDatabaseManager:
         except Exception as e:
             logger.error(f"❌ Failed to store meeting: {e}")
             raise
+    
+    def _extract_transcript_text(self, transcript_data: Any) -> str:
+        """
+        Extract plain text transcript from various formats Fathom might send.
+        
+        Fathom can send transcript as:
+        1. Plain string: "This is the transcript..."
+        2. Dict with 'transcript' key containing string
+        3. Dict with 'transcript' key containing list of segments
+        4. List of segments directly
+        
+        Args:
+            transcript_data: Raw transcript data from Fathom webhook
+            
+        Returns:
+            Plain text string transcript
+        """
+        try:
+            # Case 1: Already a string
+            if isinstance(transcript_data, str):
+                return transcript_data
+            
+            # Case 2 & 3: Dict with 'transcript' key
+            if isinstance(transcript_data, dict) and 'transcript' in transcript_data:
+                transcript_value = transcript_data['transcript']
+                
+                # If it's a string, return it
+                if isinstance(transcript_value, str):
+                    return transcript_value
+                
+                # If it's a list of segments, format it
+                if isinstance(transcript_value, list):
+                    return self._format_transcript_from_segments(transcript_value)
+            
+            # Case 4: List of segments directly
+            if isinstance(transcript_data, list):
+                return self._format_transcript_from_segments(transcript_data)
+            
+            # Fallback
+            logger.warning(f"⚠️ Unexpected transcript format: {type(transcript_data)}")
+            return str(transcript_data) if transcript_data else ""
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting transcript: {e}", exc_info=True)
+            return ""
+    
+    def _format_transcript_from_segments(self, segments: List[Dict]) -> str:
+        """
+        Format a list of transcript segments into readable text.
+        Each segment has: {'speaker': {'display_name': 'Name'}, 'text': '...', 'start': 0}
+        
+        Args:
+            segments: List of transcript segment dicts
+            
+        Returns:
+            Formatted transcript string with speaker names
+        """
+        try:
+            transcript_lines = []
+            
+            for segment in segments:
+                # Extract speaker name
+                speaker_name = "Unknown"
+                if 'speaker' in segment and segment['speaker']:
+                    speaker = segment['speaker']
+                    if isinstance(speaker, dict):
+                        speaker_name = speaker.get('display_name') or speaker.get('name', 'Unknown')
+                    elif isinstance(speaker, str):
+                        speaker_name = speaker
+                
+                # Extract text
+                text = segment.get('text', '').strip()
+                
+                if text:
+                    transcript_lines.append(f"{speaker_name}: {text}")
+            
+            return "\n\n".join(transcript_lines)
+            
+        except Exception as e:
+            logger.error(f"❌ Error formatting transcript segments: {e}", exc_info=True)
+            # Fallback: concatenate text without speaker names
+            try:
+                return "\n\n".join(s.get('text', '').strip() for s in segments if s.get('text'))
+            except:
+                return ""
     
     async def _store_action_items(self, meeting_id: str,
                                  action_items: List[Dict[str, Any]]) -> None:

@@ -55,7 +55,7 @@ class ClickUpNotificationHandler:
             # Group tasks by urgency
             overdue = [t for t in tasks if t['is_overdue']]
             due_soon = [t for t in tasks if t['due_soon'] and not t['is_overdue']]
-            high_priority = [t for t in tasks if t.get('priority') == 1 and not t['is_overdue']]
+            high_priority = [t for t in tasks if t.get('priority') == 1 and not t.get('is_overdue', False)]
             
             # Send appropriate notification
             if overdue:

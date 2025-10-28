@@ -148,6 +148,14 @@ class IntelligenceOrchestrator:
             signal_count = len(signals)
             logger.info(f"✅ Collected {signal_count} signals")
             
+            # 🔍 DIAGNOSTIC LOGGING
+            if len(signals) > 0:
+                from .intelligence_diagnostics import run_diagnostics_on_signals
+                try:
+                    await run_diagnostics_on_signals(signals)
+                except Exception as e:
+                    logger.error(f"Diagnostic failed: {e}", exc_info=True)
+            
             # PHASE 2: Detect situations from signals
             logger.info("🔍 Phase 2: Detecting situations from signals...")
             situations = await self._detect_all_situations(signals)
