@@ -433,8 +433,8 @@ class SituationDetector:
                 
                 # Simple keyword matching to find related action items
                 for action_signal in action_signals:
-                    action_text = action_signal.data.get('action_text', '').lower()
-                    meeting_title = action_signal.data.get('meeting_title', '').lower()
+                    action_text = (action_signal.data.get('action_text') or '').lower()
+                    meeting_title = (action_signal.data.get('meeting_title') or '').lower()
                     
                     # Check if action is related to this event
                     # (matches by common words in titles)
