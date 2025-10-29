@@ -941,22 +941,23 @@ class EmailContextCollector(ContextCollector):
                 logger.debug(f"High-priority email from {email['sender_email']}: {email['subject'][:50]}...")
                 
                 # Signal 2: Email requires response
-                signal_type='email_requires_response',
-                        data={
-                            'email_id': str(email['id']),
-                            'message_id': email['message_id'],
-                            'thread_id': email['thread_id'],
-                            'sender_email': email['sender_email'],
-                            'subject': email['subject'],
-                            'received_at': email['received_at'].isoformat(),
-                            'hours_old': round(hours_old, 1),
-                            'priority_level': email['priority_level']
-                        },
-                        priority=8,
-                        expires_hours=72
-                    ))
-                    
-                    logger.info(f"Response needed from {email['sender_name']}: {email['subject'][:50]}...")
+                signals.append(self._create_signal(
+                    signal_type='email_requires_response',
+                    data={
+                        'email_id': str(email['id']),
+                        'message_id': email['message_id'],
+                        'thread_id': email['thread_id'],
+                        'sender_email': email['sender_email'],
+                        'subject': email['subject'],
+                        'received_at': email['received_at'].isoformat(),
+                        'hours_old': round(hours_old, 1),
+                        'priority_level': email['priority_level']
+                    },
+                    priority=8,
+                    expires_hours=72
+                ))
+                
+                logger.info(f"Response needed from {email['sender_name']}: {email['subject'][:50]}...")
                 
                 # Signal 3: Follow-up needed based on sender/context
                 follow_up_needed = self._check_follow_up_needed(email)
