@@ -156,9 +156,9 @@ class IntelligenceDiagnostics:
                 'required_fields': ['topic', 'keyword']
             },
             'weather_impact': {
-                'required_types': ['weather_alert', 'weather_extreme_temp'],
+                'required_types': ['uv_index_alert', 'headache_risk_high', 'weather_alert', 'pressure_dropping'],
                 'optional_types': ['event_upcoming_24h'],
-                'required_fields': ['condition']
+                'required_fields': ['location']
             }
         }
         

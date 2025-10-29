@@ -30,7 +30,8 @@ from modules.intelligence.context_collectors import (
     TrendContextCollector as TrendCollector,
     WeatherContextCollector as WeatherCollector,
     KnowledgeContextCollector as KnowledgeCollector,
-    PerformanceContextCollector as ActionItemCollector
+    PerformanceContextCollector as ActionItemCollector,
+    BlueskyContextCollector as BlueskyCollector
 )
 
 from modules.intelligence.situation_detector import SituationDetector
@@ -84,6 +85,7 @@ class IntelligenceOrchestrator:
         self.weather_collector = WeatherCollector(db_manager=db_manager)
         self.knowledge_collector = KnowledgeCollector(db_manager=db_manager)
         self.action_item_collector = ActionItemCollector(db_manager=db_manager)
+        self.bluesky_collector = BlueskyCollector(db_manager=db_manager)
         
         # Initialize intelligence modules
         self.situation_detector = SituationDetector()
@@ -245,6 +247,7 @@ class IntelligenceOrchestrator:
             self.weather_collector.collect_signals(),
             self.knowledge_collector.collect_signals(),
             self.action_item_collector.collect_signals()
+            self.bluesky_collector.collect_signals()
         ]
         
         results = await asyncio.gather(*collector_tasks, return_exceptions=True)

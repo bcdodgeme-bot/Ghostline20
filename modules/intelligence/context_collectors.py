@@ -890,8 +890,15 @@ class EmailContextCollector(ContextCollector):
                     urgency_indicators
                 FROM google_gmail_analysis
                 WHERE received_at >= $1
-                AND priority_level IN ('high', 'urgent')
+                AND (
+                    priority_level IN ('high', 'urgent')
+                    OR requires_response = true
+                    OR subject ILIKE '%urgent%'
+                    OR subject ILIKE '%asap%'
+                    OR subject ILIKE '%important%'
+                )
                 ORDER BY received_at DESC
+                LIMIT 20
             """
             
             emails = await self.db.fetch_all(emails_query, lookback_time)
@@ -1324,6 +1331,149 @@ class TrendContextCollector(ContextCollector):
                 'error': str(e)
             }
 
+#===============================================================================
+# BLUESKY CONTEXT COLLECTOR - Monitors Bluesky engagement opportunities
+#===============================================================================
+
+class BlueskyContextCollector(ContextCollector):
+    """
+    Monitors Bluesky posts and conversations for engagement opportunities.
+    
+    Produces signals for:
+    - Posts in approval queue
+    - Recent posts with high engagement
+    - Conversations matching user keywords
+    """
+    
+    async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
+        """
+        Collect Bluesky signals from recent activity.
+        
+        24-hour lookback to catch recent conversations.
+        """
+        signals = []
+        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        
+        try:
+            # Signal 1: Posts in approval queue
+            queue_query = """
+                SELECT 
+                    id,
+                    account,
+                    post_text,
+                    conversation_context,
+                    relevance_score,
+                    engagement_type,
+                    created_at
+                FROM bluesky_approval_queue
+                WHERE status = 'pending'
+                AND created_at >= $1
+                ORDER BY relevance_score DESC
+                LIMIT 10
+            """
+            
+            try:
+                queued_posts = await self.db.fetch_all(queue_query, lookback_time)
+                
+                for post in queued_posts:
+                    signals.append(self._create_signal(
+                        signal_type='bluesky_approval_needed',
+                        data={
+                            'queue_id': str(post['id']),
+                            'account': post['account'],
+                            'post_text': post['post_text'][:200],
+                            'relevance_score': post['relevance_score'],
+                            'engagement_type': post['engagement_type']
+                        },
+                        priority=8,
+                        expires_hours=12
+                    ))
+                
+                if queued_posts:
+                    logger.info(f"🦋 Found {len(queued_posts)} Bluesky posts awaiting approval")
+            
+            except Exception as e:
+                logger.debug(f"Bluesky approval queue empty or table doesn't exist: {e}")
+            
+            # Signal 2: Recent high-engagement posts
+            posts_query = """
+                SELECT 
+                    id,
+                    account,
+                    text,
+                    like_count,
+                    repost_count,
+                    reply_count,
+                    created_at
+                FROM bluesky_posts
+                WHERE created_at >= $1
+                AND (like_count + repost_count + reply_count) >= 5
+                ORDER BY (like_count + repost_count + reply_count) DESC
+                LIMIT 5
+            """
+            
+            try:
+                high_engagement = await self.db.fetch_all(posts_query, lookback_time)
+                
+                for post in high_engagement:
+                    total_engagement = (post['like_count'] or 0) + (post['repost_count'] or 0) + (post['reply_count'] or 0)
+                    
+                    signals.append(self._create_signal(
+                        signal_type='bluesky_high_engagement',
+                        data={
+                            'post_id': str(post['id']),
+                            'account': post['account'],
+                            'text': post['text'][:200],
+                            'total_engagement': total_engagement,
+                            'likes': post['like_count'],
+                            'reposts': post['repost_count'],
+                            'replies': post['reply_count']
+                        },
+                        priority=6,
+                        expires_hours=48
+                    ))
+                
+                if high_engagement:
+                    logger.info(f"🦋 Found {len(high_engagement)} high-engagement Bluesky posts")
+            
+            except Exception as e:
+                logger.debug(f"Bluesky posts table empty or doesn't exist: {e}")
+            
+            logger.info(f"BlueskyContextCollector: Collected {len(signals)} signals")
+            
+        except Exception as e:
+            logger.error(f"Error collecting Bluesky signals: {e}", exc_info=True)
+        
+        return signals
+    
+    async def get_current_state(self) -> Dict[str, Any]:
+        """Get current state of Bluesky data"""
+        try:
+            # Count pending approvals
+            pending = await self.db.fetch_one(
+                """SELECT COUNT(*) as count FROM bluesky_approval_queue 
+                   WHERE status = 'pending'"""
+            )
+            
+            # Count recent posts
+            recent_posts = await self.db.fetch_one(
+                """SELECT COUNT(*) as count FROM bluesky_posts 
+                   WHERE created_at >= NOW() - INTERVAL '7 days'"""
+            )
+            
+            return {
+                'collector': 'BlueskyContextCollector',
+                'pending_approvals': pending['count'] if pending else 0,
+                'recent_posts_7d': recent_posts['count'] if recent_posts else 0,
+                'status': 'operational'
+            }
+        except Exception as e:
+            logger.error(f"Error getting Bluesky state: {e}")
+            return {
+                'collector': 'BlueskyContextCollector',
+                'status': 'error',
+                'error': str(e)
+            }
 
 #===============================================================================
 # KNOWLEDGE CONTEXT COLLECTOR - Matches knowledge base to current topics
@@ -1351,193 +1501,106 @@ class KnowledgeContextCollector(ContextCollector):
         super().__init__(db_manager)
         self.context_topics = context_topics or []
     
-    async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
+    async def collect_signals(self, lookback_hours: int = 72) -> List[ContextSignal]:
+    """
+    Collect trend signals from last 72 hours (3 days).
+    
+    Trends change relatively slowly, so 3-day lookback captures
+    meaningful changes without missing spikes.
+    """
+    signals = []
+    lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+    
+    try:
+        # First check if trend_monitoring has any data
+        count_check = await self.db.fetch_one(
+            "SELECT COUNT(*) as count FROM trend_monitoring"
+        )
+        
+        if not count_check or count_check['count'] == 0:
+            logger.info("TrendContextCollector: No trends in monitoring table")
+            return signals
+        
+        # Query: Get trends that spiked, are rising, or are stable high
+        # Changed: removed momentum filter, just look at high scores
+        trends_query = """
+            SELECT 
+                id,
+                keyword,
+                current_score,
+                previous_score,
+                momentum,
+                business_area,
+                search_volume,
+                related_topics,
+                last_checked,
+                created_at
+            FROM trend_monitoring
+            WHERE last_checked >= $1
+            AND (
+                current_score >= 60
+                OR (current_score > previous_score AND (current_score - previous_score) >= 10)
+            )
+            ORDER BY current_score DESC
+            LIMIT 50
         """
-        Collect knowledge signals based on context topics.
         
-        Note: This collector works best when provided context_topics from
-        other collectors (like conversation topics, trend keywords, etc.)
+        trends = await self.db.fetch_all(trends_query, lookback_time)
         
-        If no context_topics provided, it will look at recently accessed
-        knowledge entries.
-        """
-        signals = []
+        if not trends:
+            logger.info("TrendContextCollector: No high-scoring trends found")
+            return signals
         
-        try:
-            # If we have context topics from other collectors, search for those
-            if self.context_topics:
-                logger.info(f"KnowledgeContextCollector: Searching for {len(self.context_topics)} topics")
-                
-                for topic in self.context_topics:
-                    # Search knowledge base for this topic
-                    knowledge_query = """
-                        SELECT 
-                            id,
-                            title,
-                            content_type,
-                            word_count,
-                            key_topics,
-                            relevance_score,
-                            access_count,
-                            summary,
-                            created_at
-                        FROM knowledge_entries
-                        WHERE processed = true
-                        AND (
-                            title ILIKE $1
-                            OR $2 = ANY(key_topics)
-                            OR search_vector @@ plainto_tsquery('english', $3)
-                        )
-                        ORDER BY relevance_score DESC, access_count DESC
-                        LIMIT 5
-                    """
-                    
-                    # Search patterns
-                    title_pattern = f"%{topic}%"
-                    
-                    matches = await self.db.fetch_all(
-                        knowledge_query,
-                        title_pattern,
-                        topic.lower(),
-                        topic
-                    )
-                    
-                    if matches:
-                        # Signal 1: Knowledge exists for this topic
-                        signals.append(self._create_signal(
-                            signal_type='knowledge_exists',
-                            data={
-                                'topic': topic,
-                                'match_count': len(matches),
-                                'entries': [
-                                    {
-                                        'id': str(match['id']),
-                                        'title': match['title'],
-                                        'content_type': match['content_type'],
-                                        'word_count': match['word_count'],
-                                        'relevance_score': float(match['relevance_score']) if match['relevance_score'] else 5.0,
-                                        'summary': match['summary']
-                                    }
-                                    for match in matches
-                                ]
-                            },
-                            priority=5,  # Supportive, not urgent
-                            expires_hours=72
-                        ))
-                        
-                        logger.info(f"✅ Found {len(matches)} knowledge entries for topic: {topic}")
-                    else:
-                        # Signal 2: Knowledge gap - topic discussed but no entry
-                        signals.append(self._create_signal(
-                            signal_type='knowledge_gap',
-                            data={
-                                'topic': topic,
-                                'suggestion': f"Consider creating knowledge entry about: {topic}"
-                            },
-                            priority=4,  # Low priority - informational
-                            expires_hours=168  # Week-long reminder
-                        ))
-                        
-                        logger.debug(f"❌ Knowledge gap detected: {topic}")
+        logger.info(f"TrendContextCollector: Processing {len(trends)} trending keywords")
+        
+        for trend in trends:
+            keyword = trend['keyword']
+            current_score = trend['current_score']
+            previous_score = trend['previous_score'] or 0
+            score_change = current_score - previous_score
+            momentum = trend['momentum']
             
+            # Determine signal type based on score and change
+            if score_change >= 20:
+                signal_type = 'trend_spike'
+                priority = 9
+            elif score_change >= 10:
+                signal_type = 'trend_rising'
+                priority = 8
+            elif current_score >= 70:
+                signal_type = 'trend_stable_high'
+                priority = 7
             else:
-                # No context topics provided - look at recently accessed entries
-                logger.info("KnowledgeContextCollector: No context topics, checking recently accessed entries")
-                
-                lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
-                
-                recent_query = """
-                    SELECT 
-                        id,
-                        title,
-                        content_type,
-                        key_topics,
-                        relevance_score,
-                        access_count,
-                        last_accessed,
-                        summary
-                    FROM knowledge_entries
-                    WHERE processed = true
-                    AND last_accessed >= $1
-                    ORDER BY last_accessed DESC
-                    LIMIT 10
-                """
-                
-                recent_entries = await self.db.fetch_all(recent_query, lookback_time)
-                
-                if recent_entries:
-                    # Create a general signal about recently accessed knowledge
-                    signals.append(self._create_signal(
-                        signal_type='knowledge_recently_accessed',
-                        data={
-                            'entry_count': len(recent_entries),
-                            'entries': [
-                                {
-                                    'id': str(entry['id']),
-                                    'title': entry['title'],
-                                    'key_topics': entry['key_topics'],
-                                    'last_accessed': entry['last_accessed'].isoformat()
-                                }
-                                for entry in recent_entries
-                            ]
-                        },
-                        priority=4,  # Informational
-                        expires_hours=48
-                    ))
-                    
-                    logger.info(f"Found {len(recent_entries)} recently accessed knowledge entries")
+                signal_type = 'trend_opportunity_created'
+                priority = 6
             
-            # Additional signal: Check for high-value knowledge that hasn't been accessed recently
-            stale_knowledge_query = """
-                SELECT 
-                    id,
-                    title,
-                    relevance_score,
-                    last_accessed,
-                    key_topics
-                FROM knowledge_entries
-                WHERE processed = true
-                AND relevance_score >= 8.0
-                AND (last_accessed IS NULL OR last_accessed < NOW() - INTERVAL '30 days')
-                ORDER BY relevance_score DESC
-                LIMIT 5
-            """
+            signal_data = {
+                'keyword': keyword,
+                'current_score': current_score,
+                'previous_score': previous_score,
+                'score_change': score_change,
+                'momentum': momentum,
+                'business_area': trend['business_area'],
+                'search_volume': trend['search_volume'],
+                'related_topics': trend['related_topics'],
+                'last_checked': trend['last_checked'].isoformat() if trend['last_checked'] else None
+            }
             
-            stale_entries = await self.db.fetch_all(stale_knowledge_query)
+            signals.append(self._create_signal(
+                signal_type=signal_type,
+                data=signal_data,
+                priority=priority,
+                expires_hours=72
+            ))
             
-            if stale_entries:
-                # Signal 3: High-value knowledge not recently accessed
-                signals.append(self._create_signal(
-                    signal_type='knowledge_underutilized',
-                    data={
-                        'entry_count': len(stale_entries),
-                        'entries': [
-                            {
-                                'id': str(entry['id']),
-                                'title': entry['title'],
-                                'relevance_score': float(entry['relevance_score']),
-                                'key_topics': entry['key_topics'],
-                                'days_since_access': (
-                                    (datetime.utcnow() - entry['last_accessed']).days
-                                    if entry['last_accessed']
-                                    else 999
-                                )
-                            }
-                            for entry in stale_entries
-                        ]
-                    },
-                    priority=3,  # Low priority - just a reminder
-                    expires_hours=168
-                ))
-                
-                logger.debug(f"Found {len(stale_entries)} underutilized high-value knowledge entries")
-            
-            logger.info(f"KnowledgeContextCollector: Collected {len(signals)} signals")
-            
-        except Exception as e:
-            logger.error(f"Error collecting knowledge signals: {e}", exc_info=True)
+            logger.debug(f"📈 Trend signal: {keyword} ({signal_type}, score: {current_score})")
         
-        return signals
+        logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+        
+    except Exception as e:
+        logger.error(f"Error collecting trend signals: {e}", exc_info=True)
+    
+    return signals
     
     def set_context_topics(self, topics: List[str]):
         """
