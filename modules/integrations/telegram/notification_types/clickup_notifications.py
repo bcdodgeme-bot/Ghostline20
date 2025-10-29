@@ -94,11 +94,11 @@ class ClickUpNotificationHandler:
         ORDER BY 
             CASE WHEN due_date < NOW() THEN 0 ELSE 1 END,  -- Overdue first
             due_date ASC NULLS LAST,
-            CASE priority
-                WHEN priority = 1 THEN 0  -- urgent
-                WHEN priority = 2 THEN 1  -- high
-                WHEN priority = 3 THEN 2  -- normal
-                WHEN priority = 4 THEN 3  -- low
+            CASE
+                WHEN priority = 1 THEN 0
+                WHEN priority = 2 THEN 1
+                WHEN priority = 3 THEN 2
+                WHEN priority = 4 THEN 3
                 ELSE 4
             END
         LIMIT 10
