@@ -1500,106 +1500,106 @@ class KnowledgeContextCollector(ContextCollector):
         self.context_topics = context_topics or []
     
     async def collect_signals(self, lookback_hours: int = 72) -> List[ContextSignal]:
-    """
-    Collect trend signals from last 72 hours (3 days).
-    
-    Trends change relatively slowly, so 3-day lookback captures
-    meaningful changes without missing spikes.
-    """
-    signals = []
-    lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
-    
-    try:
-        # First check if trend_monitoring has any data
-        count_check = await self.db.fetch_one(
-            "SELECT COUNT(*) as count FROM trend_monitoring"
-        )
-        
-        if not count_check or count_check['count'] == 0:
-            logger.info("TrendContextCollector: No trends in monitoring table")
-            return signals
-        
-        # Query: Get trends that spiked, are rising, or are stable high
-        # Changed: removed momentum filter, just look at high scores
-        trends_query = """
-            SELECT 
-                id,
-                keyword,
-                current_score,
-                previous_score,
-                momentum,
-                business_area,
-                search_volume,
-                related_topics,
-                last_checked,
-                created_at
-            FROM trend_monitoring
-            WHERE last_checked >= $1
-            AND (
-                current_score >= 60
-                OR (current_score > previous_score AND (current_score - previous_score) >= 10)
-            )
-            ORDER BY current_score DESC
-            LIMIT 50
         """
+        Collect trend signals from last 72 hours (3 days).
         
-        trends = await self.db.fetch_all(trends_query, lookback_time)
+        Trends change relatively slowly, so 3-day lookback captures
+        meaningful changes without missing spikes.
+        """
+        signals = []
+        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
         
-        if not trends:
-            logger.info("TrendContextCollector: No high-scoring trends found")
-            return signals
-        
-        logger.info(f"TrendContextCollector: Processing {len(trends)} trending keywords")
-        
-        for trend in trends:
-            keyword = trend['keyword']
-            current_score = trend['current_score']
-            previous_score = trend['previous_score'] or 0
-            score_change = current_score - previous_score
-            momentum = trend['momentum']
+        try:
+            # First check if trend_monitoring has any data
+            count_check = await self.db.fetch_one(
+                "SELECT COUNT(*) as count FROM trend_monitoring"
+            )
             
-            # Determine signal type based on score and change
-            if score_change >= 20:
-                signal_type = 'trend_spike'
-                priority = 9
-            elif score_change >= 10:
-                signal_type = 'trend_rising'
-                priority = 8
-            elif current_score >= 70:
-                signal_type = 'trend_stable_high'
-                priority = 7
-            else:
-                signal_type = 'trend_opportunity_created'
-                priority = 6
+            if not count_check or count_check['count'] == 0:
+                logger.info("TrendContextCollector: No trends in monitoring table")
+                return signals
             
-            signal_data = {
-                'keyword': keyword,
-                'current_score': current_score,
-                'previous_score': previous_score,
-                'score_change': score_change,
-                'momentum': momentum,
-                'business_area': trend['business_area'],
-                'search_volume': trend['search_volume'],
-                'related_topics': trend['related_topics'],
-                'last_checked': trend['last_checked'].isoformat() if trend['last_checked'] else None
-            }
+            # Query: Get trends that spiked, are rising, or are stable high
+            # Changed: removed momentum filter, just look at high scores
+            trends_query = """
+                SELECT 
+                    id,
+                    keyword,
+                    current_score,
+                    previous_score,
+                    momentum,
+                    business_area,
+                    search_volume,
+                    related_topics,
+                    last_checked,
+                    created_at
+                FROM trend_monitoring
+                WHERE last_checked >= $1
+                AND (
+                    current_score >= 60
+                    OR (current_score > previous_score AND (current_score - previous_score) >= 10)
+                )
+                ORDER BY current_score DESC
+                LIMIT 50
+            """
             
-            signals.append(self._create_signal(
-                signal_type=signal_type,
-                data=signal_data,
-                priority=priority,
-                expires_hours=72
-            ))
+            trends = await self.db.fetch_all(trends_query, lookback_time)
             
-            logger.debug(f"📈 Trend signal: {keyword} ({signal_type}, score: {current_score})")
+            if not trends:
+                logger.info("TrendContextCollector: No high-scoring trends found")
+                return signals
+            
+            logger.info(f"TrendContextCollector: Processing {len(trends)} trending keywords")
+            
+            for trend in trends:
+                keyword = trend['keyword']
+                current_score = trend['current_score']
+                previous_score = trend['previous_score'] or 0
+                score_change = current_score - previous_score
+                momentum = trend['momentum']
+                
+                # Determine signal type based on score and change
+                if score_change >= 20:
+                    signal_type = 'trend_spike'
+                    priority = 9
+                elif score_change >= 10:
+                    signal_type = 'trend_rising'
+                    priority = 8
+                elif current_score >= 70:
+                    signal_type = 'trend_stable_high'
+                    priority = 7
+                else:
+                    signal_type = 'trend_opportunity_created'
+                    priority = 6
+                
+                signal_data = {
+                    'keyword': keyword,
+                    'current_score': current_score,
+                    'previous_score': previous_score,
+                    'score_change': score_change,
+                    'momentum': momentum,
+                    'business_area': trend['business_area'],
+                    'search_volume': trend['search_volume'],
+                    'related_topics': trend['related_topics'],
+                    'last_checked': trend['last_checked'].isoformat() if trend['last_checked'] else None
+                }
+                
+                signals.append(self._create_signal(
+                    signal_type=signal_type,
+                    data=signal_data,
+                    priority=priority,
+                    expires_hours=72
+                ))
+                
+                logger.debug(f"📈 Trend signal: {keyword} ({signal_type}, score: {current_score})")
+            
+            logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+            
+        except Exception as e:
+            logger.error(f"Error collecting trend signals: {e}", exc_info=True)
         
-        logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+        return signals
         
-    except Exception as e:
-        logger.error(f"Error collecting trend signals: {e}", exc_info=True)
-    
-    return signals
-    
     def set_context_topics(self, topics: List[str]):
         """
         Set context topics to search for.
@@ -1829,7 +1829,7 @@ class WeatherContextCollector(ContextCollector):
                 
                 # Signal 4: Significant pressure drop (headache trigger)
                 # Pressure drop > 0.1 inHg (or 3.4 mb) is significant
-                if pressure_change is not None and pressure_change < -0.1: 
+                if pressure_change is not None and pressure_change < -0.1:
                     signals.append(self._create_signal(
                         signal_type='pressure_dropping',
                         data={
