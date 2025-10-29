@@ -153,7 +153,7 @@ class MeetingContextCollector(ContextCollector):
                     transcript_text IS NOT NULL as transcript_available,  
                     created_at as processed_at 
                 FROM fathom_meetings
-                WHERE processed_at >= $1
+                WHERE created_at >= $1
                 ORDER BY meeting_date DESC
             """
             
