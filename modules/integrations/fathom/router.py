@@ -32,6 +32,7 @@ from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
 from modules.integrations.telegram.notification_manager import NotificationManager
 from modules.integrations.telegram.bot_client import TelegramBotClient
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -265,8 +266,9 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
             logger.info("   📱 Sending Telegram notification...")
             
             # Initialize Telegram notification manager
-            telegram_bot = TelegramBotClient()
-            notification_manager = NotificationManager(telegram_bot)
+            telegram_bot = TelegramBotClient(os.getenv('TELEGRAM_BOT_TOKEN'))
+            kill_switch = KillSwitch()
+            notification_manager = NotificationManager(telegram_bot, kill_switch)
             
             # Extract meeting details for notification
             title = meeting_data['details']['title']

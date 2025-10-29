@@ -871,37 +871,31 @@ class EmailContextCollector(ContextCollector):
         try:
             # Query: Get high-priority emails from gmail analysis
             emails_query = """
-                SELECT 
+                SELECT
                     id,
                     message_id,
                     thread_id,
                     sender_email,
-                    sender_name,
-                    subject,
-                    snippet,
-                    received_at,
+                    subject_line as subject,
                     priority_level,
-                    priority_score,
-                    sentiment,
+                    category,
                     requires_response,
-                    categories,
-                    key_entities,
-                    action_items,
-                    urgency_indicators
+                    email_date as received_at
                 FROM google_gmail_analysis
-                WHERE received_at >= $1
+                WHERE user_id = $1
+                AND email_date >= $2
                 AND (
                     priority_level IN ('high', 'urgent')
                     OR requires_response = true
-                    OR subject ILIKE '%urgent%'
-                    OR subject ILIKE '%asap%'
-                    OR subject ILIKE '%important%'
+                    OR subject_line ILIKE '%urgent%'
+                    OR subject_line ILIKE '%asap%'
+                    OR subject_line ILIKE '%important%'
                 )
-                ORDER BY received_at DESC
+                ORDER BY email_date DESC
                 LIMIT 20
             """
             
-            emails = await self.db.fetch_all(emails_query, lookback_time)
+            emails = await self.db.fetch_all(emails_query, self.db.user_id, lookback_time)
             
             if not emails:
                 logger.info("EmailContextCollector: No high-priority emails found")
@@ -930,15 +924,11 @@ class EmailContextCollector(ContextCollector):
                     'message_id': email['message_id'],
                     'thread_id': email['thread_id'],
                     'sender_email': email['sender_email'],
-                    'sender_name': email['sender_name'],
                     'subject': email['subject'],
-                    'snippet': email['snippet'],
                     'received_at': email['received_at'].isoformat(),
                     'hours_old': round(hours_old, 1),
                     'priority_level': email['priority_level'],
-                    'priority_score': email['priority_score'],
-                    'sentiment': email['sentiment'],
-                    'categories': email['categories']
+                    'category': email['category']
                 }
                 
                 signals.append(self._create_signal(
@@ -948,19 +938,22 @@ class EmailContextCollector(ContextCollector):
                     expires_hours=48
                 ))
                 
-                logger.debug(f"High-priority email from {email['sender_name']}: {email['subject'][:50]}...")
+                logger.debug(f"High-priority email from {email['sender_email']}: {email['subject'][:50]}...")
                 
                 # Signal 2: Email requires response
-                if email['requires_response']:
-                    signals.append(self._create_signal(
-                        signal_type='email_requires_response',
+                signal_type='email_requires_response',
                         data={
-                            **signal_data,
-                            'action_items': email['action_items'],
-                            'urgency_indicators': email['urgency_indicators']
+                            'email_id': str(email['id']),
+                            'message_id': email['message_id'],
+                            'thread_id': email['thread_id'],
+                            'sender_email': email['sender_email'],
+                            'subject': email['subject'],
+                            'received_at': email['received_at'].isoformat(),
+                            'hours_old': round(hours_old, 1),
+                            'priority_level': email['priority_level']
                         },
-                        priority=min(priority + 1, 9),  # Boost priority if response needed
-                        expires_hours=24  # Shorter expiry - needs action soon
+                        priority=8,
+                        expires_hours=72
                     ))
                     
                     logger.info(f"Response needed from {email['sender_name']}: {email['subject'][:50]}...")
@@ -1121,25 +1114,49 @@ class TrendContextCollector(ContextCollector):
             try:
                 # Query 1: Get recent high-scoring or rising trends
                 trends_query = """
-                    SELECT 
-                        id,
+                WITH today_trends AS (
+                    SELECT
                         keyword,
                         business_area,
-                        trend_score,
-                        previous_score,
+                        trend_score as current_score,
                         trend_momentum,
-                        search_volume,
-                        related_topics,
-                        last_checked,
-                        created_at
+                        regional_score as search_volume,
+                        '[]'::jsonb as related_topics,
+                        trend_date,
+                        updated_at
                     FROM trend_monitoring
-                    WHERE (
-                        trend_score >= 50 
-                        OR trend_momentum = 'rising'
-                    )
-                    AND last_checked >= $1
-                    ORDER BY trend_score DESC
-                """
+                    WHERE trend_date >= CURRENT_DATE - INTERVAL '3 days'
+                ),
+                yesterday_trends AS (
+                    SELECT
+                        keyword,
+                        business_area,
+                        trend_score
+                    FROM trend_monitoring
+                    WHERE trend_date = CURRENT_DATE - INTERVAL '1 day'
+                )
+                SELECT
+                    t.keyword,
+                    t.current_score,
+                    COALESCE(y.trend_score, 0) as previous_score,
+                    t.trend_momentum as momentum,
+                    t.business_area,
+                    t.search_volume,
+                    t.related_topics,
+                    t.updated_at as last_checked
+                FROM today_trends t
+                LEFT JOIN yesterday_trends y
+                    ON t.keyword = y.keyword
+                    AND t.business_area = y.business_area
+                WHERE t.updated_at >= $1
+                AND (
+                    t.current_score >= 60
+                    OR (t.current_score > COALESCE(y.trend_score, 0)
+                        AND (t.current_score - COALESCE(y.trend_score, 0)) >= 10)
+                )
+                ORDER BY t.current_score DESC
+                LIMIT 50
+            """
                 
                 trends = await self.db.fetch_all(trends_query, lookback_time)
                 
@@ -1159,7 +1176,7 @@ class TrendContextCollector(ContextCollector):
                         signals.append(self._create_signal(
                             signal_type='trend_spike',
                             data={
-                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
                                 'keyword': trend['keyword'],
                                 'business_area': trend['business_area'],
                                 'current_score': current_score,
@@ -1180,7 +1197,7 @@ class TrendContextCollector(ContextCollector):
                         signals.append(self._create_signal(
                             signal_type='trend_rising',
                             data={
-                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
                                 'keyword': trend['keyword'],
                                 'business_area': trend['business_area'],
                                 'current_score': current_score,
@@ -1199,7 +1216,7 @@ class TrendContextCollector(ContextCollector):
                         signals.append(self._create_signal(
                             signal_type='trend_stable_high',
                             data={
-                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
                                 'keyword': trend['keyword'],
                                 'business_area': trend['business_area'],
                                 'current_score': current_score,
@@ -1355,18 +1372,20 @@ class BlueskyContextCollector(ContextCollector):
         try:
             # Signal 1: Posts in approval queue
             queue_query = """
-                SELECT 
+                SELECT
                     id,
-                    account,
+                    post_uri,
+                    detected_by_account,
                     post_text,
-                    conversation_context,
-                    relevance_score,
-                    engagement_type,
-                    created_at
-                FROM bluesky_approval_queue
-                WHERE status = 'pending'
-                AND created_at >= $1
-                ORDER BY relevance_score DESC
+                    matched_keywords,
+                    engagement_score,
+                    opportunity_type,
+                    detected_at
+                FROM bluesky_engagement_opportunities
+                WHERE user_response IS NULL
+                AND detected_at >= $1
+                AND already_engaged = false
+                ORDER BY engagement_score DESC
                 LIMIT 10
             """
             
@@ -1377,11 +1396,12 @@ class BlueskyContextCollector(ContextCollector):
                     signals.append(self._create_signal(
                         signal_type='bluesky_approval_needed',
                         data={
-                            'queue_id': str(post['id']),
-                            'account': post['account'],
+                            'opportunity_id': str(post['id']),
+                            'account': post['detected_by_account'],
                             'post_text': post['post_text'][:200],
-                            'relevance_score': post['relevance_score'],
-                            'engagement_type': post['engagement_type']
+                            'engagement_score': float(post['engagement_score']),
+                            'opportunity_type': post['opportunity_type'],
+                            'post_uri': post['post_uri']
                         },
                         priority=8,
                         expires_hours=12
@@ -1395,47 +1415,49 @@ class BlueskyContextCollector(ContextCollector):
             
             # Signal 2: Recent high-engagement posts
             posts_query = """
-                SELECT 
+                SELECT
                     id,
-                    account,
-                    text,
-                    like_count,
-                    repost_count,
-                    reply_count,
-                    created_at
+                    account_handle,
+                    post_text,
+                    likes_count,
+                    reposts_count,
+                    replies_count,
+                    quotes_count,
+                    engagement_score,
+                    posted_at
                 FROM bluesky_posts
-                WHERE created_at >= $1
-                AND (like_count + repost_count + reply_count) >= 5
-                ORDER BY (like_count + repost_count + reply_count) DESC
+                WHERE posted_at >= $1
+                AND (likes_count + reposts_count + replies_count) >= 5
+                ORDER BY (likes_count + reposts_count + replies_count) DESC
                 LIMIT 5
             """
             
             try:
-                high_engagement = await self.db.fetch_all(posts_query, lookback_time)
+                high_engagement_posts = await self.db.fetch_all(posts_query, lookback_time)
                 
-                for post in high_engagement:
-                    total_engagement = (post['like_count'] or 0) + (post['repost_count'] or 0) + (post['reply_count'] or 0)
+                for post in high_engagement_posts:
+                    total_engagement = (post['likes_count'] or 0) + (post['reposts_count'] or 0) + (post['replies_count'] or 0)
                     
                     signals.append(self._create_signal(
-                        signal_type='bluesky_high_engagement',
+                        signal_type='bluesky_post_performance',
                         data={
                             'post_id': str(post['id']),
-                            'account': post['account'],
-                            'text': post['text'][:200],
+                            'account': post['account_handle'],
+                            'post_text': post['post_text'][:200],
                             'total_engagement': total_engagement,
-                            'likes': post['like_count'],
-                            'reposts': post['repost_count'],
-                            'replies': post['reply_count']
+                            'likes': post['likes_count'],
+                            'reposts': post['reposts_count'],
+                            'replies': post['replies_count']
                         },
                         priority=6,
-                        expires_hours=48
+                        expires_hours=72
                     ))
                 
-                if high_engagement:
-                    logger.info(f"🦋 Found {len(high_engagement)} high-engagement Bluesky posts")
+                if high_engagement_posts:
+                    logger.info(f"🦋 Found {len(high_engagement_posts)} high-performing Bluesky posts")
             
             except Exception as e:
-                logger.debug(f"Bluesky posts table empty or doesn't exist: {e}")
+                logger.debug(f"Bluesky posts query failed or table empty: {e}")
             
             logger.info(f"BlueskyContextCollector: Collected {len(signals)} signals")
             
@@ -1447,22 +1469,29 @@ class BlueskyContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of Bluesky data"""
         try:
-            # Count pending approvals
+            # Count pending opportunities
             pending = await self.db.fetch_one(
-                """SELECT COUNT(*) as count FROM bluesky_approval_queue 
-                   WHERE status = 'pending'"""
+                """SELECT COUNT(*) as count FROM bluesky_engagement_opportunities 
+                   WHERE user_response IS NULL 
+                   AND already_engaged = false"""
             )
             
             # Count recent posts
             recent_posts = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM bluesky_posts 
-                   WHERE created_at >= NOW() - INTERVAL '7 days'"""
+                   WHERE posted_at >= NOW() - INTERVAL '7 days'"""
+            )
+            
+            # Count total engagement opportunities ever detected
+            total_opportunities = await self.db.fetch_one(
+                """SELECT COUNT(*) as count FROM bluesky_engagement_opportunities"""
             )
             
             return {
                 'collector': 'BlueskyContextCollector',
-                'pending_approvals': pending['count'] if pending else 0,
+                'pending_opportunities': pending['count'] if pending else 0,
                 'recent_posts_7d': recent_posts['count'] if recent_posts else 0,
+                'total_opportunities_detected': total_opportunities['count'] if total_opportunities else 0,
                 'status': 'operational'
             }
         except Exception as e:
@@ -1472,6 +1501,7 @@ class BlueskyContextCollector(ContextCollector):
                 'status': 'error',
                 'error': str(e)
             }
+
 
 #===============================================================================
 # KNOWLEDGE CONTEXT COLLECTOR - Matches knowledge base to current topics

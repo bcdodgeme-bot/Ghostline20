@@ -208,7 +208,7 @@ class SituationManager:
         """
         # Define key fields to compare for each situation type
         comparison_fields = {
-            'post_meeting_action_required': ['meeting_id'],
+            'post_meeting_action_required': ['meeting_id', 'action_item_ids'],
             'deadline_approaching_prep_needed': ['event_id'],
             'trend_content_opportunity': ['keyword'],
             'email_priority_meeting_context': ['email_id', 'event_id'],
