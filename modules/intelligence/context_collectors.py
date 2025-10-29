@@ -161,6 +161,9 @@ class MeetingContextCollector(ContextCollector):
             
             # Create signals for each processed meeting
             for meeting in meetings:
+                # DEBUG: Log meeting_id being used
+                logger.info(f"🔍 DEBUG: Creating meeting_processed signal with meeting_id={str(meeting['id'])}")
+                
                 # Signal 1: Meeting was processed
                 signals.append(self._create_signal(
                     signal_type='meeting_processed',
