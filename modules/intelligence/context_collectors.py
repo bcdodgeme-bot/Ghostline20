@@ -1109,160 +1109,158 @@ class TrendContextCollector(ContextCollector):
     """
     
     async def collect_signals(self, lookback_hours: int = 72) -> List[ContextSignal]:
-        """
-        Collect trend signals from last 72 hours (3 days).
-        
-        Trends change relatively slowly, so 3-day lookback captures
-        meaningful changes without missing spikes.
-        """
-        signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
-        
-        try:
-            # Query 1: Get recent high-scoring or rising trends
-            trends_query = """
-                SELECT 
-                    id,
-                    keyword,
-                    business_area,
-                    trend_score,
-                    previous_score,
-                    trend_momentum,
-                    search_volume,
-                    related_topics,
-                    last_checked,
-                    created_at
-                FROM trend_monitoring
-                WHERE (
-                    trend_score >= 50 
-                    OR trend_momentum = 'rising'
-                )
-                AND last_checked >= $1
-                ORDER BY trend_score DESC
             """
+            Collect trend signals from last 72 hours (3 days).
             
-            trends = await self.db.fetch_all(trends_query, lookback_time)
-            
-            if not trends:
-                logger.info("TrendContextCollector: No significant trends found")
-                return signals
-            
-            logger.info(f"TrendContextCollector: Processing {len(trends)} trends")
-            
-            for trend in trends:
-                current_score = trend['trend_score']
-                previous_score = trend['previous_score'] or 0
-                score_change = current_score - previous_score
-                
-                # Signal 1: Trend spike (score jumped 15+ points)
-                if score_change >= 15:
-                    signals.append(self._create_signal(
-                        signal_type='trend_spike',
-                        data={
-                            'trend_id': str(trend['id']),
-                            'keyword': trend['keyword'],
-                            'business_area': trend['business_area'],
-                            'current_score': current_score,
-                            'previous_score': previous_score,
-                            'score_change': score_change,
-                            'search_volume': trend['search_volume'],
-                            'related_topics': trend['related_topics'],
-                            'last_checked': trend['last_checked'].isoformat()
-                        },
-                        priority=10 if score_change >= 25 else 9,  # Huge spikes = max priority
-                        expires_hours=48  # Act fast on spikes
-                    ))
-                    
-                    logger.warning(f"🔥 Trend SPIKE: {trend['keyword']} jumped {score_change} points to {current_score}")
-                
-                # Signal 2: Trend is rising (momentum indicator)
-                elif trend['trend_momentum'] == 'rising':
-                    signals.append(self._create_signal(
-                        signal_type='trend_rising',
-                        data={
-                            'trend_id': str(trend['id']),
-                            'keyword': trend['keyword'],
-                            'business_area': trend['business_area'],
-                            'current_score': current_score,
-                            'momentum': trend['trend_momentum'],
-                            'search_volume': trend['search_volume'],
-                            'related_topics': trend['related_topics']
-                        },
-                        priority=8,  # Rising trends are important
-                        expires_hours=72
-                    ))
-                    
-                    logger.info(f"📈 Rising trend: {trend['keyword']} (score: {current_score})")
-                
-                # Signal 3: Stable high trend (score >= 70 for multiple checks)
-                # Need to check trend history to see if it's been stable
-                if current_score >= 70 and previous_score >= 70:
-                    signals.append(self._create_signal(
-                        signal_type='trend_stable_high',
-                        data={
-                            'trend_id': str(trend['id']),
-                            'keyword': trend['keyword'],
-                            'business_area': trend['business_area'],
-                            'current_score': current_score,
-                            'stability_days': self._calculate_stability_days(trend),
-                            'search_volume': trend['search_volume'],
-                            'related_topics': trend['related_topics']
-                        },
-                        priority=7,  # Stable highs = consistent opportunity
-                        expires_hours=168  # Relevant for a week
-                    ))
-                    
-                    logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
-            
-            # Query 2: Get new trend opportunities created
-            opportunities_query = """
-                SELECT 
-                    id,
-                    keyword,
-                    business_area,
-                    opportunity_type,
-                    opportunity_score,
-                    content_angle,
-                    target_audience,
-                    suggested_action,
-                    created_at
-                FROM trend_opportunities
-                WHERE created_at >= $1
-                ORDER BY opportunity_score DESC
+            Trends change relatively slowly, so 3-day lookback captures
+            meaningful changes without missing spikes.
             """
+            signals = []
+            lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
             
-            opportunities = await self.db.fetch_all(opportunities_query, lookback_time)
-            
-            if opportunities:
-                logger.info(f"TrendContextCollector: Found {len(opportunities)} new opportunities")
+            try:
+                # Query 1: Get recent high-scoring or rising trends
+                trends_query = """
+                    SELECT 
+                        id,
+                        keyword,
+                        business_area,
+                        trend_score,
+                        previous_score,
+                        trend_momentum,
+                        search_volume,
+                        related_topics,
+                        last_checked,
+                        created_at
+                    FROM trend_monitoring
+                    WHERE (
+                        trend_score >= 50 
+                        OR trend_momentum = 'rising'
+                    )
+                    AND last_checked >= $1
+                    ORDER BY trend_score DESC
+                """
                 
-                for opp in opportunities:
-                    # Signal 4: New trend opportunity created
-                    signals.append(self._create_signal(
-                        signal_type='trend_opportunity_created',
-                        data={
-                            'opportunity_id': str(opp['id']),
-                            'keyword': opp['keyword'],
-                            'business_area': opp['business_area'],
-                            'opportunity_type': opp['opportunity_type'],
-                            'opportunity_score': opp['opportunity_score'],
-                            'content_angle': opp['content_angle'],
-                            'target_audience': opp['target_audience'],
-                            'suggested_action': opp['suggested_action'],
-                            'created_at': opp['created_at'].isoformat()
-                        },
-                        priority=8,  # Opportunities are actionable
-                        expires_hours=96  # 4 days to act on opportunity
-                    ))
+                trends = await self.db.fetch_all(trends_query, lookback_time)
+                
+                if not trends:
+                    logger.info("TrendContextCollector: No significant trends found")
+                    return signals
+                
+                logger.info(f"TrendContextCollector: Processing {len(trends)} trends")
+                
+                for trend in trends:
+                    current_score = trend['trend_score']
+                    previous_score = trend['previous_score'] or 0
+                    score_change = current_score - previous_score
                     
-                    logger.info(f"💡 New opportunity: {opp['keyword']} - {opp['opportunity_type']}")
+                    # Signal 1: Trend spike (score jumped 15+ points)
+                    if score_change >= 15:
+                        signals.append(self._create_signal(
+                            signal_type='trend_spike',
+                            data={
+                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
+                                'business_area': trend['business_area'],
+                                'current_score': current_score,
+                                'previous_score': previous_score,
+                                'score_change': score_change,
+                                'search_volume': trend['search_volume'],
+                                'related_topics': trend['related_topics'],
+                                'last_checked': trend['last_checked'].isoformat()
+                            },
+                            priority=10 if score_change >= 25 else 9,
+                            expires_hours=48
+                        ))
+                        
+                        logger.warning(f"🔥 Trend SPIKE: {trend['keyword']} jumped {score_change} points to {current_score}")
+                    
+                    # Signal 2: Trend is rising (momentum indicator)
+                    elif trend['trend_momentum'] == 'rising':
+                        signals.append(self._create_signal(
+                            signal_type='trend_rising',
+                            data={
+                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
+                                'business_area': trend['business_area'],
+                                'current_score': current_score,
+                                'momentum': trend['trend_momentum'],
+                                'search_volume': trend['search_volume'],
+                                'related_topics': trend['related_topics']
+                            },
+                            priority=8,
+                            expires_hours=72
+                        ))
+                        
+                        logger.info(f"📈 Rising trend: {trend['keyword']} (score: {current_score})")
+                    
+                    # Signal 3: Stable high trend (score >= 70 for multiple checks)
+                    if current_score >= 70 and previous_score >= 70:
+                        signals.append(self._create_signal(
+                            signal_type='trend_stable_high',
+                            data={
+                                'trend_id': str(trend['id']),
+                                'keyword': trend['keyword'],
+                                'business_area': trend['business_area'],
+                                'current_score': current_score,
+                                'stability_days': self._calculate_stability_days(trend),
+                                'search_volume': trend['search_volume'],
+                                'related_topics': trend['related_topics']
+                            },
+                            priority=7,
+                            expires_hours=168
+                        ))
+                        
+                        logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
+                
+                # Query 2: Get new trend opportunities created
+                opportunities_query = """
+                    SELECT 
+                        id,
+                        keyword,
+                        business_area,
+                        opportunity_type,
+                        opportunity_score,
+                        content_angle,
+                        target_audience,
+                        suggested_action,
+                        created_at
+                    FROM trend_opportunities
+                    WHERE created_at >= $1
+                    ORDER BY opportunity_score DESC
+                """
+                
+                opportunities = await self.db.fetch_all(opportunities_query, lookback_time)
+                
+                if opportunities:
+                    logger.info(f"TrendContextCollector: Found {len(opportunities)} new opportunities")
+                    
+                    for opp in opportunities:
+                        signals.append(self._create_signal(
+                            signal_type='trend_opportunity_created',
+                            data={
+                                'opportunity_id': str(opp['id']),
+                                'keyword': opp['keyword'],
+                                'business_area': opp['business_area'],
+                                'opportunity_type': opp['opportunity_type'],
+                                'opportunity_score': opp['opportunity_score'],
+                                'content_angle': opp['content_angle'],
+                                'target_audience': opp['target_audience'],
+                                'suggested_action': opp['suggested_action'],
+                                'created_at': opp['created_at'].isoformat()
+                            },
+                            priority=8,
+                            expires_hours=96
+                        ))
+                        
+                        logger.info(f"💡 New opportunity: {opp['keyword']} - {opp['opportunity_type']}")
+                
+                logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+                
+            except Exception as e:
+                logger.error(f"Error collecting trend signals: {e}", exc_info=True)
             
-            logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
-            
-        except Exception as e:
-            logger.error(f"Error collecting trend signals: {e}", exc_info=True)
-        
-        return signals
+            return signals
     
     def _calculate_stability_days(self, trend: Dict) -> int:
         """
