@@ -246,7 +246,7 @@ class IntelligenceOrchestrator:
             self.trend_collector.collect_signals(),
             self.weather_collector.collect_signals(),
             self.knowledge_collector.collect_signals(),
-            self.action_item_collector.collect_signals()
+            self.action_item_collector.collect_signals(),
             self.bluesky_collector.collect_signals()
         ]
         
