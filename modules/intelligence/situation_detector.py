@@ -291,6 +291,12 @@ class SituationDetector:
                     # This might be a follow-up to a previous meeting
                     meetings_with_actions[meeting_id]['upcoming_related'] = signal
             
+            # DEBUG: Log what we grouped
+            logger.info(f"📊 Grouped {len(meetings_with_actions)} unique meeting_ids")
+            for mid, data in meetings_with_actions.items():
+                logger.info(f"  Meeting {mid}: has_meeting={data['meeting'] is not None}, action_count={len(data['action_items'])}")
+
+            
             # Create situations for meetings that have action items
             for meeting_id, data in meetings_with_actions.items():
                 meeting_signal = data['meeting']
