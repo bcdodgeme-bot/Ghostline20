@@ -1757,8 +1757,19 @@ class WeatherContextCollector(ContextCollector):
             
             logger.info(f"WeatherContextCollector: Processing weather data for {latest['location']}")
             
+            logger.info(f"WeatherContextCollector: Processing weather data for {latest['location']}")
+            
+            # 🔍 DEBUG: Log all weather data fields
+            logger.info(f"🔍 DEBUG - Weather data fields:")
+            logger.info(f"   uv_index: {latest.get('uv_index')} (type: {type(latest.get('uv_index'))})")
+            logger.info(f"   headache_risk_level: {latest.get('headache_risk_level')}")
+            logger.info(f"   headache_risk_score: {latest.get('headache_risk_score')}")
+            logger.info(f"   headache_risk_factors: {latest.get('headache_risk_factors')}")
+            logger.info(f"   severe_weather_alert: {latest.get('severe_weather_alert')}")
+            logger.info(f"   alert_description: {latest.get('alert_description')}")
+            
             # Signal 1: UV INDEX HIGH (>4 triggers sun allergy warning)
-                        logger.info(f"🔍 DEBUG - Checking UV index signal...")
+            logger.info(f"🔍 DEBUG - Checking UV index signal...")
                         
             uv_index = latest.get('uv_index')
             if uv_index is not None and uv_index > 4:
@@ -1791,7 +1802,8 @@ class WeatherContextCollector(ContextCollector):
                 logger.warning(f"☀️ UV ALERT: Index {uv_index} ({uv_level}) - SUN PROTECTION REQUIRED!")
             
             # Signal 2: High headache risk
-                        logger.info(f"🔍 DEBUG - Checking headache risk signal...")
+            logger.info(f"🔍 DEBUG - Checking headache risk signal...")
+            
             if latest['headache_risk_level'] in ['high', 'severe']:
                 priority = 8 if latest['headache_risk_level'] == 'high' else 9
                 
@@ -1815,7 +1827,8 @@ class WeatherContextCollector(ContextCollector):
                 logger.warning(f"⚠️ {latest['headache_risk_level'].upper()} headache risk detected - Score: {latest['headache_risk_score']}")
             
             # Signal 3: Severe weather alert
-                        logger.info(f"🔍 DEBUG - Checking severe weather alert signal...")
+            logger.info(f"🔍 DEBUG - Checking severe weather alert signal...")
+            
             if latest['severe_weather_alert']:
                 signals.append(self._create_signal(
                     signal_type='weather_alert',
