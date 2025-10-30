@@ -697,27 +697,30 @@ class ActionSuggester:
             message += f"\n⏰ Expires: {situation.expires_at.strftime('%I:%M %p %m/%d')}"
         
         # Build buttons
-        buttons = []
-        
+        button_rows = []
+
         # Top row: Action buttons (up to 2 primary actions)
         action_row = []
         for i, action in enumerate(actions[:2], 1):
             callback_data = f"situation:action{i}:{situation.situation_id}"
-            action_row.append([action['description'][:30], callback_data])  # Truncate to 30 chars
-        
+            action_row.append({"text": action['description'][:30], "callback_data": callback_data})
+
         if action_row:
-            buttons.append(action_row)
-        
+            button_rows.append(action_row)
+
         # Second row: Response buttons
-        buttons.append([
-            ["⏭️ Dismiss", f"situation:dismiss:{situation.situation_id}"],
-            ["⏰ Snooze", f"situation:snooze:{situation.situation_id}"]
+        button_rows.append([
+            {"text": "⏭️ Dismiss", "callback_data": f"situation:dismiss:{situation.situation_id}"},
+            {"text": "⏰ Snooze", "callback_data": f"situation:snooze:{situation.situation_id}"}
         ])
-        
+
         # Third row: More info button
-        buttons.append([
-            ["ℹ️ More Details", f"situation:details:{situation.situation_id}"]
+        button_rows.append([
+            {"text": "ℹ️ More Details", "callback_data": f"situation:details:{situation.situation_id}"}
         ])
+
+        # Wrap in Telegram format
+        buttons = {"inline_keyboard": button_rows}
         
         return message, buttons
     
