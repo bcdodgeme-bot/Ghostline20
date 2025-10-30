@@ -227,7 +227,15 @@ class SituationManager:
         
         # Check if all key fields match
         for field in fields:
-            if context1.get(field) != context2.get(field):
+            val1 = context1.get(field)
+            val2 = context2.get(field)
+            
+            # If either value is None/empty, NOT a duplicate
+            if not val1 or not val2:
+                return False
+            
+            # Compare actual values
+            if val1 != val2:
                 return False
         
         return True
