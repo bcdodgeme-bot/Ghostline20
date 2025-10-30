@@ -798,19 +798,14 @@ class ActionSuggester:
             condition = context.get('weather_condition', 'Weather condition')
             
             if 'uv_index' in context:
-                summary = f"**UV Index: {context['uv_index']}**\n"
-                summary += f"Dangerous for sun allergy!"
+                return "High UV today"
             elif 'risk_level' in context:
-                summary = f"**Headache Risk: {context['risk_level'].upper()}**\n"
-                summary += "Preventive measures recommended"
+                risk = context.get('risk_level', 'high').upper()
+                return f"Headache Risk: {risk}"
+            elif 'rain' in condition.lower() or 'storm' in condition.lower():
+                return "Rain today"
             else:
-                summary = f"**{condition}**"
-            
-            event_count = context.get('event_count', 0)
-            if event_count > 0:
-                summary += f"\n{event_count} events affected"
-            
-            return summary
+                return "Weather alert"
         
         elif situation_type == 'weather_emergency_alert':
             alert = context.get('alert_description', 'Severe weather')

@@ -109,6 +109,28 @@ def get_current_datetime_context() -> dict:
         "unix_timestamp": int(now_user_tz.timestamp())
     }
 
+def convert_utc_to_user_timezone(dt: datetime) -> datetime:
+    """
+    Convert UTC datetime to user's timezone (EST/EDT)
+    
+    Args:
+        dt: datetime object (timezone-aware or naive)
+    
+    Returns:
+        datetime object in user's timezone
+    """
+    import pytz
+    
+    # Define user timezone
+    user_tz = pytz.timezone('America/New_York')
+    
+    # If datetime is naive (no timezone), assume it's UTC
+    if dt.tzinfo is None:
+        dt = pytz.utc.localize(dt)
+    
+    # Convert to user timezone
+    return dt.astimezone(user_tz)
+
 #-- Section 3: Weather Integration Functions - 9/26/25
 def detect_weather_request(message: str) -> tuple[bool, str]:
     """Detect weather-related requests
@@ -4220,7 +4242,9 @@ async def search_meetings(
                 ORDER BY meeting_date DESC
                 LIMIT $1
             """
-            meetings = await db_manager.fetch_all(sql, limit)
+            results = await db_manager.fetch_all(sql, limit)
+            # Convert asyncpg Records to dicts for proper .get() access
+            meetings = [dict(row) for row in results]
         
         elif query_type == 'action_items':
             sql = """
@@ -4233,7 +4257,9 @@ async def search_meetings(
                 ORDER BY m.meeting_date DESC
                 LIMIT $1
             """
-            meetings = await db_manager.fetch_all(sql, limit)
+            results = await db_manager.fetch_all(sql, limit)
+            # Convert asyncpg Records to dicts for proper .get() access
+            meetings = [dict(row) for row in results]
         
         else:  # specific or search
             # NEW: Try to extract dates from the query
@@ -4279,7 +4305,7 @@ async def search_meetings(
                 end_date = meeting_date + timedelta(days=3)
                 
                 sql = """
-                    SELECT 
+                    SELECT
                         title,
                         meeting_date,
                         duration_minutes,
@@ -4291,7 +4317,9 @@ async def search_meetings(
                     ORDER BY ABS(EXTRACT(EPOCH FROM (meeting_date - $3)))
                     LIMIT $4
                 """
-                meetings = await db_manager.fetch_all(sql, start_date, end_date, meeting_date, limit)
+                results = await db_manager.fetch_all(sql, start_date, end_date, meeting_date, limit)
+                # Convert asyncpg Records to dicts for proper .get() access
+                meetings = [dict(row) for row in results]
             else:
                 # Fallback: Simple text search in title and summary
                 search_term = f"%{query.lower()}%"
@@ -4310,7 +4338,9 @@ async def search_meetings(
                     ORDER BY meeting_date DESC
                     LIMIT $2
                 """
-                meetings = await db_manager.fetch_all(sql, search_term, limit)
+                results = await db_manager.fetch_all(sql, search_term, limit)
+                # Convert asyncpg Records to dicts for proper .get() access
+                meetings = [dict(row) for row in results]
         
         if not meetings or len(meetings) == 0:
             return "\n\n📅 **Meeting Context:** No meetings found matching your query."
@@ -4323,9 +4353,11 @@ async def search_meetings(
             meeting_context = ["\n\n📅 **Meeting Search Results:**\n"]
         
         for meeting in meetings:
+            # Convert UTC to user timezone
+            meeting_dt = convert_utc_to_user_timezone(meeting['meeting_date'])
             meeting_text = [
                 f"\n**{meeting['title']}**",
-                f"📅 Date: {meeting['meeting_date']}",
+                f"📅 Date: {meeting_dt.strftime('%B %d, %Y at %I:%M %p %Z')}",
                 f"⏱️ Duration: {meeting['duration_minutes']} minutes"
             ]
             
@@ -4414,7 +4446,7 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
         start_date = end_date - timedelta(days=days)
         
         sql = """
-            SELECT 
+            SELECT
                 title,
                 meeting_date,
                 duration_minutes,
@@ -4426,9 +4458,11 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
             ORDER BY meeting_date DESC
             LIMIT $2
         """
-        
-        meetings = await db_manager.fetch_all(sql, start_date, limit)
-        
+
+        results = await db_manager.fetch_all(sql, start_date, limit)
+        # Convert asyncpg Records to dicts for proper .get() access
+        meetings = [dict(row) for row in results] if results else []
+
         if not meetings or len(meetings) == 0:
             logger.info(f"📅 No recent meetings found in last {days} days")
             return ""
@@ -4439,9 +4473,11 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
         meeting_context = [f"\n\n📅 **Available Meeting Context (Last {days} Days):**\n"]
         
         for meeting in meetings:
+            # Convert UTC to user timezone
+            meeting_dt = convert_utc_to_user_timezone(meeting['meeting_date'])
             meeting_text = [
                 f"\n**{meeting['title']}**",
-                f"Date: {meeting['meeting_date']}",
+                f"Date: {meeting_dt.strftime('%B %d, %Y at %I:%M %p %Z')}",
                 f"Duration: {meeting['duration_minutes']} minutes"
             ]
             

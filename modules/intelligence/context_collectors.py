@@ -18,6 +18,14 @@ import json
 
 logger = logging.getLogger(__name__)
 
+def convert_utc_to_user_timezone(dt: datetime) -> datetime:
+    """Convert UTC datetime to America/New_York timezone"""
+    import pytz
+    user_tz = pytz.timezone('America/New_York')
+    if dt.tzinfo is None:
+        dt = pytz.utc.localize(dt)
+    return dt.astimezone(user_tz)
+
 #===============================================================================
 # BASE CLASSES - Foundation for all collectors
 #===============================================================================
@@ -170,7 +178,7 @@ class MeetingContextCollector(ContextCollector):
                     data={
                         'meeting_id': str(meeting['id']),
                         'meeting_title': meeting['meeting_title'],
-                        'meeting_date': meeting['meeting_date'].isoformat(),
+                        'meeting_date': convert_utc_to_user_timezone(meeting['meeting_date']).isoformat(),
                         'duration_minutes': meeting['duration_minutes'],
                         'attendees': meeting['attendees'],
                         'summary': meeting['summary'],
@@ -294,7 +302,7 @@ class MeetingContextCollector(ContextCollector):
                     data={
                         'meeting_id': str(meeting['id']),
                         'meeting_title': meeting['meeting_title'],
-                        'meeting_date': meeting['meeting_date'].isoformat(),
+                        'meeting_date': convert_utc_to_user_timezone(meeting['meeting_date']).isoformat(),
                         'hours_until': round(hours_until, 1),
                         'attendees': meeting['attendees']
                     },
