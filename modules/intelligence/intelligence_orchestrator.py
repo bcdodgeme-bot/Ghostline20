@@ -434,13 +434,19 @@ class IntelligenceOrchestrator:
                 )
                 
                 # Send to Telegram
-                success = await self.telegram.send_message(
-                    user_id=user_id,
-                    message=message,
-                    buttons=buttons
+                result = await self.telegram.send_notification(
+                    user_id=str(user_id),
+                    notification_type="intelligence",
+                    notification_subtype=situation.situation_type,
+                    message_text=message,
+                    buttons=buttons,
+                    message_data={
+                        "situation_id": str(situation.situation_id),
+                        "priority": situation.priority_score
+                    }
                 )
-                
-                if success:
+
+                if result.get('success'):
                     notification_count += 1
                     logger.debug(f"Sent notification for {situation.situation_type}")
                 else:
