@@ -719,10 +719,8 @@ class ActionSuggester:
             {"text": "ℹ️ More Details", "callback_data": f"situation:details:{situation.situation_id}"}
         ])
 
-        # Wrap in Telegram format
-        buttons = {"inline_keyboard": button_rows}
-        
-        return message, buttons
+        # Return button rows - notification manager will wrap in inline_keyboard
+        return message, button_rows
     
     
     def _format_situation_summary(self, situation_type: str, context: Dict[str, Any]) -> str:
