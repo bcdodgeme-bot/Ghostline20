@@ -1758,6 +1758,8 @@ class WeatherContextCollector(ContextCollector):
             logger.info(f"WeatherContextCollector: Processing weather data for {latest['location']}")
             
             # Signal 1: UV INDEX HIGH (>4 triggers sun allergy warning)
+                        logger.info(f"🔍 DEBUG - Checking UV index signal...")
+                        
             uv_index = latest.get('uv_index')
             if uv_index is not None and uv_index > 4:
                 # Determine severity
@@ -1789,6 +1791,7 @@ class WeatherContextCollector(ContextCollector):
                 logger.warning(f"☀️ UV ALERT: Index {uv_index} ({uv_level}) - SUN PROTECTION REQUIRED!")
             
             # Signal 2: High headache risk
+                        logger.info(f"🔍 DEBUG - Checking headache risk signal...")
             if latest['headache_risk_level'] in ['high', 'severe']:
                 priority = 8 if latest['headache_risk_level'] == 'high' else 9
                 
@@ -1812,6 +1815,7 @@ class WeatherContextCollector(ContextCollector):
                 logger.warning(f"⚠️ {latest['headache_risk_level'].upper()} headache risk detected - Score: {latest['headache_risk_score']}")
             
             # Signal 3: Severe weather alert
+                        logger.info(f"🔍 DEBUG - Checking severe weather alert signal...")
             if latest['severe_weather_alert']:
                 signals.append(self._create_signal(
                     signal_type='weather_alert',

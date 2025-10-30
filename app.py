@@ -709,6 +709,7 @@ async def intelligence_cycle_task():
                 # Initialize orchestrator
                 orchestrator = IntelligenceOrchestrator(
                     db_manager=db_manager,
+                    telegram_service=app.state.telegram_notification_manager,
                         user_id=USER_ID
                     )
                 
