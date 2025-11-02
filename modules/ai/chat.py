@@ -855,7 +855,7 @@ async def process_scraper_command(message: str, user_id: str) -> str:
             # 🔧 DEBUG: Log results (10/31/25)
             logger.info(f"🔍 SCRAPER DEBUG: Retrieved {len(history)} records")
             if len(history) > 0:
-                logger.info(f"🔍 SCRAPER DEBUG: First record: {history[0]}"
+                logger.info(f"🔍 SCRAPER DEBUG: First record: {history[0]}")
             
             if not history:
                 return """🔍 **Marketing Scraper History**
