@@ -957,9 +957,30 @@ class CallbackHandler:
                     "ack_text": "Dismissed"
                 }
             
+            elif action == 'snooze':
+                # User wants to snooze this situation
+                minutes = int(params[0]) if params else 60  # Default 60 minutes
+                
+                await orchestrator.situation_manager.record_user_response(
+                    notification_id,
+                    'snoozed',
+                    f'snoozed_{minutes}m'
+                )
+                
+                await self.edit_message(
+                    message_id,
+                    f"⏰ Snoozed for {minutes} minutes - I'll remind you later",
+                    reply_markup=None
+                )
+                
+                return {
+                    "success": True,
+                    "ack_text": f"Snoozed {minutes} minutes"
+                }
+            
             elif action == 'details':
                 # User wants more details
-                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                situation = await orchestrator.situation_manager.get_situation_by_id(notification_id)
                 
                 if not situation:
                     return {"success": False, "error": "Situation not found"}
@@ -1003,16 +1024,16 @@ class CallbackHandler:
                 )
                 
                 # Record user response
-                await orchestrator.manager.record_user_response(
+                await orchestrator.situation_manager.record_user_response(
                     notification_id,
                     'acted',
                     f'action_{action_index + 1}'
                 )
                 
                 # Update learning (positive reinforcement)
-                situation = await orchestrator.manager.get_situation_by_id(notification_id)
+                situation = await orchestrator.situation_manager.get_situation_by_id(notification_id)
                 if situation:
-                    await orchestrator.manager.update_learning(
+                    await orchestrator.situation_manager.update_learning(
                         pattern_type=situation['situation_type'],
                         user_response='acted',
                         confidence_adjustment=0.05

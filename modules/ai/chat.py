@@ -837,6 +837,9 @@ def extract_url_from_message(message: str) -> str:
 async def process_scraper_command(message: str, user_id: str) -> str:
     """Process marketing scraper commands"""
     try:
+    # 🔧 DEBUG: Log the user_id being used (10/31/25)
+        logger.info(f"🔍 SCRAPER DEBUG: user_id received = {user_id}")
+        logger.info(f"🔍 SCRAPER DEBUG: user_id type = {type(user_id)}")
         from ..integrations.marketing_scraper.scraper_client import MarketingScraperClient
         from ..integrations.marketing_scraper.content_analyzer import ContentAnalyzer
         from ..integrations.marketing_scraper.database_manager import ScrapedContentDatabase
@@ -846,7 +849,13 @@ async def process_scraper_command(message: str, user_id: str) -> str:
         if 'scrape history' in message_lower:
             # Get scrape history
             db = ScrapedContentDatabase()
+            # 🔧 DEBUG: Log before query (10/31/25)
+            logger.info(f"🔍 SCRAPER DEBUG: Querying history for user_id = {user_id}")
             history = await db.get_user_scrape_history(user_id=user_id, limit=10)
+            # 🔧 DEBUG: Log results (10/31/25)
+            logger.info(f"🔍 SCRAPER DEBUG: Retrieved {len(history)} records")
+            if len(history) > 0:
+                logger.info(f"🔍 SCRAPER DEBUG: First record: {history[0]}"
             
             if not history:
                 return """🔍 **Marketing Scraper History**
@@ -873,9 +882,13 @@ No scraping history found. Start analyzing competitors with:
         elif 'scrape insights' in message_lower:
             # Get competitive insights from all scraped content
             db = ScrapedContentDatabase()
+            # 🔧 DEBUG: Log before insights query (10/31/25)
+            logger.info(f"🔍 SCRAPER DEBUG: Querying insights for user_id = {user_id}")
             
             # Search for recent content using empty topic to get all
             recent_content = await db.search_scraped_insights(user_id=user_id, topic="", limit=20)
+            # 🔧 DEBUG: Log insights results (10/31/25)
+            logger.info(f"🔍 SCRAPER DEBUG: Retrieved {len(recent_content)} insight records")
             
             if not recent_content:
                 return """🔍 **Marketing Scraper Insights**
@@ -951,6 +964,9 @@ Please verify the URL is accessible and try again."""
                     scraped_data=scraped_data,
                     analysis_results=analysis
                 )
+                
+                # 🔧 DEBUG: Verify storage (10/31/25)
+                logger.info(f"🔍 SCRAPER DEBUG: Stored as content_id = {content_id}")
                 
                 # Generate response
                 domain = scraped_data.get('domain', url)
@@ -4137,6 +4153,94 @@ Use `list reminders` to see your pending reminders.
     except Exception as e:
         logger.error(f"Failed to cancel reminder: {e}")
         return f"❌ **Error:** {str(e)}"
+
+#-- Section 15.5: Meeting Display Functions - 10/31/25
+def detect_show_meetings_command(message: str) -> bool:
+    """Detect explicit 'show recent meetings' command"""
+    message_lower = message.lower().strip()
+    show_patterns = [
+        'show recent meetings',
+        'show meetings',
+        'list recent meetings',
+        'list meetings',
+        'recent meetings',
+        'my recent meetings'
+    ]
+    return any(pattern in message_lower for pattern in show_patterns)
+
+async def format_recent_meetings_response(user_id: str, days: int = 14, limit: int = 10) -> str:
+    """
+    Format recent meetings for direct display to user
+    This is different from search_meetings() which adds AI context
+    """
+    try:
+        from modules.core.database import db_manager
+        from datetime import datetime, timedelta
+        
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # Query database
+        sql = """
+            SELECT
+                title,
+                meeting_date,
+                duration_minutes,
+                participants,
+                ai_summary,
+                key_points
+            FROM fathom_meetings
+            WHERE meeting_date >= $1
+            ORDER BY meeting_date DESC
+            LIMIT $2
+        """
+        
+        results = await db_manager.fetch_all(sql, start_date, limit)
+        meetings = [dict(row) for row in results] if results else []
+        
+        if not meetings or len(meetings) == 0:
+            return f"""📅 **Recent Meetings (Last {days} Days)**
+
+No meetings found in the last {days} days."""
+        
+        # Format response
+        response_parts = [
+            f"📅 **Recent Meetings (Last {days} Days)**",
+            "",
+            "---",
+            ""
+        ]
+        
+        for meeting in meetings:
+            # Convert UTC to Eastern Time
+            meeting_dt = convert_utc_to_user_timezone(meeting['meeting_date'])
+            
+            response_parts.append(f"### 📌 {meeting['title']}")
+            response_parts.append(f"**Date:** {meeting_dt.strftime('%B %d, %Y at %I:%M %p %Z')}")
+            response_parts.append(f"**Duration:** {meeting['duration_minutes']} minutes")
+            
+            # Check if summary exists
+            if meeting.get('ai_summary') and meeting['ai_summary'].strip():
+                # Truncate long summaries
+                summary = meeting['ai_summary']
+                if len(summary) > 300:
+                    summary = summary[:300] + "..."
+                response_parts.append(f"**Summary:** {summary}")
+            else:
+                response_parts.append("**Summary:** No summary available")
+            
+            response_parts.append("")
+            response_parts.append("---")
+            response_parts.append("")
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        logger.error(f"Failed to format recent meetings: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"❌ Error retrieving meetings: {str(e)}"
 
 #-- Section 16: Fathom Meeting Integration Functions - 10/19/25
 def detect_meeting_query(message: str) -> tuple[bool, str]:

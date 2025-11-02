@@ -229,6 +229,7 @@ async def chat_with_ai(
                  process_reminder_list, process_reminder_cancel,
                  detect_email_detail_command, process_email_detail_command,
                  detect_draft_creation_command, process_draft_creation_command, detect_meeting_query,
+                 detect_show_meetings_command, format_recent_meetings_response,
                  search_meetings, get_recent_meetings_context # NEW 10/2/25
             )
             logger.info("✅ DEBUG: All chat helper functions loaded successfully")
@@ -610,6 +611,16 @@ Weather data powered by Tomorrow.io"""
                     import traceback
                     logger.error(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
                     special_response = f"✉️ **Draft Creation Error**\n\nError: {str(e)}"
+        
+        # 10.4 📅 Show Recent Meetings Command (TENTH) - NEW 10/31/25
+        if detect_show_meetings_command(message):
+            logger.info("📅 DEBUG: 'Show recent meetings' command detected")
+            try:
+                special_response = await format_recent_meetings_response(user_id, days=14, limit=10)
+                logger.info("✅ DEBUG: Recent meetings formatted successfully")
+            except Exception as e:
+                logger.error(f"❌ DEBUG: Show meetings failed: {e}")
+                special_response = f"📅 **Meeting Display Error**\n\nError: {str(e)}"
         
         # 10.5 📅 Fathom Meeting Detection (ELEVENTH) - NEW 10/21/25
         logger.info("📅 DEBUG: Checking for meeting queries...")
