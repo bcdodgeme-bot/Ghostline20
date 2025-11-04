@@ -1222,7 +1222,7 @@ class TrendContextCollector(ContextCollector):
                         expires_hours=72
                     ))
                         
-                        logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
+                    logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
                 
                 # Query 2: Get new trend opportunities created
                 opportunities_query = """
