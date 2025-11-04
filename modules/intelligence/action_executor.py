@@ -167,31 +167,52 @@ class ActionExecutor:
             try:
                 action_text = item.get('action_text', 'Action item')
                 assigned_to = item.get('assigned_to', 'You')
+                meeting_id = item.get('meeting_id')
                 
-                # Create task title and description
+                # Fetch meeting context from database
+                meeting_summary = ""
+                meeting_points = ""
+                recording_link = ""
+                
+                if meeting_id:
+                    meeting_query = """
+                        SELECT ai_summary, key_points, share_url 
+                        FROM fathom_meetings 
+                        WHERE id = $1
+                    """
+                    meeting_data = await self.db.fetch_one(meeting_query, meeting_id)
+                    
+                    if meeting_data:
+                        meeting_summary = meeting_data['ai_summary'] or ""
+                        meeting_points = meeting_data['key_points'] or ""
+                        recording_link = meeting_data['share_url'] or ""
+                
+                # Create task title
                 title = f"[{meeting_title}] {action_text}"
-                description = f"Action item from meeting: {meeting_title}\n"
-                description += f"Assigned to: {assigned_to}\n"
+                
+                # Build enriched description
+                description = f"**Action Item:** {action_text}\n"
+                description += f"**Assigned To:** {assigned_to}\n\n"
+                description += "---\n\n"
+                description += f"**From Meeting:** {meeting_title}\n\n"
+                
+                if meeting_summary:
+                    description += f"**Meeting Summary:**\n{meeting_summary}\n\n"
+                
+                if meeting_points:
+                    description += f"**Key Points:**\n{meeting_points}\n\n"
+                
+                if recording_link:
+                    description += f"🎥 **[View Recording]({recording_link})**\n\n"
                 
                 if urgent or item.get('overdue', False):
-                    description += "\n⚠️ URGENT - This is overdue!\n"
+                    description = "⚠️ **URGENT - This is overdue!**\n\n" + description
                 
                 # Create ClickUp task
                 result = await self.clickup.create_personal_task(
                     title=title,
                     description=description
                 )
-                
-                if result:
-                    created_tasks.append({
-                        'action_text': action_text,
-                        'task_id': result.get('id'),
-                        'task_url': result.get('url')
-                    })
-                    logger.info(f"✅ Created task: {title}")
-                else:
-                    failed_tasks.append(action_text)
-                    logger.warning(f"❌ Failed to create task: {title}")
             
             except Exception as e:
                 logger.error(f"Error creating reminder for item: {e}")

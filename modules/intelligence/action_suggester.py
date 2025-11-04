@@ -115,7 +115,7 @@ class ActionSuggester:
             if overdue_items:
                 actions.append({
                     'action_type': 'create_reminders',
-                    'description': f"⚠️ Create urgent reminders for {len(overdue_items)} OVERDUE action items",
+                    'description': f"⚠️ Send {len(overdue_items)} URGENT to ClickUp",
                     'priority': 1,
                     'parameters': {
                         'action_items': action_items,
@@ -126,7 +126,7 @@ class ActionSuggester:
             else:
                 actions.append({
                     'action_type': 'create_reminders',
-                    'description': f"Create calendar reminders for {len(action_items)} action items",
+                    'description': f"Send {len(action_items)} action items to ClickUp",
                     'priority': 1,
                     'parameters': {
                         'action_items': action_items,
