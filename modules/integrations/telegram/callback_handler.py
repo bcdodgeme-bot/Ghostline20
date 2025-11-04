@@ -923,10 +923,10 @@ class CallbackHandler:
             - action1/action2: User clicked suggested action
         """
         try:
-            from ...intelligence.intelligence_orchestrator import IntelligenceOrchestrator
+            from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
             
             user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
-            from ....core.database import db_manager
+            from modules.core.database import db_manager
             from uuid import UUID
             
             orchestrator = IntelligenceOrchestrator(
