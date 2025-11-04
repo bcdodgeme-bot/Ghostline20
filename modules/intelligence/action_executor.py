@@ -145,6 +145,7 @@ class ActionExecutor:
         action_items = parameters.get('action_items', [])
         meeting_title = parameters.get('meeting_title', 'Meeting')
         urgent = parameters.get('urgent', False)
+        meeting_id = parameters.get('meeting_id')
         
         if not action_items:
             return {
@@ -167,7 +168,6 @@ class ActionExecutor:
             try:
                 action_text = item.get('action_text', 'Action item')
                 assigned_to = item.get('assigned_to', 'You')
-                meeting_id = item.get('meeting_id')
                 
                 # Fetch meeting context from database
                 meeting_summary = ""
