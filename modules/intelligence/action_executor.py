@@ -215,15 +215,15 @@ class ActionExecutor:
                 )
             
                 if result:
-                            created_tasks.append({
-                                'action_text': action_text,
-                                'task_id': result.get('id'),
-                                'task_url': result.get('url')
-                            })
-                            logger.info(f"✅ Created task: {title}")
-                        else:
-                            failed_tasks.append(action_text)
-                            logger.warning(f"❌ Failed to create task: {title}")
+                    created_tasks.append({
+                        'action_text': action_text,
+                        'task_id': result.get('id'),
+                        'task_url': result.get('url')
+                    })
+                    logger.info(f"✅ Created task: {title}")
+                else:
+                    failed_tasks.append(action_text)
+                    logger.warning(f"❌ Failed to create task: {title}")
     
             except Exception as e:
                 logger.error(f"Error creating reminder for item: {e}")
