@@ -147,6 +147,9 @@ class ActionExecutor:
         urgent = parameters.get('urgent', False)
         meeting_id = parameters.get('meeting_id')
         
+        # ADD THIS DEBUG LINE:
+        logger.info(f"🔍 DEBUG: meeting_id = {meeting_id}")
+        
         if not action_items:
             return {
                 'success': False,
