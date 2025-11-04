@@ -1160,7 +1160,6 @@ class TrendContextCollector(ContextCollector):
                             signal_type='trend_spike',
                             data={
                                 'keyword': trend['keyword'],
-                                'keyword': trend['keyword'],
                                 'business_area': trend['business_area'],
                                 'current_score': current_score,
                                 'previous_score': previous_score,
@@ -1180,7 +1179,6 @@ class TrendContextCollector(ContextCollector):
                         signals.append(self._create_signal(
                             signal_type='trend_rising',
                             data={
-                                'keyword': trend['keyword'],
                                 'keyword': trend['keyword'],
                                 'business_area': trend['business_area'],
                                 'current_score': current_score,
@@ -1549,9 +1547,9 @@ class KnowledgeContextCollector(ContextCollector):
                 SELECT 
                     id,
                     keyword,
-                    current_score,
+                    trend_score,
                     previous_score,
-                    momentum,
+                    trend_momentum,
                     business_area,
                     search_volume,
                     related_topics,
@@ -1560,10 +1558,10 @@ class KnowledgeContextCollector(ContextCollector):
                 FROM trend_monitoring
                 WHERE last_checked >= $1
                 AND (
-                    current_score >= 60
-                    OR (current_score > previous_score AND (current_score - previous_score) >= 10)
+                    trend_score >= 60
+                    OR (trend_score > previous_score AND (trend_score - previous_score) >= 10)
                 )
-                ORDER BY current_score DESC
+                ORDER BY trend_score DESC
                 LIMIT 50
             """
             
@@ -1577,10 +1575,10 @@ class KnowledgeContextCollector(ContextCollector):
             
             for trend in trends:
                 keyword = trend['keyword']
-                current_score = trend['current_score']
+                current_score = trend['trend_score']
                 previous_score = trend['previous_score'] or 0
                 score_change = current_score - previous_score
-                momentum = trend['momentum']
+                momentum = trend['trend_momentum']
                 
                 # Determine signal type based on score and change
                 if score_change >= 20:
