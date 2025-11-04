@@ -307,42 +307,43 @@ class AnalyticsNotificationHandler:
     
     async def _get_daily_stats(self, current_day: bool = False) -> Dict[str, Any]:
         """Get daily statistics - personal activity + website analytics"""
-        target_date = 'CURRENT_DATE' if current_day else 'CURRENT_DATE - INTERVAL \'1 day\''
         
         stats = {}
         
+        # Use proper SQL with INTERVAL for date calculations
+        date_offset = 0 if current_day else 1
+        
         # Personal Activity Stats
         # AI messages
-        query = f"""
+        query = """
         SELECT COUNT(*) as count
         FROM conversation_messages
         WHERE user_id = $1
-        AND DATE(created_at) = {target_date}
+        AND DATE(created_at) = CURRENT_DATE - $2::integer
         """
-        result = await self.db.fetch_one(query, self.user_id)
+        result = await self.db.fetch_one(query, self.user_id, date_offset)
         stats['ai_messages'] = result['count'] if result else 0
         
         # Notifications sent
-        query = f"""
+        query = """
         SELECT COUNT(*) as count
         FROM telegram_notifications
         WHERE user_id = $1
-        AND DATE(sent_at) = {target_date}
+        AND DATE(sent_at) = CURRENT_DATE - $2::integer
         """
-        result = await self.db.fetch_one(query, self.user_id)
+        result = await self.db.fetch_one(query, self.user_id, date_offset)
         stats['notifications_sent'] = result['count'] if result else 0
         
-        # Tasks completed
         # Tasks completed - using status column instead of completed_at
-        query = f"""
+        query = """
         SELECT COUNT(*) as count
         FROM telegram_reminders
         WHERE user_id = $1
         AND status = 'completed'
-        AND DATE(updated_at) = {target_date}
+        AND DATE(updated_at) = CURRENT_DATE - $2::integer
         """
         try:
-            result = await self.db.fetch_one(query, self.user_id)
+            result = await self.db.fetch_one(query, self.user_id, date_offset)
             stats['tasks_completed'] = result['count'] if result else 0
         except Exception as e:
             logger.warning(f"Could not fetch completed tasks: {e}")
@@ -354,7 +355,7 @@ class AnalyticsNotificationHandler:
             SELECT COUNT(*) as count
             FROM google_calendar_events
             WHERE user_id = $1
-            AND start_time::date = (CURRENT_DATE + INTERVAL '1 day')::date
+            AND start_time::date = (CURRENT_DATE + 1)
             """
             try:
                 result = await self.db.fetch_one(query, self.user_id)

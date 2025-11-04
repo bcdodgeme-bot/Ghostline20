@@ -418,7 +418,7 @@ class AudioCacheManager:
                 DATE(audio_generated_at) as generation_date,
                 COUNT(*) as daily_generations,
                 SUM(audio_file_size) as daily_size_bytes,
-                AVG(json_extract(voice_synthesis_metadata, '$.generation_time_ms')::int) as avg_generation_time_ms
+                AVG((voice_synthesis_metadata->>'generation_time_ms')::int) as avg_generation_time_ms
             FROM conversation_messages 
             WHERE audio_generated_at >= NOW() - INTERVAL '7 days'
                 AND audio_file_path IS NOT NULL
@@ -456,12 +456,12 @@ class AudioCacheManager:
         try:
             query = """
             SELECT 
-                json_extract(voice_synthesis_metadata, '$.personality_id') as personality_id,
-                json_extract(voice_synthesis_metadata, '$.voice_id') as voice_id,
+                voice_synthesis_metadata->>'personality_id' as personality_id,
+                voice_synthesis_metadata->>'voice_id' as voice_id,
                 COUNT(*) as usage_count,
                 SUM(audio_file_size) as total_size_bytes,
                 AVG(audio_file_size) as avg_file_size,
-                AVG(json_extract(voice_synthesis_metadata, '$.generation_time_ms')::int) as avg_generation_time_ms,
+                AVG((voice_synthesis_metadata->>'generation_time_ms')::int), '$.generation_time_ms')::int) as avg_generation_time_ms,
                 MAX(audio_generated_at) as last_used
             FROM conversation_messages 
             WHERE voice_synthesis_metadata IS NOT NULL 

@@ -1202,6 +1202,29 @@ async def setup_periodic_tasks():
         print(f"⚠️ Failed to start prayer notification service: {e}")
         # Continue without prayer notifications rather than crash the app
 
+    # Start calendar notification service - added 11/3/25
+    try:
+        async def calendar_notification_loop():
+            from modules.integrations.telegram.notification_types.calendar_notifications import CalendarNotificationHandler
+            from modules.integrations.telegram.notification_manager import get_notification_manager
+            
+            notification_manager = get_notification_manager()
+            calendar_handler = CalendarNotificationHandler(notification_manager)
+            
+            while True:
+                try:
+                    await calendar_handler.check_and_notify()
+                    # Check every 10 minutes for upcoming meetings
+                    await asyncio.sleep(600)
+                except Exception as e:
+                    logger.error(f"Calendar notification error: {e}")
+                    await asyncio.sleep(600)
+        
+        asyncio.create_task(calendar_notification_loop())
+        print("📅 Calendar notification service started successfully")
+    except Exception as e:
+        print(f"⚠️ Failed to start calendar notification service: {e}")
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

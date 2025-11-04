@@ -70,7 +70,7 @@ class ContextCollector:
             db_manager: Database manager for running queries
         """
         self.db = db_manager
-        self.collector_name = self.__class__.__name__
+        self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
         
     async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
         """
@@ -903,7 +903,8 @@ class EmailContextCollector(ContextCollector):
                 LIMIT 20
             """
             
-            emails = await self.db.fetch_all(emails_query, self.db.user_id, lookback_time)
+            user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+            emails = await self.db.fetch_all(emails_query, self.user_id, lookback_time)
             
             if not emails:
                 logger.info("EmailContextCollector: No high-priority emails found")
@@ -1123,49 +1124,27 @@ class TrendContextCollector(ContextCollector):
             try:
                 # Query 1: Get recent high-scoring or rising trends
                 trends_query = """
-                WITH today_trends AS (
                     SELECT
+                        id,
                         keyword,
-                        business_area,
                         trend_score as current_score,
-                        trend_momentum,
-                        regional_score as search_volume,
-                        '[]'::jsonb as related_topics,
-                        trend_date,
-                        updated_at
-                    FROM trend_monitoring
-                    WHERE trend_date >= CURRENT_DATE - INTERVAL '3 days'
-                ),
-                yesterday_trends AS (
-                    SELECT
-                        keyword,
+                        previous_score,
+                        momentum,
                         business_area,
-                        trend_score
+                        search_volume,
+                        related_topics,
+                        last_checked,
+                        created_at
                     FROM trend_monitoring
-                    WHERE trend_date = CURRENT_DATE - INTERVAL '1 day'
-                )
-                SELECT
-                    t.keyword,
-                    t.current_score,
-                    COALESCE(y.trend_score, 0) as previous_score,
-                    t.trend_momentum as momentum,
-                    t.business_area,
-                    t.search_volume,
-                    t.related_topics,
-                    t.updated_at as last_checked
-                FROM today_trends t
-                LEFT JOIN yesterday_trends y
-                    ON t.keyword = y.keyword
-                    AND t.business_area = y.business_area
-                WHERE t.updated_at >= $1
-                AND (
-                    t.current_score >= 60
-                    OR (t.current_score > COALESCE(y.trend_score, 0)
-                        AND (t.current_score - COALESCE(y.trend_score, 0)) >= 10)
-                )
-                ORDER BY t.current_score DESC
-                LIMIT 50
-            """
+                    WHERE last_checked >= $1
+                    AND (
+                        trend_score >= 60
+                        OR (trend_score > COALESCE(previous_score, 0)
+                            AND (trend_score - COALESCE(previous_score, 0)) >= 10)
+                    )
+                    ORDER BY trend_score DESC
+                    LIMIT 50
+                """
                 
                 trends = await self.db.fetch_all(trends_query, lookback_time)
                 

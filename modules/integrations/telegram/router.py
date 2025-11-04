@@ -7,6 +7,7 @@ import logging
 import uuid
 from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
+from .kill_switch import KillSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,6 @@ async def process_telegram_command(command: str) -> str:
         - telegram enable [type]
         - telegram status
     """
-    from .kill_switch import KillSwitch
     from .notification_manager import get_notification_manager
     
     command_lower = command.lower().strip()
@@ -180,7 +180,6 @@ async def health_check():
 async def get_notification_status():
     """Get current notification system status"""
     try:
-        from .kill_switch import KillSwitch
         from .notification_manager import get_notification_manager
         
         user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"

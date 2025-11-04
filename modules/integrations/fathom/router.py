@@ -32,6 +32,7 @@ from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
 from modules.integrations.telegram.notification_manager import NotificationManager
 from modules.integrations.telegram.bot_client import TelegramBotClient
+from modules.integrations.telegram.kill_switch import KillSwitch
 import os
 
 logger = logging.getLogger(__name__)

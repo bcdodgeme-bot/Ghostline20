@@ -131,6 +131,11 @@ class CallbackHandler:
                     action, notification_id, message_id, extra_params
                 )
             
+            elif notification_type == 'situation':
+                result = await self._handle_situation_callback(
+                    action, notification_id, message_id, extra_params
+                )
+            
             elif notification_type == 'engagement':
                 result = await self._handle_engagement_callback(
                     action, notification_id, message_id, extra_params

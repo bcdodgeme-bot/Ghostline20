@@ -6,6 +6,7 @@ Sends proactive calendar event reminders
 
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any
 
 from ....core.database import db_manager
@@ -155,9 +156,13 @@ class CalendarNotificationHandler:
         
         # Calculate time until event
         minutes_until = int((start_time - datetime.now(timezone.utc)).total_seconds() / 60)
-        
-        # Format time
-        time_str = start_time.strftime("%I:%M %p").lstrip('0')
+
+        # Convert to EST for display
+        est_tz = ZoneInfo("America/New_York")
+        start_time_est = start_time.astimezone(est_tz)
+
+        # Format time in EST
+        time_str = start_time_est.strftime("%I:%M %p").lstrip('0')
         
         # Build message
         message = f"📅 *Calendar Reminder*\n\n"
@@ -257,8 +262,11 @@ class CalendarNotificationHandler:
                 message += f"You have {count} event{'s' if count != 1 else ''} today.\n"
                 
                 if first_event:
-                    first_time = first_event.strftime("%I:%M %p").lstrip('0')
-                    message += f"First event starts at {first_time}\n"
+                    # Convert to EST for display
+                    est_tz = ZoneInfo("America/New_York")
+                    first_event_est = first_event.astimezone(est_tz)
+                    first_time = first_event_est.strftime("%I:%M %p").lstrip('0')
+
                 
                 message += "\n_You'll receive reminders before each event._"
             
