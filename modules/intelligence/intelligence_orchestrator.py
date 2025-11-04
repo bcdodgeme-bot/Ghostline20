@@ -38,6 +38,9 @@ from modules.intelligence.situation_detector import SituationDetector
 from modules.intelligence.situation_manager import SituationManager
 from modules.intelligence.action_suggester import ActionSuggester
 
+from modules.intelligence.action_executor import ActionExecutor
+import json
+
 logger = logging.getLogger(__name__)
 
 #===============================================================================
@@ -91,6 +94,18 @@ class IntelligenceOrchestrator:
         self.situation_detector = SituationDetector()
         self.situation_manager = SituationManager(db_manager=db_manager)
         self.action_suggester = ActionSuggester(db_manager=db_manager)
+        
+        try:
+            from modules.integrations.slack_clickup.clickup_handler import ClickUpHandler
+            clickup_handler = ClickUpHandler()
+        except:
+            clickup_handler = None
+            logger.warning("ClickUp handler not available")
+
+        self.action_executor = ActionExecutor(
+            db_manager=db_manager,
+            clickup_handler=clickup_handler
+        )
         
         # Store services
         self.telegram = telegram_service
@@ -858,3 +873,52 @@ class IntelligenceOrchestrator:
                 'success': False,
                 'error': str(e)
             }
+            
+    async def handle_situation_callback(
+        self,
+        callback_data: str,
+        user_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Execute an action from a situation.
+        Called by Telegram callback handler when user clicks action button.
+        
+        Args:
+            callback_data: Format "situation:action:situation_id"
+            user_id: User ID
+            
+        Returns:
+            Result dict with success and message
+        """
+        try:
+            # Parse callback
+            parts = callback_data.split(':')
+            action_type = parts[1]  # e.g. "action1", "action2"
+            situation_id = parts[2]
+            
+            # Get situation
+            situation = await self.situation_manager.get_situation_by_id(situation_id)
+            if not situation:
+                return {'success': False, 'message': '❌ Situation not found'}
+            
+            # Extract action index
+            action_index = int(action_type.replace('action', '')) - 1
+            
+            # Get the specific action
+            actions = situation.get('suggested_actions', [])
+            if action_index >= len(actions):
+                return {'success': False, 'message': '❌ Invalid action'}
+            
+            clicked_action = actions[action_index]
+            
+            # Execute using ActionExecutor
+            result = await self.action_executor.execute_action(
+                action=clicked_action,
+                user_id=user_id
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error handling callback: {e}", exc_info=True)
+            return {'success': False, 'message': f'❌ Error: {str(e)}'}
