@@ -944,12 +944,6 @@ class CallbackHandler:
                 
                 # Update learning system
                 situation = await orchestrator.situation_manager.get_situation_by_id(notification_id)
-                if situation:
-                    await orchestrator.situation_manager.update_learning(
-                        pattern_type=situation['situation_type'],
-                        user_response='dismissed',
-                        confidence_adjustment=-0.1
-                    )
                 
                 await self.bot_client.edit_message(
                     message_id,
@@ -1000,7 +994,7 @@ class CallbackHandler:
 **Context:**
 {situation.get('context_summary', 'No additional context')}
 
-**Detected:** {situation['detected_at'].strftime('%b %d at %I:%M %p')}
+**Detected:** {situation.get('detected_at', 'Unknown')}
 """
                 
                 await self.bot_client.edit_message(
@@ -1034,15 +1028,6 @@ class CallbackHandler:
                     'acted',
                     f'action_{action_index + 1}'
                 )
-                
-                # Update learning (positive reinforcement)
-                situation = await orchestrator.situation_manager.get_situation_by_id(notification_id)
-                if situation:
-                    await orchestrator.situation_manager.update_learning(
-                        pattern_type=situation['situation_type'],
-                        user_response='acted',
-                        confidence_adjustment=0.05
-                    )
                 
                 if result.get('success'):
                     await self.bot_client.edit_message(
