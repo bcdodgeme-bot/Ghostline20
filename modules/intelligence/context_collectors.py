@@ -70,7 +70,7 @@ class ContextCollector:
             db_manager: Database manager for running queries
         """
         self.db = db_manager
-        self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+        self.collector_name = self.__class__.__name__
         
     async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
         """
@@ -913,6 +913,7 @@ class EmailContextCollector(ContextCollector):
             logger.info(f"EmailContextCollector: Processing {len(emails)} high-priority emails")
             
             for email in emails:
+                from datetime import timezone
                 hours_old = (datetime.utcnow() - email['received_at']).total_seconds() / 3600
                 
                 # Determine base priority from email priority level
@@ -1125,23 +1126,17 @@ class TrendContextCollector(ContextCollector):
                 # Query 1: Get recent high-scoring or rising trends
                 trends_query = """
                     SELECT
-                        id,
                         keyword,
-                        trend_score as current_score,
-                        previous_score,
-                        momentum,
                         business_area,
-                        search_volume,
-                        related_topics,
-                        last_checked,
-                        created_at
+                        trend_score,
+                        trend_momentum,
+                        regional_score,
+                        trend_date,
+                        created_at,
+                        updated_at
                     FROM trend_monitoring
-                    WHERE last_checked >= $1
-                    AND (
-                        trend_score >= 60
-                        OR (trend_score > COALESCE(previous_score, 0)
-                            AND (trend_score - COALESCE(previous_score, 0)) >= 10)
-                    )
+                    WHERE trend_date >= CURRENT_DATE - INTERVAL '3 days'
+                    AND trend_score >= 60
                     ORDER BY trend_score DESC
                     LIMIT 50
                 """
@@ -1155,9 +1150,9 @@ class TrendContextCollector(ContextCollector):
                 logger.info(f"TrendContextCollector: Processing {len(trends)} trends")
                 
                 for trend in trends:
+                    keyword = trend['keyword']
                     current_score = trend['trend_score']
-                    previous_score = trend['previous_score'] or 0
-                    score_change = current_score - previous_score
+                    momentum = trend['trend_momentum']
                     
                     # Signal 1: Trend spike (score jumped 15+ points)
                     if score_change >= 15:
@@ -1200,21 +1195,32 @@ class TrendContextCollector(ContextCollector):
                         logger.info(f"📈 Rising trend: {trend['keyword']} (score: {current_score})")
                     
                     # Signal 3: Stable high trend (score >= 70 for multiple checks)
-                    if current_score >= 70 and previous_score >= 70:
-                        signals.append(self._create_signal(
-                            signal_type='trend_stable_high',
-                            data={
-                                'keyword': trend['keyword'],
-                                'keyword': trend['keyword'],
-                                'business_area': trend['business_area'],
-                                'current_score': current_score,
-                                'stability_days': self._calculate_stability_days(trend),
-                                'search_volume': trend['search_volume'],
-                                'related_topics': trend['related_topics']
-                            },
-                            priority=7,
-                            expires_hours=168
-                        ))
+                    if current_score >= 80:
+                        signal_type = 'trend_spike'
+                        priority = 9
+                    elif momentum == 'rising' and current_score >= 70:
+                        signal_type = 'trend_rising'
+                        priority = 8
+                    elif current_score >= 70:
+                        signal_type = 'trend_stable_high'
+                        priority = 7
+                    else:
+                        signal_type = 'trend_opportunity'
+                        priority = 6
+                    
+                    signals.append(self._create_signal(
+                        signal_type=signal_type,
+                        data={
+                            'keyword': keyword,
+                            'business_area': trend['business_area'],
+                            'current_score': current_score,
+                            'momentum': momentum,
+                            'regional_score': trend.get('regional_score'),
+                            'trend_date': trend['trend_date'].isoformat() if trend.get('trend_date') else None
+                        },
+                        priority=priority,
+                        expires_hours=72
+                    ))
                         
                         logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
                 
