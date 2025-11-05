@@ -120,6 +120,7 @@ class ActionSuggester:
                     'parameters': {
                         'action_items': action_items,
                         'meeting_title': meeting_title,
+                        'meeting_id': context.get('meeting_id'),
                         'urgent': True
                     }
                 })
@@ -131,6 +132,7 @@ class ActionSuggester:
                     'parameters': {
                         'action_items': action_items,
                         'meeting_title': meeting_title,
+                        'meeting_id': context.get('meeting_id'),
                         'urgent': False
                     }
                 })
