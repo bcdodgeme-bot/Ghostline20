@@ -4184,6 +4184,7 @@ async def format_recent_meetings_response(user_id: str, days: int = 14, limit: i
         # Query database
         sql = """
             SELECT
+                id,
                 title,
                 meeting_date,
                 duration_minutes,
@@ -4336,6 +4337,7 @@ async def search_meetings(
         if query_type == 'recent':
             sql = """
                 SELECT 
+                    id,
                     title,
                     meeting_date,
                     duration_minutes,
@@ -4353,9 +4355,11 @@ async def search_meetings(
         elif query_type == 'action_items':
             sql = """
                 SELECT DISTINCT
+                    m.id,
                     m.title,
                     m.meeting_date,
-                    m.ai_summary
+                    m.ai_summary,
+                    m.key_points
                 FROM fathom_meetings m
                 WHERE m.ai_summary IS NOT NULL
                 ORDER BY m.meeting_date DESC
@@ -4410,6 +4414,7 @@ async def search_meetings(
                 
                 sql = """
                     SELECT
+                        id,
                         title,
                         meeting_date,
                         duration_minutes,
@@ -4429,6 +4434,7 @@ async def search_meetings(
                 search_term = f"%{query.lower()}%"
                 sql = """
                     SELECT 
+                        id,
                         title,
                         meeting_date,
                         duration_minutes,
@@ -4551,6 +4557,7 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
         
         sql = """
             SELECT
+                id,
                 title,
                 meeting_date,
                 duration_minutes,
