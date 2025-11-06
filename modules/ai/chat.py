@@ -4190,7 +4190,8 @@ async def format_recent_meetings_response(user_id: str, days: int = 14, limit: i
                 duration_minutes,
                 participants,
                 ai_summary,
-                key_points
+                key_points,
+                transcript_text
             FROM fathom_meetings
             WHERE meeting_date >= $1
             ORDER BY meeting_date DESC
@@ -4199,6 +4200,20 @@ async def format_recent_meetings_response(user_id: str, days: int = 14, limit: i
         
         results = await db_manager.fetch_all(sql, start_date, limit)
         meetings = [dict(row) for row in results] if results else []
+        
+        # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
+        import json
+        for meeting in meetings:
+            if meeting.get('participants') and isinstance(meeting['participants'], str):
+                try:
+                    meeting['participants'] = json.loads(meeting['participants'])
+                except:
+                    meeting['participants'] = []
+            if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                try:
+                    meeting['key_points'] = json.loads(meeting['key_points'])
+                except:
+                    meeting['key_points'] = []
         
         if not meetings or len(meetings) == 0:
             return f"""📅 **Recent Meetings (Last {days} Days)**
@@ -4343,7 +4358,8 @@ async def search_meetings(
                     duration_minutes,
                     participants,
                     ai_summary,
-                    key_points
+                    key_points,
+                    transcript_text
                 FROM fathom_meetings
                 ORDER BY meeting_date DESC
                 LIMIT $1
@@ -4351,6 +4367,20 @@ async def search_meetings(
             results = await db_manager.fetch_all(sql, limit)
             # Convert asyncpg Records to dicts for proper .get() access
             meetings = [dict(row) for row in results]
+            
+            # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
+            import json
+            for meeting in meetings:
+                if meeting.get('participants') and isinstance(meeting['participants'], str):
+                    try:
+                        meeting['participants'] = json.loads(meeting['participants'])
+                    except:
+                        meeting['participants'] = []
+                if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                    try:
+                        meeting['key_points'] = json.loads(meeting['key_points'])
+                    except:
+                        meeting['key_points'] = []
         
         elif query_type == 'action_items':
             sql = """
@@ -4359,7 +4389,8 @@ async def search_meetings(
                     m.title,
                     m.meeting_date,
                     m.ai_summary,
-                    m.key_points
+                    m.key_points,
+                    m.transcript_text
                 FROM fathom_meetings m
                 WHERE m.ai_summary IS NOT NULL
                 ORDER BY m.meeting_date DESC
@@ -4420,7 +4451,8 @@ async def search_meetings(
                         duration_minutes,
                         participants,
                         ai_summary,
-                        key_points
+                        key_points,
+                        transcript_text
                     FROM fathom_meetings
                     WHERE meeting_date BETWEEN $1 AND $2
                     ORDER BY ABS(EXTRACT(EPOCH FROM (meeting_date - $3)))
@@ -4429,6 +4461,21 @@ async def search_meetings(
                 results = await db_manager.fetch_all(sql, start_date, end_date, meeting_date, limit)
                 # Convert asyncpg Records to dicts for proper .get() access
                 meetings = [dict(row) for row in results]
+                
+                # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
+                import json
+                for meeting in meetings:
+                    if meeting.get('participants') and isinstance(meeting['participants'], str):
+                        try:
+                            meeting['participants'] = json.loads(meeting['participants'])
+                        except:
+                            meeting['participants'] = []
+                    if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                        try:
+                            meeting['key_points'] = json.loads(meeting['key_points'])
+                        except:
+                            meeting['key_points'] = []
+                
             else:
                 # Fallback: Simple text search in title and summary
                 search_term = f"%{query.lower()}%"
@@ -4440,7 +4487,8 @@ async def search_meetings(
                         duration_minutes,
                         participants,
                         ai_summary,
-                        key_points
+                        key_points,
+                        transcript_text
                     FROM fathom_meetings
                     WHERE 
                         LOWER(title) LIKE $1
@@ -4451,6 +4499,21 @@ async def search_meetings(
                 results = await db_manager.fetch_all(sql, search_term, limit)
                 # Convert asyncpg Records to dicts for proper .get() access
                 meetings = [dict(row) for row in results]
+                
+                # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
+                import json
+                for meeting in meetings:
+                    if meeting.get('participants') and isinstance(meeting['participants'], str):
+                        try:
+                            meeting['participants'] = json.loads(meeting['participants'])
+                        except:
+                            meeting['participants'] = []
+                    if meeting.get('key_points') and isinstance(meeting['key_points'], str):
+                        try:
+                            meeting['key_points'] = json.loads(meeting['key_points'])
+                        except:
+                            meeting['key_points'] = []
+                
         
         if not meetings or len(meetings) == 0:
             return "\n\n📅 **Meeting Context:** No meetings found matching your query."
@@ -4563,7 +4626,8 @@ async def get_recent_meetings_context(user_id: str, days: int = 7, limit: int = 
                 duration_minutes,
                 participants,
                 ai_summary,
-                key_points
+                key_points,
+                transcript_text
             FROM fathom_meetings
             WHERE meeting_date >= $1
             ORDER BY meeting_date DESC
