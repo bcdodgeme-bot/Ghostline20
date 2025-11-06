@@ -4543,6 +4543,14 @@ async def search_meetings(
                 # Show MORE of the summary so AI can make better matches
                 summary = meeting['ai_summary']
                 meeting_text.append(f"\n📝 Summary: {summary}")
+                
+            # 🔧 FIX (Nov 6, 2025): Add transcript for specific queries
+            if meeting.get('transcript_text') and meeting['transcript_text'].strip():
+                transcript = meeting['transcript_text']
+                # Truncate if extremely long (over 30k chars)
+                if len(transcript) > 30000:
+                    transcript = transcript[:30000] + "\n\n[Transcript truncated for length - showing first 30,000 characters]"
+                meeting_text.append(f"\n📝 Full Transcript:\n{transcript}")
             
             if meeting.get('key_points'):
                 key_points = meeting['key_points']
