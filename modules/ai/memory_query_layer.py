@@ -669,27 +669,52 @@ def format_meetings_context(meetings: List[Dict]) -> str:
     ]
     
     for meeting in meetings:
-        start = meeting['meeting_date'].strftime('%Y-%m-%d %H:%M')
         title = meeting.get('title') or 'Untitled Meeting'
+        
+        # 🔧 FIX (Nov 6, 2025): Convert UTC to user timezone
+        from modules.ai.chat import convert_utc_to_user_timezone
+        from datetime import datetime
+        
+        meeting_date = meeting.get('meeting_date')
+        if meeting_date and isinstance(meeting_date, datetime):
+            meeting_dt = convert_utc_to_user_timezone(meeting_date)
+            start = meeting_dt.strftime('%Y-%m-%d %H:%M')
+        else:
+            start = 'Unknown'
+        
         duration = meeting.get('duration_minutes') or 0
         
         lines.append(f"\n📌 {title}")
         lines.append(f"   Time: {start} ({duration} min)")
         
+        # 🔧 FIX (Nov 6, 2025): Parse JSON strings and fix column name
+        import json
+
+        # Parse participants if it's a JSON string
         if meeting.get('participants'):
-            # participants is JSONB array
             parts = meeting['participants']
-            if isinstance(parts, list):
+            if isinstance(parts, str):
+                try:
+                    parts = json.loads(parts)
+                except:
+                    parts = []
+            if isinstance(parts, list) and parts:
                 parts_str = ', '.join(parts[:3])  # First 3 participants
                 lines.append(f"   Participants: {parts_str}")
-        
-        if meeting.get('summary'):
-            summary = meeting['summary'][:200] + "..." if len(meeting['summary']) > 200 else meeting['summary']
+
+        # Use 'ai_summary' instead of 'summary'
+        if meeting.get('ai_summary'):
+            summary = meeting['ai_summary'][:200] + "..." if len(meeting['ai_summary']) > 200 else meeting['ai_summary']
             lines.append(f"   Summary: {summary}")
-        
+
+        # Parse key_points if it's a JSON string
         if meeting.get('key_points'):
-            # key_points is JSONB array
             key_points = meeting['key_points']
+            if isinstance(key_points, str):
+                try:
+                    key_points = json.loads(key_points)
+                except:
+                    key_points = []
             if isinstance(key_points, list) and key_points:
                 lines.append(f"   Key Points:")
                 for item in key_points[:3]:  # First 3 items
