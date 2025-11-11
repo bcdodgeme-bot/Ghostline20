@@ -351,6 +351,9 @@ async def startup_event():
         asyncio.create_task(bluesky_notification_task())
         asyncio.create_task(trends_notification_task())
         asyncio.create_task(analytics_notification_task())
+        asyncio.create_task(trends_monitoring_cycle_task())
+        asyncio.create_task(bluesky_scanning_cycle_task())
+        asyncio.create_task(clickup_sync_cycle_task())
         asyncio.create_task(intelligence_cycle_task())
         asyncio.create_task(daily_intelligence_digest_task())
 
@@ -692,6 +695,117 @@ async def analytics_notification_task():
         except Exception as e:
             logger.error(f"Analytics notification error: {e}")
             await asyncio.sleep(60)
+
+async def trends_monitoring_cycle_task():
+    """
+    Scan Google Trends and populate trend_opportunities every 4 hours
+    This populates the database that trends_notification_task reads from
+    """
+    logger.info("📈 Trends monitoring cycle task started")
+    
+    # Wait 10 minutes on startup to let system stabilize
+    await asyncio.sleep(600)
+    
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                logger.info("🔍 Running Google Trends monitoring cycle...")
+                
+                from modules.integrations.google_trends.keyword_monitor import KeywordMonitor
+                
+                # Use 'normal' mode: 50 keywords per business area
+                monitor = KeywordMonitor(DATABASE_URL, mode='normal')
+                result = await monitor.run_monitoring_cycle()
+                
+                if result.get('success'):
+                    logger.info(f"✅ Trends cycle complete: {result.get('keywords_monitored', 0)} keywords, "
+                              f"{result.get('trends_fetched', 0)} trends, {result.get('alerts_created', 0)} opportunities created")
+                else:
+                    logger.error(f"❌ Trends cycle failed: {result.get('error', 'Unknown error')}")
+            else:
+                logger.info("📈 Trends monitoring cycle skipped (kill switch disabled)")
+            
+            # Wait 4 hours before next cycle
+            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
+            
+        except Exception as e:
+            logger.error(f"Trends monitoring cycle error: {e}")
+            # Retry after 10 minutes on error
+            await asyncio.sleep(600)
+
+async def bluesky_scanning_cycle_task():
+    """
+    Scan all 5 Bluesky accounts for engagement opportunities every 90 minutes
+    This populates bluesky_engagement_opportunities that bluesky_notification_task reads from
+    """
+    logger.info("🦋 Bluesky scanning cycle task started")
+    
+    # Wait 15 minutes on startup to stagger with trends monitoring
+    await asyncio.sleep(900)
+    
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                logger.info("🔍 Scanning Bluesky accounts for engagement opportunities...")
+                
+                from modules.integrations.bluesky.engagement_detector import EngagementDetector
+                
+                detector = EngagementDetector()
+                results = await detector.scan_all_accounts()
+                
+                total_opportunities = sum(results.values())
+                logger.info(f"✅ Bluesky scan complete: {total_opportunities} opportunities found across {len(results)} accounts")
+                
+                # Log per-account breakdown
+                for account_id, count in results.items():
+                    if count > 0:
+                        logger.info(f"   🦋 {account_id}: {count} opportunities")
+            else:
+                logger.info("🦋 Bluesky scanning cycle skipped (kill switch disabled)")
+            
+            # Wait 90 minutes before next scan (1.5 hours)
+            await asyncio.sleep(5400)  # 90 minutes = 5400 seconds
+            
+        except Exception as e:
+            logger.error(f"Bluesky scanning cycle error: {e}")
+            # Retry after 10 minutes on error
+            await asyncio.sleep(600)
+
+async def clickup_sync_cycle_task():
+    """
+    Sync ClickUp tasks from API to database every 4 hours
+    This populates clickup_tasks that clickup_notification_task reads from
+    """
+    logger.info("📋 ClickUp sync cycle task started")
+    
+    # Wait 20 minutes on startup to stagger with other services
+    await asyncio.sleep(1200)
+    
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                logger.info("🔄 Syncing ClickUp tasks from API...")
+                
+                from modules.integrations.slack_clickup.clickup_sync_manager import ClickUpSyncManager
+                
+                sync_manager = ClickUpSyncManager()
+                result = await sync_manager.sync_all_tasks()
+                
+                logger.info(f"✅ ClickUp sync complete: {result['tasks_synced']} tasks total "
+                          f"({result['amcf_tasks']} AMCF, {result['personal_tasks']} Personal)")
+                
+                if result['errors']:
+                    logger.error(f"⚠️ ClickUp sync had errors: {result['errors']}")
+            else:
+                logger.info("📋 ClickUp sync cycle skipped (kill switch disabled)")
+            
+            # Wait 4 hours before next sync
+            await asyncio.sleep(14400)  # 4 hours = 14400 seconds
+            
+        except Exception as e:
+            logger.error(f"ClickUp sync cycle error: {e}")
+            # Retry after 10 minutes on error
+            await asyncio.sleep(600)
 
 async def intelligence_cycle_task():
     """
