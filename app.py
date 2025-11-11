@@ -714,7 +714,9 @@ async def trends_monitoring_cycle_task():
                 from modules.integrations.google_trends.keyword_monitor import KeywordMonitor
                 
                 # Use 'normal' mode: 50 keywords per business area
-                monitor = KeywordMonitor(DATABASE_URL, mode='normal')
+                import os
+                database_url = os.getenv('DATABASE_URL')
+                monitor = KeywordMonitor(database_url, mode='normal')
                 result = await monitor.run_monitoring_cycle()
                 
                 if result.get('success'):

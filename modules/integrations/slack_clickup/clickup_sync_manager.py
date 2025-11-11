@@ -219,7 +219,17 @@ class ClickUpSyncManager:
             task_name = task_data.get('name', 'Untitled Task')
             task_description = task_data.get('description', '')
             status = task_data.get('status', {}).get('status', 'open')
-            priority = task_data.get('priority', {}).get('priority') if task_data.get('priority') else None
+            priority_obj = task_data.get('priority')
+            priority = None
+            if priority_obj:
+                priority_str = priority_obj.get('priority', '').lower() if isinstance(priority_obj, dict) else str(priority_obj).lower()
+                priority_map = {
+                    'urgent': 1,
+                    'high': 2,
+                    'normal': 3,
+                    'low': 4
+                }
+                priority = priority_map.get(priority_str)
             
             # Parse due date (ClickUp uses millisecond timestamps)
             due_date = None
@@ -227,13 +237,16 @@ class ClickUpSyncManager:
                 due_date = datetime.fromtimestamp(int(task_data['due_date']) / 1000)
             
             # Parse assignees
-            assignees = [
+            import json
+            assignees_list = [
                 assignee.get('username', assignee.get('email', 'Unknown'))
                 for assignee in task_data.get('assignees', [])
             ]
+            assignees = json.dumps(assignees_list)  # Convert to JSON string for JSONB
             
             # Parse tags
-            tags = [tag.get('name', '') for tag in task_data.get('tags', [])]
+            tags_list = [tag.get('name', '') for tag in task_data.get('tags', [])]
+            tags = json.dumps(tags_list)  # Convert to JSON string for JSONB
             
             # List and space info
             list_id = task_data.get('list', {}).get('id')
