@@ -67,8 +67,6 @@ class GoogleTrendsClient:
                 hl='en-US',  # Language
                 tz=300,      # Eastern Time Zone (Virginia)
                 timeout=(10, 25),  # Connection and read timeouts
-                retries=2,
-                backoff_factor=0.5
             )
             logger.info("Google Trends client initialized successfully")
             return True

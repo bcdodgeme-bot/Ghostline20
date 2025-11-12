@@ -750,10 +750,25 @@ async def bluesky_scanning_cycle_task():
             if await app.state.telegram_kill_switch.is_enabled(USER_ID):
                 logger.info("🔍 Scanning Bluesky accounts for engagement opportunities...")
                 
-                from modules.integrations.bluesky.engagement_detector import EngagementDetector
-                
-                detector = EngagementDetector()
-                results = await detector.scan_all_accounts()
+                # Try to import and run Bluesky scanning
+                try:
+                    # Import the engagement_detector module
+                    import importlib
+                    engagement_detector_module = importlib.import_module('modules.integrations.bluesky.engagement_detector')
+                    
+                    # Get the EngagementDetector class
+                    EngagementDetector = getattr(engagement_detector_module, 'EngagementDetector')
+                    
+                    # Create instance and scan
+                    detector = EngagementDetector()
+                    results = await detector.scan_all_accounts()
+                    
+                except AttributeError:
+                    logger.error("⚠️ EngagementDetector class not found in engagement_detector.py")
+                    results = {}
+                except Exception as scan_error:
+                    logger.error(f"⚠️ Bluesky scanning failed: {scan_error}")
+                    results = {}
                 
                 total_opportunities = sum(results.values())
                 logger.info(f"✅ Bluesky scan complete: {total_opportunities} opportunities found across {len(results)} accounts")
