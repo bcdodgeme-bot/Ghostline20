@@ -188,12 +188,15 @@ class EngagementAnalyzer:
         keyword_score, matched_keywords = self.calculate_keyword_match_score(post_text, keywords)
         
         # Skip low-relevance posts early (lowered threshold for testing)
-        if keyword_score < 0.05:  # 5% instead of 10%
+        if keyword_score < 0.02:  # 5% instead of 10%
             logger.debug(f"Skipped post from {author_handle}: keyword_score too low ({keyword_score:.2f})")
             return None
         
+        # Log potential matches
+        logger.info(f"✨ Analyzing post from {author_handle}: keyword_score={keyword_score:.3f}, matched={len(matched_keywords)} keywords")
+        
         # Log when we find potential matches
-        if keyword_score >= 0.05:
+        if keyword_score >= 0.02:
             logger.info(f"✨ Found potential match from {author_handle}: score={keyword_score:.2f}, keywords={len(matched_keywords)}")
         
         # Detect conversation opportunities
@@ -240,6 +243,20 @@ class EngagementAnalyzer:
                 'sensitive_topics': account_config.get('sensitive_topics', False)
             }
         }
+        
+        # Calculate final engagement potential
+        engagement_potential = self._calculate_engagement_potential(
+            keyword_score,
+            conversation_ops,
+            like_count,
+            reply_count
+        )
+        
+        # Log the final decision
+        logger.info(f"   📊 Engagement potential: {engagement_potential:.3f}")
+        logger.info(f"   🎯 Priority: {self._calculate_priority_level(keyword_score, engagement_potential)}")
+        logger.info(f"   💬 Has question: {conversation_ops['is_question']}")
+        logger.info(f"   📝 Matched keywords: {matched_keywords[:5]}")  # Show first 5
         
         return analysis
     
