@@ -5,7 +5,7 @@ Sends proactive notifications for ClickUp tasks and updates
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
 from ....core.database import db_manager
@@ -74,7 +74,8 @@ class ClickUpNotificationHandler:
     async def _get_tasks_needing_attention(self) -> List[Dict[str, Any]]:
         """Get tasks that need attention"""
         query = """
-        SELECT id, task_id, name, description, status, priority,
+        SELECT id, clickup_task_id as task_id, task_name as name, 
+               task_description as description, status, priority,
                due_date, list_name, space_name, url,
                CASE 
                    WHEN due_date < NOW() THEN true 
@@ -86,30 +87,30 @@ class ClickUpNotificationHandler:
                END as due_soon
         FROM clickup_tasks
         WHERE user_id = $1
-        AND status NOT IN ('complete', 'closed')
+        AND LOWER(status) NOT IN ('complete', 'closed')
         AND (
             due_date < NOW() + INTERVAL '24 hours'  -- Due in next 24 hours or overdue
-            OR (priority::text = 'urgent' OR priority = 1)
+            OR priority = 1  -- Urgent priority
         )
         ORDER BY 
             CASE WHEN due_date < NOW() THEN 0 ELSE 1 END,  -- Overdue first
             due_date ASC NULLS LAST,
-            CASE
-                WHEN priority = 1 THEN 0
-                WHEN priority = 2 THEN 1
-                WHEN priority = 3 THEN 2
-                WHEN priority = 4 THEN 3
-                ELSE 4
-            END
+            priority ASC NULLS LAST
         LIMIT 10
         """
         
-        results = await self.db.fetch_all(query, self.user_id)
-        
-        if not results:
+        try:
+            results = await self.db.fetch_all(query, self.user_id)
+            
+            if not results:
+                logger.info("No ClickUp tasks need attention")
+                return []
+            
+            logger.info(f"Found {len(results)} ClickUp tasks needing attention")
+            return [dict(r) for r in results]
+        except Exception as e:
+            logger.error(f"Error fetching ClickUp tasks: {e}")
             return []
-        
-        return [dict(r) for r in results]
     
     async def _send_overdue_notification(self, tasks: List[Dict[str, Any]]) -> None:
         """Send notification for overdue tasks"""
@@ -123,7 +124,7 @@ class ClickUpNotificationHandler:
             if isinstance(due_date, str):
                 due_date = datetime.fromisoformat(due_date)
             
-            days_overdue = (datetime.now() - due_date).days
+            days_overdue = (datetime.now(timezone.utc) - due_date).days
             
             message += f"{i}. *{name}*\n"
             message += f"   📍 {task['list_name']}\n"
@@ -163,7 +164,7 @@ class ClickUpNotificationHandler:
             if isinstance(due_date, str):
                 due_date = datetime.fromisoformat(due_date)
             
-            hours_until = int((due_date - datetime.now()).total_seconds() / 3600)
+            hours_until = int((due_date - datetime.now(timezone.utc)).total_seconds() / 3600)
             
             message += f"{i}. *{name}*\n"
             message += f"   📍 {task['list_name']}\n"

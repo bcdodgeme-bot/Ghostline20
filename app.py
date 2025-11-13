@@ -757,10 +757,12 @@ async def bluesky_scanning_cycle_task():
                     engagement_detector_module = importlib.import_module('modules.integrations.bluesky.engagement_detector')
                     
                     # Get the EngagementDetector class
-                    EngagementDetector = getattr(engagement_detector_module, 'EngagementDetector')
+                    EngagementDetector = getattr(engagement_detector_module, 'BlueskyEngagementDetector')
                     
                     # Create instance and scan
-                    detector = EngagementDetector()
+                    dimport os
+                    database_url = os.getenv('DATABASE_URL')
+                    detector = EngagementDetector(database_url)
                     results = await detector.scan_all_accounts()
                     
                 except AttributeError:
