@@ -1135,7 +1135,7 @@ class TrendContextCollector(ContextCollector):
                         created_at,
                         updated_at
                     FROM trend_monitoring
-                    WHERE trend_date >= CURRENT_DATE - INTERVAL '3 days'
+                    WHERE trend_date >= $1
                     AND trend_score >= 60
                     ORDER BY trend_score DESC
                     LIMIT 50

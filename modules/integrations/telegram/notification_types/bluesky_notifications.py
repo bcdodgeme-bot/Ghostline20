@@ -66,23 +66,41 @@ class BlueskyNotificationHandler:
             return False
     
     async def _get_pending_approvals(self) -> List[Dict[str, Any]]:
-        """Get high-potential Bluesky engagement opportunities from trends"""
+        """Get high-potential Bluesky engagement opportunities"""
         query = """
-        SELECT id, keyword, business_area, opportunity_type, 
-               urgency_level, trend_momentum, trend_score_at_alert,
-               bluesky_engagement_potential, created_at,
-               related_rss_insights
-        FROM trend_opportunities
-        WHERE bluesky_engagement_potential > 0.25
-        AND processed = false
-        AND created_at > NOW() - INTERVAL '4 hours'
-        ORDER BY bluesky_engagement_potential DESC, trend_score_at_alert DESC
+        SELECT 
+            id,
+            detected_by_account,
+            author_handle,
+            post_text,
+            matched_keywords,
+            engagement_score,
+            opportunity_type,
+            post_context,
+            already_engaged,
+            detected_at,
+            expires_at
+        FROM bluesky_engagement_opportunities
+        WHERE user_response IS NULL
+          AND already_engaged = false
+          AND (expires_at IS NULL OR expires_at > NOW())
+          AND engagement_score >= 50  -- Only notify for 50%+ matches
+        ORDER BY engagement_score DESC
         LIMIT 10
         """
         
-        results = await self.db.fetch_all(query)
-        
-        if not results:
+        try:
+            results = await self.db.fetch_all(query)
+            
+            if not results:
+                logger.info("No pending Bluesky opportunities found")
+                return []
+            
+            logger.info(f"Found {len(results)} pending Bluesky opportunities")
+            return [dict(r) for r in results]
+            
+        except Exception as e:
+            logger.error(f"Failed to get Bluesky opportunities: {e}")
             return []
         
         # Filter out ones we already notified about
@@ -108,24 +126,46 @@ class BlueskyNotificationHandler:
         return result['count'] > 0 if result else False
     
     async def _send_approval_notification(self, opportunities: List[Dict[str, Any]]) -> None:
-        """Send notification for engagement opportunities"""
+        """Send notification for Bluesky engagement opportunities"""
         count = len(opportunities)
         
-        if count == 1:
-            # Single high-priority opportunity
-            opp = opportunities[0]
+        if count == 0:
+            return
+        
+        # Build message
+        message = f"🦋 *Bluesky: {count} Engagement Opportunit{'ies' if count != 1 else 'y'}*\n\n"
+        
+        for i, opp in enumerate(opportunities[:5], 1):  # Show max 5
+            account = opp['detected_by_account'].replace('_', ' ').title()
+            author = opp['author_handle']
+            score = int(opp['engagement_score'])
+            post_preview = opp['post_text'][:80] + "..." if len(opp['post_text']) > 80 else opp['post_text']
             
-            engagement_pct = int(opp['bluesky_engagement_potential'] * 100)
-            
-            message = f"🦋 *Bluesky Engagement Opportunity*\n\n"
-            message += f"*Keyword:* {opp['keyword']}\n"
-            message += f"*Business Area:* {opp['business_area']}\n"
-            message += f"*Engagement Potential:* {engagement_pct}% 🎯\n"
-            message += f"*Trend Score:* {opp['trend_score_at_alert']}\n"
-            message += f"*Momentum:* {opp['trend_momentum'].upper()}\n\n"
-            
-            message += f"*Opportunity Type:* {opp['opportunity_type']}\n"
-            message += f"*Urgency:* {opp['urgency_level'].upper()}\n\n"
+            message += f"{i}. *{account}* ({score}% match)\n"
+            message += f"   @{author}\n"
+            message += f"   {post_preview}\n\n"
+        
+        if count > 5:
+            message += f"_...and {count - 5} more opportunit{'ies' if count - 5 != 1 else 'y'}_\n\n"
+        
+        message += "Check your Bluesky dashboard to engage!"
+        
+        # Metadata
+        metadata = {
+            'opportunity_count': count,
+            'notification_type': 'engagement_opportunities',
+            'opportunity_ids': [str(o['id']) for o in opportunities[:5]]
+        }
+        
+        await self.notification_manager.send_notification(
+            user_id=self.user_id,
+            notification_type='bluesky',
+            notification_subtype='engagement_opportunities',
+            message_text=message,
+            message_data=metadata
+        )
+        
+        logger.info(f"✅ Sent Bluesky notification: {count} opportunities")
             
             # Add RSS insights if available
             rss_insights = opp.get('related_rss_insights', {})
