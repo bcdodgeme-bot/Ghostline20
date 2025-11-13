@@ -488,7 +488,7 @@ class BlueskyEngagementDetector:
         Returns:
             Dict with opportunity counts per account
         """
-        accounts = ['bcdodge', 'damnitcarl', 'tvsignals', 'roseandangel', 'mealsnfeelz']
+        accounts = ['personal', 'damn_it_carl', 'binge_tv', 'rose_angel', 'meals_feelz']
         results = {}
         
         for account_id in accounts:
