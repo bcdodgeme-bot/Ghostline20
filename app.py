@@ -760,7 +760,7 @@ async def bluesky_scanning_cycle_task():
                     EngagementDetector = getattr(engagement_detector_module, 'BlueskyEngagementDetector')
                     
                     # Create instance and scan
-                    dimport os
+                    import os
                     database_url = os.getenv('DATABASE_URL')
                     detector = EngagementDetector(database_url)
                     results = await detector.scan_all_accounts()
