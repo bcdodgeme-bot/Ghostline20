@@ -187,9 +187,14 @@ class EngagementAnalyzer:
         # Calculate keyword match score
         keyword_score, matched_keywords = self.calculate_keyword_match_score(post_text, keywords)
         
-        # Skip low-relevance posts early
-        if keyword_score < 0.1:
+        # Skip low-relevance posts early (lowered threshold for testing)
+        if keyword_score < 0.05:  # 5% instead of 10%
+            logger.debug(f"Skipped post from {author_handle}: keyword_score too low ({keyword_score:.2f})")
             return None
+        
+        # Log when we find potential matches
+        if keyword_score >= 0.05:
+            logger.info(f"✨ Found potential match from {author_handle}: score={keyword_score:.2f}, keywords={len(matched_keywords)}")
         
         # Detect conversation opportunities
         conversation_ops = self.detect_conversation_opportunities(post_text)

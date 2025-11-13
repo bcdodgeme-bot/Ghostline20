@@ -58,16 +58,12 @@ class BlueskyEngagementDetector:
     ) -> List[str]:
         """Get keywords for a Bluesky account"""
         
-        # Map account_id to keywords table
-        keywords_table_map = {
-            'bcdodge': 'bcdodge_keywords',
-            'damnitcarl': 'damnitcarl_keywords',
-            'tvsignals': 'tvsignals_keywords',
-            'roseandangel': 'roseandangel_keywords',
-            'mealsnfeelz': 'mealsnfeelz_keywords'
-        }
+        # Get the keywords table from multi_account_client config
+        from .multi_account_client import get_bluesky_multi_client
+        multi_client = get_bluesky_multi_client()
+        account_info = multi_client.get_account_info(account_id)
         
-        table_name = keywords_table_map.get(account_id)
+        table_name = account_info.get('keywords_table')
         if not table_name:
             logger.warning(f"No keywords table for account: {account_id}")
             return []
@@ -83,7 +79,7 @@ class BlueskyEngagementDetector:
             rows = await conn.fetch(query)
             keywords = [row['keyword'].lower() for row in rows]
             
-            logger.info(f"Loaded {len(keywords)} keywords for {account_id}")
+            logger.info(f"✅ Loaded {len(keywords)} keywords for {account_id} from {table_name}")
             return keywords
         
         except Exception as e:
@@ -206,9 +202,26 @@ class BlueskyEngagementDetector:
         Returns:
             List of opportunity dicts
         """
+        # ADD DEBUG LOGGING HERE
+        logger.info(f"📊 Starting scan for {account_id}...")
+        
+        # Get keywords info from multi_account_client
+        from .multi_account_client import get_bluesky_multi_client
+        multi_client = get_bluesky_multi_client()
+        account_info = multi_client.get_account_info(account_id)
+        keywords_table = account_info.get('keywords_table')
+        logger.info(f"   Using keywords table: {keywords_table}")
+        
         conn = await self.get_connection()
         
         try:
+            # Get keyword count
+            try:
+                keyword_count = await conn.fetchval(f'SELECT COUNT(*) FROM {keywords_table}')
+                logger.info(f"   📝 {keyword_count} keywords loaded for matching")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to load keywords: {e}")
+                
             # Get Bluesky client
             client = await self._get_bluesky_client()
             
