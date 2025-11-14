@@ -267,18 +267,24 @@ class ActionSuggester:
         knowledge_count = context.get('knowledge_count', 0)
         
         # Action 1: Generate Bluesky post (primary action)
+        action_params = {
+            'keyword': keyword,
+            'business_area': business_area,
+            'account': suggested_account,
+            'trend_score': trend_score,
+            'has_knowledge': knowledge_count > 0,
+            'has_discussion': discussed_recently
+        }
+
+        # Add opportunity_id if available
+        if 'opportunity_details' in context and context['opportunity_details'].get('opportunity_id'):
+            action_params['opportunity_id'] = context['opportunity_details']['opportunity_id']
+
         actions.append({
             'action_type': 'draft_bluesky_post',
             'description': f"Generate Bluesky post about '{keyword}' for @{suggested_account}",
             'priority': 1,
-            'parameters': {
-                'keyword': keyword,
-                'business_area': business_area,
-                'account': suggested_account,
-                'trend_score': trend_score,
-                'has_knowledge': knowledge_count > 0,
-                'has_discussion': discussed_recently
-            }
+            'parameters': action_params
         })
         
         # Action 2: Generate blog outline (if high score or has knowledge)

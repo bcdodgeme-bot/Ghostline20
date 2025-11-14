@@ -101,10 +101,20 @@ class IntelligenceOrchestrator:
         except:
             clickup_handler = None
             logger.warning("ClickUp handler not available")
+            
+        try:
+            from modules.content.content_generator import ContentGenerator
+            import os
+            database_url = os.getenv('DATABASE_URL')
+            content_generator = ContentGenerator(database_url) if database_url else None
+        except Exception as e:
+            content_generator = None
+            logger.warning(f"Content generator not available: {e}")
 
         self.action_executor = ActionExecutor(
             db_manager=db_manager,
-            clickup_handler=clickup_handler
+            clickup_handler=clickup_handler,
+            content_generator=content_generator
         )
         
         # Store services

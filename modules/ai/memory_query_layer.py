@@ -36,20 +36,20 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 CONTEXT_CONFIG = {
-    'hot_cache_days': 10,           # Always loaded (recent discussions)
-    'warm_cache_days': 30,          # Loaded on new day/thread
-    'cold_cache_days': 60,          # Query-based (everything in V2)
+    'hot_cache_days': 60,           # Always loaded (recent discussions)
+    'warm_cache_days': 90,          # Loaded on new day/thread
+    'cold_cache_days': 150,          # Query-based (everything in V2)
     'hours_gap_threshold': 8,       # Hours before comprehensive context
     
     'limits': {
-        'hot_conversations': 100,    # Recent messages always available
-        'warm_conversations': 300,   # Comprehensive context
-        'cold_conversations': 50,    # Semantic search results
+        'hot_conversations': 800,    # Recent messages always available
+        'warm_conversations': 1300,   # Comprehensive context
+        'cold_conversations': 250,    # Semantic search results
         'meetings': 14,              # From last 14 days
-        'emails': 20,                # Unread/important
+        'emails': 50,                # Unread/important
         'calendar_events': 30,       # Upcoming events
-        'trends': 15,                # High-priority trends
-        'knowledge_base': 10,        # Semantic search results
+        'trends': 30,                # High-priority trends
+        'knowledge_base': 100,        # Semantic search results
         'weather': 1,                # Current reading
         'tasks': 20                  # Active tasks
     }

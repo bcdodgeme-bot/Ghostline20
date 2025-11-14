@@ -624,6 +624,7 @@ class SituationDetector:
                 # Add opportunity details if this came from trend_opportunities table
                 if trend_signal.signal_type == 'trend_opportunity_created':
                     context['opportunity_details'] = {
+                        'opportunity_id': trend_signal.data.get('opportunity_id'),
                         'opportunity_type': trend_signal.data.get('opportunity_type'),
                         'content_angle': trend_signal.data.get('content_angle'),
                         'target_audience': trend_signal.data.get('target_audience'),

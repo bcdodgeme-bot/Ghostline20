@@ -44,7 +44,8 @@ class ActionExecutor:
         clickup_handler=None,
         calendar_client=None,
         gmail_client=None,
-        ai_service=None
+        ai_service=None,
+        content_generator=None
     ):
         """
         Initialize with all necessary integrations.
@@ -55,12 +56,14 @@ class ActionExecutor:
             calendar_client: Google Calendar client
             gmail_client: Gmail client
             ai_service: AI service for drafting (OpenRouter)
+            content_generator: Content generator for Bluesky posts
         """
         self.db = db_manager
         self.clickup = clickup_handler
         self.calendar = calendar_client
         self.gmail = gmail_client
         self.ai = ai_service
+        self.content_generator = content_generator
         
         logger.info("🔧 Action Executor initialized")
     
@@ -111,6 +114,12 @@ class ActionExecutor:
             elif action_type == 'review_email':
                 return await self._execute_review_email(parameters, user_id)
             
+            elif action_type == 'review_email':
+                return await self._execute_review_email(parameters, user_id)
+
+            elif action_type == 'draft_bluesky_post':
+                return await self._execute_draft_bluesky_post(parameters, user_id)
+
             else:
                 logger.warning(f"Unknown action type: {action_type}")
                 return {
@@ -118,7 +127,7 @@ class ActionExecutor:
                     'message': f"❌ Action type '{action_type}' not implemented yet",
                     'details': {'action_type': action_type}
                 }
-        
+            
         except Exception as e:
             logger.error(f"Error executing {action_type}: {e}", exc_info=True)
             return {
@@ -628,3 +637,80 @@ class ActionExecutor:
                 'requires_response': email['requires_response']
             }
         }
+        
+    async def _execute_draft_bluesky_post(
+        self,
+        parameters: Dict[str, Any],
+        user_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Generate a Bluesky post draft for a trending topic.
+        
+        Uses content generator to create a post draft based on trend opportunity.
+        """
+        keyword = parameters.get('keyword', 'Topic')
+        account = parameters.get('account', 'syntaxprime')
+        opportunity_id = parameters.get('opportunity_id')
+        
+        # Check if content generator is available
+        if not self.content_generator:
+            return {
+                'success': False,
+                'message': "❌ Content generator not available",
+                'details': {'keyword': keyword}
+            }
+        
+        # If we have an opportunity_id, use it directly
+        if opportunity_id:
+            try:
+                result = await self.content_generator.generate_bluesky_post(
+                    opportunity_id=UUID(opportunity_id),
+                    account_id=account
+                )
+                
+                if result.get('success'):
+                    preview = result.get('preview', '')
+                    confidence = int(result.get('recommendation_score', 0) * 100)
+                    
+                    message = f"✅ **Draft Generated**\n\n"
+                    message += f"📝 {preview[:200]}{'...' if len(preview) > 200 else ''}\n\n"
+                    message += f"🎯 Confidence: {confidence}%\n"
+                    message += f"📱 Account: @{account}\n\n"
+                    message += "_Review and approve via Telegram notification_"
+                    
+                    return {
+                        'success': True,
+                        'message': message,
+                        'details': {
+                            'keyword': keyword,
+                            'account': account,
+                            'queue_id': result.get('queue_id'),
+                            'confidence': confidence
+                        }
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'message': f"❌ Failed to generate draft: {result.get('error', 'Unknown error')}",
+                        'details': {'keyword': keyword, 'account': account}
+                    }
+                    
+            except Exception as e:
+                logger.error(f"Error generating Bluesky post: {e}", exc_info=True)
+                return {
+                    'success': False,
+                    'message': f"❌ Error generating post: {str(e)}",
+                    'details': {'keyword': keyword, 'error': str(e)}
+                }
+        
+        # Fallback: No opportunity_id available
+        else:
+            return {
+                'success': False,
+                'message': f"❌ Cannot generate post: No opportunity_id for '{keyword}'",
+                'details': {
+                    'keyword': keyword,
+                    'account': account,
+                    'note': 'Opportunity ID required for post generation'
+                }
+            }
