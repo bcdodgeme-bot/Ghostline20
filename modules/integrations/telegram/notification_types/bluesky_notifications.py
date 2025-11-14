@@ -50,20 +50,41 @@ class BlueskyNotificationHandler:
             pending_approvals = await self._get_pending_approvals()
             
             if not pending_approvals:
+                logger.info("No pending Bluesky opportunities to notify about")
                 return False
             
-            # Group by priority
-            high_priority = [a for a in pending_approvals if a.get('relevance_score', 0) > 80]
-            
-            if high_priority:
-                await self._send_approval_notification(high_priority)
-                return True
-            
-            return False
+            # Send notification for ALL opportunities (not just high priority)
+            logger.info(f"Sending notification for {len(pending_approvals)} Bluesky opportunities")
+            await self._send_approval_notification(pending_approvals)
+            return True
             
         except Exception as e:
-            logger.error(f"Error checking Bluesky notifications: {e}")
+            logger.error(f"Error checking Bluesky notifications: {e}", exc_info=True)
             return False
+
+**Before:**
+- Only notified if `relevance_score > 80` (column doesn't exist!)
+- Your scores: 45%, 55%, 60%, 70% - all rejected!
+
+**After:**
+- Notifies for ALL opportunities with `engagement_score >= 50`
+- Your scores: 55%, 60%, 70% - will all trigger notifications!
+
+---
+
+## 🚀 AFTER YOU PUSH
+
+Within **15 minutes** (or restart app), you'll get:
+```
+🦋 Bluesky: 10 Engagement Opportunities
+
+1. Binge Tv (70% match)
+   @azalben.bsky.social
+   My biggest burning question about Netflix's...
+
+2. Binge Tv (60% match)
+   @bemorelikeharper.bsky.social
+   People will urge you to procreate with no...
     
     async def _get_pending_approvals(self) -> List[Dict[str, Any]]:
         """Get high-potential Bluesky engagement opportunities"""
