@@ -709,7 +709,7 @@ class SituationManager:
                 total_occurrences = existing['total_occurrences'] + 1
                 acted_count = existing['acted_count'] + (1 if user_response == 'acted' else 0)
                 dismissed_count = existing['dismissed_count'] + (1 if user_response == 'dismissed' else 0)
-                confidence_sum = existing['confidence_sum'] + confidence_score
+                confidence_sum = float(existing['confidence_sum']) + confidence_score
                 
                 # Calculate new metrics
                 action_rate = acted_count / total_occurrences if total_occurrences > 0 else 0

@@ -669,11 +669,12 @@ class ActionExecutor:
                 )
                 
                 if result.get('success'):
-                    preview = result.get('preview', '')
+                    preview_safe = preview[:200].replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace('`', '\\`')
+
                     confidence = int(result.get('recommendation_score', 0) * 100)
                     
                     message = f"✅ **Draft Generated**\n\n"
-                    message += f"📝 {preview[:200]}{'...' if len(preview) > 200 else ''}\n\n"
+                    message += f"📝 {preview_safe}{'...' if len(preview) > 200 else ''}\n\n"
                     message += f"🎯 Confidence: {confidence}%\n"
                     message += f"📱 Account: @{account}\n\n"
                     message += "_Review and approve via Telegram notification_"
