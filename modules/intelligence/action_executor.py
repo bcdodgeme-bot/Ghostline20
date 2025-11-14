@@ -673,7 +673,7 @@ class ActionExecutor:
                     
                     return {
                         'success': True,
-                        'message': f"✅ Draft queued for '{keyword}' → @{account}\n\nQueue ID: {str(queue_id)[:8]}\n\nApproval notification coming...",
+                        'message': f"Draft queued for {keyword} on @{account}. Queue ID: {str(queue_id)[:8]}. Approval notification coming soon.",
                         'details': {
                             'keyword': keyword,
                             'account': account,
