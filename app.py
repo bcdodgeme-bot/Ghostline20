@@ -85,6 +85,7 @@ from modules.integrations.telegram.notification_types.clickup_notifications impo
 from modules.integrations.telegram.notification_types.bluesky_notifications import BlueskyNotificationHandler
 from modules.integrations.telegram.notification_types.trends_notifications import TrendsNotificationHandler
 from modules.integrations.telegram.notification_types.analytics_notifications import AnalyticsNotificationHandler
+from modules.integrations.telegram.notification_types.content_approval_notifications import ContentApprovalNotificationHandler
 
 #-- NEW Section 2k: Fathom Meeting Integration - added 10/16/25
 from modules.integrations.fathom import router as fathom_router
@@ -318,6 +319,7 @@ async def startup_event():
         bluesky_handler = BlueskyNotificationHandler(telegram_notification_manager)  # lowercase "s"
         trends_handler = TrendsNotificationHandler(telegram_notification_manager)
         analytics_handler = AnalyticsNotificationHandler(telegram_notification_manager)
+        content_approval_handler = ContentApprovalNotificationHandler(telegram_notification_manager)
     
         
         # Store in app state for access throughout the app
@@ -332,6 +334,9 @@ async def startup_event():
         app.state.telegram_trends_handler = trends_handler
         app.state.telegram_analytics_handler = analytics_handler
         app.state.telegram_kill_switch = telegram_kill_switch
+        app.state.telegram_kill_switch = telegram_kill_switch
+        app.state.telegram_analytics_handler = analytics_handler
+        app.state.telegram_content_approval_handler = content_approval_handler
         app.state.telegram_kill_switch = telegram_kill_switch
         
         # Verify bot connection
@@ -351,6 +356,7 @@ async def startup_event():
         asyncio.create_task(bluesky_notification_task())
         asyncio.create_task(trends_notification_task())
         asyncio.create_task(analytics_notification_task())
+        asyncio.create_task(content_approval_notification_task())
         asyncio.create_task(trends_monitoring_cycle_task())
         asyncio.create_task(bluesky_scanning_cycle_task())
         asyncio.create_task(clickup_sync_cycle_task())
@@ -695,6 +701,28 @@ async def analytics_notification_task():
         except Exception as e:
             logger.error(f"Analytics notification error: {e}")
             await asyncio.sleep(60)
+
+async def content_approval_notification_task():
+    """
+    Check content recommendation queue every 30 seconds
+    Send approval notifications for pending AI-generated content
+    """
+    logger.info("📝 Content approval notification task started")
+    
+    # Wait 30 seconds before first check
+    await asyncio.sleep(30)
+    
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(USER_ID):
+                await app.state.telegram_content_approval_handler.check_and_notify()
+            
+            # Check every 30 seconds
+            await asyncio.sleep(30)
+            
+        except Exception as e:
+            logger.error(f"Content approval notification error: {e}")
+            await asyncio.sleep(30)
 
 async def trends_monitoring_cycle_task():
     """
