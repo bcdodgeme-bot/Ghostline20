@@ -277,8 +277,11 @@ class ActionSuggester:
         }
 
         # Add opportunity_id if available
-        if 'opportunity_details' in context and context['opportunity_details'].get('opportunity_id'):
-            action_params['opportunity_id'] = context['opportunity_details']['opportunity_id']
+        opportunity_id = context.get('opportunity_id') or (
+            context.get('opportunity_details', {}).get('opportunity_id')
+        )
+        if opportunity_id:
+            action_params['opportunity_id'] = str(opportunity_id)
 
         actions.append({
             'action_type': 'draft_bluesky_post',
