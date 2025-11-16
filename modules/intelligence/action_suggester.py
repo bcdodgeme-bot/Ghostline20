@@ -709,12 +709,33 @@ class ActionSuggester:
 
         # Top row: Action buttons (up to 2 primary actions)
         action_row = []
-        for i, action in enumerate(actions[:2], 1):
-            callback_data = f"situation:action{i}:{situation.situation_id}"
-            action_row.append({"text": action['description'][:30], "callback_data": callback_data})
+        
+        # Special handling for trend_content_opportunity - use direct content callback
+        if situation.situation_type == 'trend_content_opportunity':
+            # Extract opportunity details from context
+            opportunity_id = situation.situation_context.get('opportunity_id')
+            account = situation.situation_context.get('suggested_account', 'syntaxprime')
+            
+            if opportunity_id and actions:
+                # Use content:draft_bluesky callback for direct generation
+                callback_data = f"content:draft_bluesky:{opportunity_id}:{account}"
+                action_row.append({
+                    "text": actions[0]['description'][:30],
+                    "callback_data": callback_data
+                })
+        else:
+            # Standard situation actions for all other types
+            for i, action in enumerate(actions[:2], 1):
+                callback_data = f"situation:action{i}:{situation.situation_id}"
+                action_row.append({
+                    "text": action['description'][:30],
+                    "callback_data": callback_data
+                })
 
         if action_row:
             button_rows.append(action_row)
+
+
 
         # Second row: Response buttons
         button_rows.append([

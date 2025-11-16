@@ -670,25 +670,15 @@ class ActionExecutor:
                 
                 if result.get('success'):
                     queue_id = result.get('queue_id')
+                    preview = result.get('preview', keyword)[:100]
                     
                     return {
                         'success': True,
-                        'message': f"Draft queued for {keyword} on @{account}. Queue ID: {str(queue_id)[:8]}. Approval notification coming soon.",
+                        'message': f"✅ Draft created for '{keyword}' on @{account}\n\n{preview}...\n\nApproval notification coming soon!",
                         'details': {
                             'keyword': keyword,
                             'account': account,
-                            'queue_id': queue_id
-                        }
-                    }
-                    
-                    return {
-                        'success': True,
-                        'message': message,
-                        'details': {
-                            'keyword': keyword,
-                            'account': account,
-                            'queue_id': result.get('queue_id'),
-                            'confidence': confidence
+                            'queue_id': str(queue_id)
                         }
                     }
                 else:
@@ -702,7 +692,7 @@ class ActionExecutor:
                 logger.error(f"Error generating Bluesky post: {e}", exc_info=True)
                 return {
                     'success': False,
-                    'message': f"❌ Error generating post: {str(e)}",
+                    'message': f"❌ Error: {str(e)}",
                     'details': {'keyword': keyword, 'error': str(e)}
                 }
         
@@ -710,10 +700,9 @@ class ActionExecutor:
         else:
             return {
                 'success': False,
-                'message': f"❌ Cannot generate post: No opportunity_id for '{keyword}'",
+                'message': f"❌ Cannot generate post - missing opportunity ID",
                 'details': {
                     'keyword': keyword,
-                    'account': account,
-                    'note': 'Opportunity ID required for post generation'
+                    'account': account
                 }
             }
