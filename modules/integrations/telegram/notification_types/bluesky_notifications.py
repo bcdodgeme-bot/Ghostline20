@@ -98,44 +98,84 @@ class BlueskyNotificationHandler:
             return []
     
     async def _send_approval_notification(self, opportunities: List[Dict[str, Any]]) -> None:
-        """Send notification for Bluesky engagement opportunities"""
-        count = len(opportunities)
-        
-        if count == 0:
+        """Send individual notification for each Bluesky engagement opportunity"""
+        if not opportunities:
             return
         
-        message = f"🦋 *Bluesky: {count} Engagement Opportunit{'ies' if count != 1 else 'y'}*\n\n"
+        logger.info(f"Sending {len(opportunities)} individual Bluesky notifications")
         
-        for i, opp in enumerate(opportunities[:5], 1):
-            account = opp['detected_by_account'].replace('_', ' ').title()
-            author = opp['author_handle']
-            score = int(opp['engagement_score'])
-            post_preview = opp['post_text'][:80] + "..." if len(opp['post_text']) > 80 else opp['post_text']
-            
-            message += f"{i}. *{account}* ({score}% match)\n"
-            message += f"   @{author}\n"
-            message += f"   {post_preview}\n\n"
+        # Send individual notification for each opportunity
+        for opp in opportunities:
+            try:
+                await self._send_individual_opportunity(opp)
+            except Exception as e:
+                logger.error(f"Failed to send notification for opportunity {opp.get('id')}: {e}")
+                continue
+    
+    async def _send_individual_opportunity(self, opp: Dict[str, Any]) -> None:
+        """Send a single engagement opportunity notification with action buttons"""
         
-        if count > 5:
-            message += f"_...and {count - 5} more opportunit{'ies' if count - 5 != 1 else 'y'}_\n\n"
+        # Format account and author info
+        account = opp['detected_by_account'].replace('_', ' ').title()
+        author = opp['author_handle']
+        score = int(opp['engagement_score'])
+        post_text = opp['post_text']
         
-        message += "Check your Bluesky dashboard to engage!"
+        # Truncate post preview for readability
+        post_preview = post_text[:200] + "..." if len(post_text) > 200 else post_text
         
-        metadata = {
-            'opportunity_count': count,
-            'notification_type': 'engagement_opportunities',
-            'opportunity_ids': [str(o['id']) for o in opportunities[:5]]
-        }
+        # Determine suggested action
+        action_emoji = {'reply': '💬', 'quote_post': '🔁', 'like': '❤️'}
+        opp_type = opp.get('opportunity_type', 'reply')
+        emoji = action_emoji.get(opp_type, '💬')
         
+        # Build message
+        message = f"🦋 *Bluesky Engagement Opportunity*\n\n"
+        message += f"*Account:* {account}\n"
+        message += f"*Author:* @{author}\n"
+        message += f"*Score:* {score}/100\n"
+        message += f"*Confidence:* {score}% | *Priority:* {min(10, (score // 10) + 1)}/10\n\n"
+        message += f"💡 *Suggested Action:*\n"
+        message += f"{emoji} {opp_type.replace('_', ' ').title()} to this post\n\n"
+        message += f"*Post Preview:*\n{post_preview}\n"
+        
+        # Add expiry
+        if opp.get('expires_at'):
+            expires = opp['expires_at']
+            if isinstance(expires, str):
+                expires = datetime.fromisoformat(expires.replace('Z', '+00:00'))
+            message += f"\n⏰ Expires: {expires.strftime('%I:%M %p %m/%d')}"
+        
+        # Create action buttons
+        button_rows = [
+            [
+                {"text": f"{emoji} Generate {opp_type.replace('_', ' ').title()}", "callback_data": f"bluesky:draft:{opp['id']}"},
+                {"text": "👀 View Post", "callback_data": f"bluesky:view:{opp['id']}"}
+            ],
+            [
+                {"text": "⏭️ Dismiss", "callback_data": f"bluesky:dismiss:{opp['id']}"},
+                {"text": "⏰ Snooze", "callback_data": f"bluesky:snooze:{opp['id']}"}
+            ],
+            [
+                {"text": "ℹ️ More Details", "callback_data": f"bluesky:details:{opp['id']}"}
+            ]
+        ]
+        
+        # Send notification
         await self.notification_manager.send_notification(
             user_id=self.user_id,
             notification_type='bluesky',
-            notification_subtype='engagement_opportunities',
+            notification_subtype='engagement_opportunity',
             message_text=message,
-            message_data=metadata
+            buttons=button_rows,
+            message_data={
+                'opportunity_id': str(opp['id']),
+                'account': opp['detected_by_account'],
+                'author': author,
+                'score': score,
+                'opportunity_type': opp_type
+            }
         )
-        
-        logger.info(f"✅ Sent Bluesky notification: {count} opportunities")
     
     async def send_daily_summary(self) -> bool:
         """Send daily Bluesky activity summary"""
