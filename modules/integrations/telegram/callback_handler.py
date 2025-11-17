@@ -859,14 +859,103 @@ class CallbackHandler:
             return {"success": False, "ack_text": "❌ Invalid link"}
         
         elif action == 'draft_reply':
-            await self.bot_client.edit_message(
-                message_id,
-                "🚧 Reply drafting coming soon!",
-                reply_markup=None
-            )
-            return {"success": True, "ack_text": "Coming soon"}
-        
-        elif action == 'like':
+            # Generate a reply to this Bluesky engagement opportunity
+            opportunity_id = notification_id
+            
+            try:
+                import asyncpg
+                from modules.integrations.bluesky.approval_system import get_approval_system
+                
+                database_url = os.getenv('DATABASE_URL')
+                conn = await asyncpg.connect(database_url)
+                
+                try:
+                    # Fetch the engagement opportunity details
+                    opportunity = await conn.fetchrow('''
+                        SELECT 
+                            id, post_uri, post_text, author_handle, author_display_name,
+                            detected_by_account, engagement_score, matched_keywords
+                        FROM bluesky_engagement_opportunities
+                        WHERE id = $1
+                    ''', UUID(opportunity_id))
+                    
+                    if not opportunity:
+                        await self.bot_client.edit_message(
+                            message_id,
+                            "❌ Opportunity not found",
+                            reply_markup=None
+                        )
+                        return {"success": False, "ack_text": "❌ Not found"}
+                    
+                    # Build analysis dict for approval system
+                    analysis = {
+                        'account_id': opportunity['detected_by_account'],
+                        'account_config': {'personality': 'professional'},  # Will be enhanced later
+                        'post_content': opportunity['post_text'],
+                        'author': {
+                            'handle': opportunity['author_handle'],
+                            'display_name': opportunity['author_display_name']
+                        },
+                        'keyword_analysis': {
+                            'matched_keywords': json.loads(opportunity['matched_keywords']) if opportunity['matched_keywords'] else []
+                        },
+                        'suggested_action': 'reply'
+                    }
+                    
+                    # Generate draft using approval system
+                    approval_system = get_approval_system()
+                    draft_result = await approval_system.generate_draft_post(analysis, post_type="reply")
+                    
+                    if not draft_result.get('success'):
+                        await self.bot_client.edit_message(
+                            message_id,
+                            "❌ Failed to generate reply draft",
+                            reply_markup=None
+                        )
+                        return {"success": False, "ack_text": "❌ Generation failed"}
+                    
+                    draft_text = draft_result['draft_text']
+                    
+                    # Build draft notification message
+                    message = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
+                    message += f"*Replying to:* @{opportunity['author_handle']}\n"
+                    message += f'"{opportunity["post_text"][:100]}..."\n\n'
+                    message += f"*Your reply:*\n{draft_text}\n\n"
+                    message += f"_{len(draft_text)} characters_"
+                    
+                    # Buttons for draft approval
+                    buttons = {
+                        'inline_keyboard': [
+                            [
+                                {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
+                                {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
+                            ],
+                            [
+                                {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
+                            ]
+                        ]
+                    }
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        message,
+                        reply_markup=buttons
+                    )
+                    
+                    return {"success": True, "ack_text": "✅ Draft generated!"}
+                    
+                finally:
+                    await conn.close()
+                    
+            except Exception as e:
+                logger.error(f"Reply draft generation failed: {e}", exc_info=True)
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Error: {str(e)}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "❌ Error"}
+            
             await self.bot_client.edit_message(
                 message_id,
                 "❤️ Like feature coming soon!",
