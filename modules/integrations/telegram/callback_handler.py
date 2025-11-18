@@ -499,8 +499,8 @@ class CallbackHandler:
                 try:
                     # Fetch the engagement opportunity details
                     opportunity = await conn.fetchrow('''
-                        SELECT 
-                            id, post_uri, post_text, author_handle, author_display_name,
+                        SELECT
+                            id, post_uri, post_text, author_handle, author_did,
                             detected_by_account, engagement_score, matched_keywords
                         FROM bluesky_engagement_opportunities
                         WHERE id = $1
@@ -521,7 +521,7 @@ class CallbackHandler:
                         'post_content': opportunity['post_text'],
                         'author': {
                             'handle': opportunity['author_handle'],
-                            'display_name': opportunity['author_display_name']
+                            'display_name': opportunity['author_handle']  # Use handle as display name
                         },
                         'keyword_analysis': {
                             'matched_keywords': json.loads(opportunity['matched_keywords']) if opportunity['matched_keywords'] else []
