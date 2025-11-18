@@ -808,9 +808,16 @@ def format_calendar_context(events: List[Dict]) -> str:
         day_name = datetime.strptime(day, '%Y-%m-%d').strftime('%A, %B %d')
         lines.append(f"\n📅 {day_name}:")
         
+        from ..core.timezone_utils import convert_utc_to_user_timezone
+        
         for event in sorted(day_events, key=lambda e: e['start_time']):
-            start = event['start_time'].strftime('%H:%M')
-            end = event['end_time'].strftime('%H:%M') if event.get('end_time') else '?'
+            # Convert UTC to user timezone for display
+            start_local = convert_utc_to_user_timezone(event['start_time'])
+            start = start_local.strftime('%H:%M')
+
+            end_local = convert_utc_to_user_timezone(event['end_time']) if event.get('end_time') else None
+            end = end_local.strftime('%H:%M') if end_local else '?'
+
             summary = event.get('summary') or 'Untitled Event'
             
             lines.append(f"   {start}-{end}: {summary}")
