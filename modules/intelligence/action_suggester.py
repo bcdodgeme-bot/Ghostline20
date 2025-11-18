@@ -714,7 +714,7 @@ class ActionSuggester:
         action_row = []
         
         # Special handling for trend_content_opportunity - use direct content callback
-        if situation.situation_type == 'trend_content_opportunity':
+        if situation.situation_type in ['trend_content_opportunity', 'conversation_trend_alignment']:
             # Extract opportunity details from context
             opportunity_id = situation.situation_context.get('opportunity_id')
             account = situation.situation_context.get('suggested_account', 'syntaxprime')
