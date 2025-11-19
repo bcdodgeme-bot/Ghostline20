@@ -156,35 +156,38 @@ class NotificationManager:
                         message_data=message_data or {},
                         telegram_message_id=result.get('message_id')
                     )
-                    
-                    # All checks passed - send notification
+
+                    # Try to create thread, but don't block if it fails
                     try:
-                        # NEW: Create/update thread in main chat FIRST
                         thread_result = await self._create_chat_thread(
                             user_id=user_id,
                             notification_type=notification_type,
                             message_text=message_text,
                             message_data=message_data
                         )
-                        
-                        # Add "Open in Chat" button if no custom buttons provided
                         thread_id = thread_result.get('thread_id')
-                        if thread_id and not buttons:
-                            chat_url = f"https://ghostline20-production.up.railway.app/chat?thread={thread_id}"
-                            buttons = [[{"text": "💬 Open in Chat", "url": chat_url}]]
-                            logger.info(f"🔗 Adding chat deeplink: {chat_url}")
-                        
-                        # Create inline keyboard if buttons provided
-                        reply_markup = None
-                        if buttons:
-                            reply_markup = self.bot_client.create_inline_keyboard(buttons)
-                        
-                        # Send via Telegram with button
-                        result = await self.bot_client.send_message(
-                            chat_id=chat_id,
-                            text=message_text,
-                            reply_markup=reply_markup
-                        )
+                        logger.info(f"📊 Thread created/updated: {thread_id}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Thread creation failed (continuing): {e}")
+                        # Continue sending notification even if thread fails
+                    
+                    # Add "Open in Chat" button if thread was created successfully
+                    if thread_id and not buttons:
+                        chat_url = f"https://ghostline20-production.up.railway.app/chat?thread={thread_id}"
+                        buttons = [[{"text": "💬 Open in Chat", "url": chat_url}]]
+                        logger.info(f"🔗 Adding chat deeplink: {chat_url}")
+                    
+                    # Create inline keyboard if buttons provided
+                    reply_markup = None
+                    if buttons:
+                        reply_markup = self.bot_client.create_inline_keyboard(buttons)
+                    
+                    # Send via Telegram (this MUST work)
+                    result = await self.bot_client.send_message(
+                        chat_id=chat_id,
+                        text=message_text,
+                        reply_markup=reply_markup
+                    )
                         
                         if result.get('message_id'):
                             # Log to database
