@@ -1287,7 +1287,11 @@ async def create_thread_from_notification(
             thread_id=thread_id,
             role='assistant',  # From SyntaxPrime
             content=request.initial_message,
+            metadata=request.message_data
         )
+        
+        logger.info(f"📊 Added message with metadata: {list(request.message_data.keys()) if request.message_data else 'none'}")
+        
         # Add structured metadata message (AI-parseable)
         # Only for certain notification types that need structured data
         if request.notification_type in ['trends', 'bluesky', 'analytics']:

@@ -73,16 +73,20 @@ class DigitalElephantMemory:
             raise
     
     async def add_message(self,
-                         thread_id: str,
-                         role: str,  # 'user' or 'assistant'
-                         content: str,
-                         content_type: str = 'text',
-                         model_used: str = None,
-                         response_time_ms: int = None,
-                         knowledge_sources_used: List[str] = None,
-                         extracted_preferences: Dict = None) -> str:
+                     thread_id: str,
+                     role: str,  # 'user' or 'assistant'
+                     content: str,
+                     content_type: str = 'text',
+                     model_used: str = None,
+                     response_time_ms: int = None,
+                     knowledge_sources_used: List[str] = None,
+                     extracted_preferences: Dict = None,
+                     metadata: Dict = None) -> str:  # <-- NEW PARAMETER
         """
         Add a message to a conversation thread
+        
+        Args:
+            metadata: Optional structured data for this message (JSONB)
         
         Returns:
             message_id: UUID of the created message
@@ -97,12 +101,13 @@ class DigitalElephantMemory:
         # Prepare JSONB fields
         knowledge_sources_json = json.dumps(knowledge_sources_used or [])
         preferences_json = json.dumps(extracted_preferences or {})
+        metadata_json = json.dumps(metadata or {})  # <-- NEW
         
         insert_query = """
         INSERT INTO conversation_messages
         (id, thread_id, user_id, role, content, content_type, 
-         response_time_ms, model_used, knowledge_sources_used, extracted_preferences, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, NOW(), NOW())
+         response_time_ms, model_used, knowledge_sources_used, extracted_preferences, metadata, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, NOW(), NOW())
         RETURNING id;
         """
         
@@ -117,7 +122,8 @@ class DigitalElephantMemory:
                                                response_time_ms,
                                                model_used,
                                                knowledge_sources_json,
-                                               preferences_json)
+                                               preferences_json,
+                                               metadata_json)  # <-- NEW
             
             # Update thread metadata
             await self._update_thread_after_message(thread_id, content if role == 'user' else None)
