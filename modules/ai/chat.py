@@ -4559,6 +4559,11 @@ async def search_meetings(
                     for point in key_points[:5]:  # Show more key points
                         meeting_text.append(f"  • {point}")
             
+            # Add full transcript if available
+            if meeting.get('transcript_text'):
+                transcript = meeting['transcript_text']
+                meeting_text.append(f"\n\n**Full Transcript:**\n{transcript}")
+            
             meeting_context.append("\n".join(meeting_text))
             meeting_context.append("---")
         

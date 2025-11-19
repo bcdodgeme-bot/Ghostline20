@@ -40,36 +40,10 @@ class ClickUpNotificationHandler:
     
     async def check_and_notify(self) -> bool:
         """
-        Check for ClickUp tasks that need attention
-        
-        Returns:
-            True if any notifications were sent
+        Check ClickUp tasks (DISABLED - broken and not useful)
         """
-        try:
-            # Get tasks needing attention
-            tasks = await self._get_tasks_needing_attention()
-            
-            if not tasks:
-                return False
-            
-            # Group tasks by urgency
-            overdue = [t for t in tasks if t['is_overdue']]
-            due_soon = [t for t in tasks if t['due_soon'] and not t['is_overdue']]
-            high_priority = [t for t in tasks if t.get('priority') == 1 and not t.get('is_overdue', False)]
-            
-            # Send appropriate notification
-            if overdue:
-                await self._send_overdue_notification(overdue)
-            elif due_soon:
-                await self._send_due_soon_notification(due_soon)
-            elif high_priority:
-                await self._send_priority_notification(high_priority)
-            
-            return len(tasks) > 0
-            
-        except Exception as e:
-            logger.error(f"Error checking ClickUp notifications: {e}")
-            return False
+        logger.info("⏭️ ClickUp task notifications disabled")
+        return
     
     async def _get_tasks_needing_attention(self) -> List[Dict[str, Any]]:
         """Get tasks that need attention"""
@@ -111,121 +85,6 @@ class ClickUpNotificationHandler:
         except Exception as e:
             logger.error(f"Error fetching ClickUp tasks: {e}")
             return []
-    
-    async def _send_overdue_notification(self, tasks: List[Dict[str, Any]]) -> None:
-        """Send notification for overdue tasks"""
-        count = len(tasks)
-        
-        message = f"⚠️ *ClickUp: {count} Overdue Task{'s' if count != 1 else ''}*\n\n"
-        
-        for i, task in enumerate(tasks[:5], 1):  # Show max 5 tasks
-            name = task['name']
-            due_date = task['due_date']
-            if isinstance(due_date, str):
-                due_date = datetime.fromisoformat(due_date)
-            
-            days_overdue = (datetime.now(timezone.utc) - due_date).days
-            
-            message += f"{i}. *{name}*\n"
-            message += f"   📍 {task['list_name']}\n"
-            message += f"   ⏰ Overdue by {days_overdue} day{'s' if days_overdue != 1 else ''}\n\n"
-        
-        if count > 5:
-            message += f"_...and {count - 5} more overdue task{'s' if count - 5 != 1 else ''}_\n\n"
-        
-        message += "🔥 Time to catch up!"
-        
-        # Metadata
-        metadata = {
-            'task_count': count,
-            'notification_type': 'overdue',
-            'task_ids': [t['task_id'] for t in tasks[:5]]
-        }
-        
-        await self.notification_manager.send_notification(
-            user_id=self.user_id,
-            notification_type='clickup',
-            notification_subtype='overdue',
-            message_text=message,
-            message_data=metadata
-        )
-        
-        logger.info(f"✅ Sent ClickUp overdue notification: {count} tasks")
-    
-    async def _send_due_soon_notification(self, tasks: List[Dict[str, Any]]) -> None:
-        """Send notification for tasks due soon"""
-        count = len(tasks)
-        
-        message = f"⏰ *ClickUp: {count} Task{'s' if count != 1 else ''} Due Soon*\n\n"
-        
-        for i, task in enumerate(tasks[:5], 1):
-            name = task['name']
-            due_date = task['due_date']
-            if isinstance(due_date, str):
-                due_date = datetime.fromisoformat(due_date)
-            
-            hours_until = int((due_date - datetime.now(timezone.utc)).total_seconds() / 3600)
-            
-            message += f"{i}. *{name}*\n"
-            message += f"   📍 {task['list_name']}\n"
-            
-            if hours_until < 24:
-                message += f"   ⏰ Due in {hours_until} hour{'s' if hours_until != 1 else ''}\n\n"
-            else:
-                message += f"   ⏰ Due tomorrow\n\n"
-        
-        if count > 5:
-            message += f"_...and {count - 5} more task{'s' if count - 5 != 1 else ''}_"
-        
-        # Metadata
-        metadata = {
-            'task_count': count,
-            'notification_type': 'due_soon',
-            'task_ids': [t['task_id'] for t in tasks[:5]]
-        }
-        
-        await self.notification_manager.send_notification(
-            user_id=self.user_id,
-            notification_type='clickup',
-            notification_subtype='due_soon',
-            message_text=message,
-            message_data=metadata
-        )
-        
-        logger.info(f"✅ Sent ClickUp due soon notification: {count} tasks")
-    
-    async def _send_priority_notification(self, tasks: List[Dict[str, Any]]) -> None:
-        """Send notification for urgent priority tasks"""
-        count = len(tasks)
-        
-        message = f"🔴 *ClickUp: {count} Urgent Task{'s' if count != 1 else ''}*\n\n"
-        
-        for i, task in enumerate(tasks[:5], 1):
-            name = task['name']
-            
-            message += f"{i}. *{name}*\n"
-            message += f"   📍 {task['list_name']}\n"
-            message += f"   🔥 Priority: URGENT\n\n"
-        
-        if count > 5:
-            message += f"_...and {count - 5} more urgent task{'s' if count - 5 != 1 else ''}_"
-        
-        # Metadata
-        metadata = {
-            'task_count': count,
-            'notification_type': 'urgent_priority',
-            'task_ids': [t['task_id'] for t in tasks[:5]]
-        }
-        
-        await self.notification_manager.send_notification(
-            user_id=self.user_id,
-            notification_type='clickup',
-            notification_subtype='urgent_priority',
-            message_text=message,
-            message_data=metadata
-        )
-        
-        logger.info(f"✅ Sent ClickUp priority notification: {count} tasks")
     
     async def send_daily_summary(self) -> bool:
         """

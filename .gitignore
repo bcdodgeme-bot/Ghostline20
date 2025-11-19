@@ -87,3 +87,5 @@ modules/integrations/bluesky/__pycache__/integration_info.cpython-311.pyc
 modules/integrations/bluesky/__pycache__/multi_account_client.cpython-311.pyc
 modules/integrations/bluesky/__pycache__/notification_manager.cpython-311.pyc
 modules/integrations/bluesky/__pycache__/router.cpython-311.pyc
+sample_contact_full.json
+hubspot_properties.json
