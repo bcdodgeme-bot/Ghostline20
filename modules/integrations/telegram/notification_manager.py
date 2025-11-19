@@ -133,12 +133,64 @@ class NotificationManager:
             if buttons:
                 reply_markup = self.bot_client.create_inline_keyboard(buttons)
             
-            # Send via Telegram
-            result = await self.bot_client.send_message(
-                chat_id=chat_id,
-                text=message_text,
-                reply_markup=reply_markup
-            )
+            # All checks passed - send notification
+            try:
+                # Create inline keyboard if buttons provided
+                reply_markup = None
+                if buttons:
+                    reply_markup = self.bot_client.create_inline_keyboard(buttons)
+                
+                # Send via Telegram
+                result = await self.bot_client.send_message(
+                    chat_id=chat_id,
+                    text=message_text,
+                    reply_markup=reply_markup
+                )
+                
+                if result.get('message_id'):
+                    # Log to database
+                    notification_id = await self.db_manager.log_notification(
+                        user_id=user_id,
+                        notification_type=notification_type,
+                        notification_subtype=notification_subtype,
+                        message_data=message_data or {},
+                        telegram_message_id=result.get('message_id')
+                    )
+                    
+                    # NEW: Create/update thread in main chat
+                    thread_result = await self._create_chat_thread(
+                        user_id=user_id,
+                        notification_type=notification_type,
+                        message_text=message_text,
+                        message_data=message_data
+                    )
+                    
+                    logger.info(
+                        f"✅ Notification sent: {notification_type}/{notification_subtype} "
+                        f"(ID: {notification_id}, Telegram: {result.get('message_id')}, "
+                        f"Thread: {thread_result.get('thread_id', 'N/A')})"
+                    )
+                    
+                    return {
+                        "success": True,
+                        "notification_id": notification_id,
+                        "telegram_message_id": result.get('message_id'),
+                        "thread_id": thread_result.get('thread_id')
+                    }
+                else:
+                    logger.error(f"Failed to send notification: No message_id returned")
+                    return {
+                        "success": False,
+                        "error": "No message_id returned"
+                    }
+
+            except Exception as e:
+                logger.error(f"Exception sending notification: {e}", exc_info=True)
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+            
             
             if result.get('message_id'):
                 # Log to database
@@ -229,6 +281,68 @@ class NotificationManager:
         )
         
         return count < daily_limit
+    
+    async def _create_chat_thread(
+        self,
+        user_id: str,
+        notification_type: str,
+        message_text: str,
+        message_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create/update a thread in main chat for this notification
+        
+        Maps notification types to thread titles:
+        - weather → "Weather Alerts"
+        - bluesky → "Bluesky Drafts" or individual thread per post
+        - trends → "Trending Opportunities"
+        - etc.
+        """
+        try:
+            # Map notification types to thread titles
+            thread_titles = {
+                'weather': 'Weather Alerts',
+                'trends': 'Trending Opportunities',
+                'analytics': 'Analytics Reports',
+                'intelligence': 'Intelligence Briefings',
+                'fathom': 'Meeting Summaries',
+                'email': 'Email Notifications',
+                'calendar': 'Calendar Alerts',
+                'reminders': 'Reminders'
+            }
+            
+            # Bluesky gets individual threads per draft
+            if notification_type == 'bluesky':
+                # Extract account from message_data if available
+                account = message_data.get('account', 'unknown') if message_data else 'unknown'
+                thread_title = f"Bluesky Draft: {account}"
+            else:
+                thread_title = thread_titles.get(notification_type, f"{notification_type.title()} Notifications")
+            
+            # Call the chat API endpoint
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    "http://localhost:8000/ai/thread/from-notification",
+                    json={
+                        "notification_type": notification_type,
+                        "thread_title": thread_title,
+                        "initial_message": message_text,
+                        "message_data": message_data
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"📌 Thread {'created' if result['created'] else 'updated'}: {thread_title}")
+                    return result
+                else:
+                    logger.error(f"Failed to create thread: {response.status_code} - {response.text}")
+                    return {"success": False, "error": response.text}
+        
+        except Exception as e:
+            logger.error(f"Exception creating chat thread: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
     
     async def acknowledge_notification(
         self,
