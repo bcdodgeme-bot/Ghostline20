@@ -1226,6 +1226,84 @@ async def search_knowledge(q: str, personality: str = 'syntaxprime', limit: int 
         "count": len(results)
     }
 
+#-- Thread Management for Telegram Notifications - 11/19/25
+class CreateThreadRequest(BaseModel):
+    notification_type: str = Field(..., description="Type: weather, bluesky, etc.")
+    thread_title: str = Field(..., description="Thread title: 'Weather Alerts', etc.")
+    initial_message: str = Field(..., description="First message from SyntaxPrime")
+    message_data: Optional[Dict[str, Any]] = Field(None, description="Metadata")
+
+class CreateThreadResponse(BaseModel):
+    thread_id: str
+    thread_title: str
+    message_id: str
+    created: bool  # True if new, False if existing
+
+@router.post("/thread/from-notification", response_model=CreateThreadResponse)
+async def create_thread_from_notification(
+    request: CreateThreadRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Create/update a thread from Telegram notification
+    Pattern: Auto-create threads for notifications (like Prayer does in sidebar)
+    """
+    start_time = time.time()
+    
+    try:
+        memory_manager = get_memory_manager(user_id)
+        
+        # Check if thread already exists with this title
+        existing_threads_query = """
+        SELECT id, title 
+        FROM conversation_threads 
+        WHERE user_id = $1 AND title = $2 AND platform = 'system'
+        ORDER BY created_at DESC LIMIT 1
+        """
+        
+        from ..core.database import db_manager
+        existing = await db_manager.fetch_one(
+            existing_threads_query,
+            user_id,
+            request.thread_title
+        )
+        
+        if existing:
+            # Thread exists - add message to it
+            thread_id = str(existing['id'])
+            created = False
+            logger.info(f"📌 Using existing thread: {request.thread_title} ({thread_id})")
+        else:
+            # Create new thread
+            thread_id = await memory_manager.create_conversation_thread(
+                platform='system',
+                title=request.thread_title
+            )
+            created = True
+            logger.info(f"✨ Created new thread: {request.thread_title} ({thread_id})")
+        
+        # Add the notification message to thread
+        message_id = await memory_manager.add_message(
+            thread_id=thread_id,
+            role='assistant',  # From SyntaxPrime
+            content=request.initial_message,
+            message_data=request.message_data or {}
+        )
+        
+        response_time = int((time.time() - start_time) * 1000)
+        logger.info(f"✅ Thread notification processed in {response_time}ms")
+        
+        return CreateThreadResponse(
+            thread_id=thread_id,
+            thread_title=request.thread_title,
+            message_id=message_id,
+            created=created
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create thread from notification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/stats")
 async def get_ai_stats():
     """Get AI brain statistics"""
