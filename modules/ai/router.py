@@ -1288,6 +1288,21 @@ async def create_thread_from_notification(
             role='assistant',  # From SyntaxPrime
             content=request.initial_message,
         )
+        # Add structured metadata message (AI-parseable)
+        # Only for certain notification types that need structured data
+        if request.notification_type in ['trends', 'bluesky', 'analytics']:
+            metadata_content = f"""<notification_data type="{request.notification_type}">
+        {json.dumps(request.message_data, indent=2) if request.message_data else '{}'}
+        </notification_data>
+
+        Note: The above data is structured information about this notification. Parse it to understand the specific details and opportunities."""
+
+            await memory_manager.add_message(
+                thread_id=thread_id,
+                role='system',  # System message (not shown to user)
+                content=metadata_content
+            )
+            logger.info(f"📊 Added structured metadata for {request.notification_type}")
         
         response_time = int((time.time() - start_time) * 1000)
         logger.info(f"✅ Thread notification processed in {response_time}ms")

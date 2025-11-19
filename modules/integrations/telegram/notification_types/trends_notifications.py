@@ -108,113 +108,89 @@ class TrendsNotificationHandler:
         return result['count'] > 0 if result else False
     
     async def _send_trend_notification(self, trends: List[Dict[str, Any]]) -> None:
-        """Send notification for trending opportunities"""
-        count = len(trends)
+        """Send individual notification for each trending opportunity"""
+        if not trends:
+            return
         
-        if count == 1:
-            # Single high-priority trend
-            trend = trends[0]
-            
-            # Urgency emoji
-            urgency_emoji = "🔴" if trend['urgency_level'] == 'high' else "🟡"
-            
-            message = f"{urgency_emoji} *Trending Opportunity*\n\n"
-            message += f"*Keyword:* {trend['keyword']}\n"
-            message += f"*Business Area:* {trend['business_area']}\n"
-            message += f"*Trend Score:* {trend['trend_score_at_alert']}\n"
-            message += f"*Momentum:* {trend['trend_momentum'].upper()}\n"
-            message += f"*Urgency:* {trend['urgency_level'].upper()}\n\n"
-            
-            # Show momentum change if significant
-            if trend.get('momentum_change_percent'):
-                change = float(trend['momentum_change_percent'])
-                if change > 0:
-                    message += f"📊 Momentum increased by {change:.1f}%\n\n"
-            
-            # Add RSS insights if available
-            rss_insights = trend.get('related_rss_insights', {})
-            if rss_insights and isinstance(rss_insights, dict):
-                if rss_insights.get('summary'):
-                    message += f"💡 *Market Insight:*\n{rss_insights['summary'][:200]}\n\n"
-            
-            # Show Bluesky potential if high
-            bluesky_potential = trend.get('bluesky_engagement_potential', 0)
-            if bluesky_potential > 0.25:
-                pct = int(bluesky_potential * 100)
-                message += f"🦋 Bluesky engagement potential: {pct}%\n\n"
-            
-            message += f"*Opportunity Type:* {trend['opportunity_type']}\n"
-            message += f"Perfect timing to create content! 🚀"
-            
-            if trend.get('content_angles'):
-                angles = trend['content_angles']
-                if isinstance(angles, list) and len(angles) > 0:
-                    message += f"*Content Ideas:*\n"
-                    for angle in angles[:3]:
-                        message += f"• {angle}\n"
-                    message += "\n"
-            
-            message += f"*Competition:* {trend.get('competition_level', 'Unknown')}\n"
-            
-            # Create action buttons
-            buttons = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "🔍 Research More",
-                            "callback_data": f"trend_research:{trend['id']}"
-                        },
-                        {
-                            "text": "✍️ Create Content",
-                            "callback_data": f"trend_content:{trend['id']}"
-                        }
-                    ]
-                ]
-            }
-            
-            metadata = {
-                'trend_id': trend['id'],
-                'keyword': trend['trend_keyword'],
-                'opportunity_score': trend['opportunity_score'],
-                'trend_traffic': trend['trend_traffic']
-            }
-            
-        else:
-            # Multiple trends - digest
-            message = f"📈 *{count} Trending Opportunities*\n\n"
+        logger.info(f"Sending {len(trends)} individual trend notifications")
         
-            for i, trend in enumerate(trends[:5], 1):
-                urgency_emoji = "🔴" if trend['urgency_level'] == 'high' else "🟡"
-                message += f"{i}. {urgency_emoji} *{trend['keyword']}*\n"
-                message += f"   {trend['business_area']} | Score: {trend['trend_score_at_alert']}\n"
-                message += f"   Momentum: {trend['trend_momentum'].upper()}\n\n"
-            
-            if count > 5:
-                message += f"_...and {count - 5} more opportunities_\n\n"
-            
-            message += "Multiple trending opportunities detected! 🚀"
-            
-            buttons = None
-            
-            metadata = {
-                'opportunity_count': count,
-                'opportunity_ids': [str(t['id']) for t in trends[:5]],
-                'notification_type': 'trending_opportunity',
-                'urgency_levels': [t['urgency_level'] for t in trends[:5]]
-            }
+        # Send individual notification for each opportunity
+        for trend in trends:
+            try:
+                await self._send_individual_trend(trend)
+            except Exception as e:
+                logger.error(f"Failed to send notification for trend {trend.get('keyword')}: {e}")
+                continue
+
+    async def _send_individual_trend(self, trend: Dict[str, Any]) -> None:
+        """Send a single trend opportunity notification with action buttons"""
         
-        # Send via notification manager
+        # Format trend info
+        keyword = trend['keyword']
+        business_area = trend['business_area']
+        score = int(trend['trend_score_at_alert'])
+        momentum = trend['trend_momentum'].upper()
+        urgency = trend['urgency_level']
+        
+        # Urgency emoji
+        urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(urgency, "⚪")
+        
+        # Momentum emoji
+        momentum_emoji = {
+            "BREAKOUT": "🚀",
+            "RISING": "📈",
+            "STABLE_HIGH": "⭐",
+            "STABLE": "➡️",
+            "DECLINING": "📉"
+        }.get(momentum, "📊")
+        
+        # Build message
+        message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
+        message += f"*Business:* {business_area}\n"
+        message += f"*Score:* {score}/100 | {urgency_emoji} {urgency.upper()}\n"
+        message += f"*Momentum:* {momentum}\n"
+        
+        if trend.get('momentum_change_percent'):
+            change = trend['momentum_change_percent']
+            message += f"*Change:* {change:+.1f}%\n"
+        
+        if trend.get('related_rss_insights'):
+            message += f"\n💡 *Insights:* {trend['related_rss_insights'][:100]}...\n"
+        
+        if trend.get('bluesky_engagement_potential'):
+            message += f"🦋 *Bluesky Potential:* {trend['bluesky_engagement_potential']}\n"
+        
+        # Action buttons
+        buttons = [
+            [
+                {"text": "💬 Draft Post", "callback_data": f"trend:draft:{trend['id']}"},
+                {"text": "🔍 Research", "callback_data": f"trend:research:{trend['id']}"}
+            ],
+            [
+                {"text": "⏭️ Skip", "callback_data": f"trend:skip:{trend['id']}"},
+                {"text": "📊 Details", "callback_data": f"trend:details:{trend['id']}"}
+            ]
+        ]
+        
+        # Send notification
         await self.notification_manager.send_notification(
             user_id=self.user_id,
             notification_type='trends',
             notification_subtype='opportunity_alert',
             message_text=message,
-            buttons=buttons,  # Note: convert reply_markup to simple list format
-            message_data=metadata
+            buttons=buttons,
+            message_data={
+                'trend_id': str(trend['id']),
+                'keyword': keyword,
+                'business_area': business_area,
+                'score': score,
+                'urgency': urgency,
+                'momentum': momentum
+            }
         )
         
-        logger.info(f"✅ Sent trends notification: {count} opportunities")
-    
+        logger.info(f"✅ Sent individual trend notification: {keyword} (Score: {score})")
+        
     async def send_daily_summary(self) -> bool:
         """
         Send daily trends summary
