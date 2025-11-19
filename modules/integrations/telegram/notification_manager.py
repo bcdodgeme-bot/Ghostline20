@@ -17,16 +17,16 @@ logger = logging.getLogger(__name__)
 # Rate limits per notification type (per day)
 RATE_LIMITS = {
     'prayer': 10,      # 5 prayers + follow-ups
-    'weather': 10,
-    'reminders': 20,
-    'calendar': 50,    # High limit for events
-    'email': 20,
-    'clickup': 15,
-    'bluesky': 15,
-    'trends': 15,
+    'weather': 40,
+    'reminders': 40,
+    'calendar': 30,    # High limit for events
+    'email': 30,
+    'clickup': 30,
+    'bluesky': 30,
+    'trends': 30,
     'analytics': 3,
-    'intelligence': 50,  # ← ADD THIS - High limit for situation notifications
-    'fathom': 20
+    'intelligence': 1000,  # ← ADD THIS - High limit for situation notifications
+    'fathom': 30
 }
 
 class NotificationManager:
