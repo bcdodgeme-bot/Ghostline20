@@ -1287,7 +1287,6 @@ async def create_thread_from_notification(
             thread_id=thread_id,
             role='assistant',  # From SyntaxPrime
             content=request.initial_message,
-            message_data=request.message_data or {}
         )
         
         response_time = int((time.time() - start_time) * 1000)
