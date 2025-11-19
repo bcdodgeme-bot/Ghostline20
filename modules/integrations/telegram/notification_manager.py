@@ -171,12 +171,31 @@ class NotificationManager:
                         f"Thread: {thread_result.get('thread_id', 'N/A')})"
                     )
                     
+                    # Add "Open in Chat" button if thread was created
+                    thread_id = thread_result.get('thread_id')
+                    if thread_id and not buttons:  # Only add if no custom buttons
+                        chat_url = f"https://ghostline20-production.up.railway.app/chat?thread={thread_id}"
+                        buttons = [[{"text": "💬 Open in Chat", "url": chat_url}]]
+                        
+                        # Update Telegram message with the button
+                        try:
+                            await self.bot_client.edit_message_reply_markup(
+                                chat_id=chat_id,
+                                message_id=result.get('message_id'),
+                                reply_markup=self.bot_client.create_inline_keyboard(buttons)
+                            )
+                            logger.info(f"🔗 Added chat deeplink button to notification")
+                        except Exception as e:
+                            logger.warning(f"Could not add chat button: {e}")
+
                     return {
                         "success": True,
                         "notification_id": notification_id,
                         "telegram_message_id": result.get('message_id'),
-                        "thread_id": thread_result.get('thread_id')
+                        "thread_id": thread_id,
+                        "chat_url": f"https://ghostline20-production.up.railway.app/chat?thread={thread_id}" if thread_id else None
                     }
+                    
                 else:
                     logger.error(f"Failed to send notification: No message_id returned")
                     return {
