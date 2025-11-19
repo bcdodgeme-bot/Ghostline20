@@ -144,6 +144,14 @@ class TrendsNotificationHandler:
             "DECLINING": "📉"
         }.get(momentum, "📊")
         
+        # Escape markdown special characters for Telegram
+        def escape_markdown(text: str) -> str:
+            """Escape special characters for Telegram markdown"""
+            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+            for char in special_chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+        
         # Build message
         message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
         message += f"*Business:* {business_area}\n"
