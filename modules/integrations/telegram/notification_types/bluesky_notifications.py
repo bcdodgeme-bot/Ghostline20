@@ -71,6 +71,7 @@ class BlueskyNotificationHandler:
             engagement_score,
             opportunity_type,
             post_context,
+            post_uri,
             already_engaged,
             detected_at,
             expires_at
@@ -146,30 +147,40 @@ class BlueskyNotificationHandler:
                 expires = datetime.fromisoformat(expires.replace('Z', '+00:00'))
             message += f"\n⏰ Expires: {expires.strftime('%I:%M %p %m/%d')}"
         
-        # Create action buttons
-        button_rows = [
-            [
-                {"text": f"{emoji} Generate {opp_type.replace('_', ' ').title()}", "callback_data": f"bluesky:draft:{opp['id']}"},
-                {"text": "👀 View Post", "callback_data": f"bluesky:view:{opp['id']}"}
-            ],
-            [
-                {"text": "⏭️ Dismiss", "callback_data": f"bluesky:dismiss:{opp['id']}"},
-                {"text": "⏰ Snooze", "callback_data": f"bluesky:snooze:{opp['id']}"}
-            ],
-            [
-                {"text": "ℹ️ More Details", "callback_data": f"bluesky:details:{opp['id']}"}
-            ]
-        ]
+        # Parse post_uri to create Bluesky web URL
+        post_uri = opp.get('post_uri', '')
+        bluesky_url = None
         
-        # Send notification
+        if post_uri and post_uri.startswith('at://'):
+            try:
+                # Format: at://did:plc:xxx/app.bsky.feed.post/yyy
+                parts = post_uri.replace('at://', '').split('/')
+                if len(parts) >= 3:
+                    did = parts[0]
+                    post_id = parts[2]
+                    bluesky_url = f"https://bsky.app/profile/{did}/post/{post_id}"
+            except Exception as e:
+                logger.warning(f"Failed to parse post_uri: {e}")
+        
+        # Create action buttons with direct URLs (no broken callbacks)
+        button_rows = []
+        
+        # Row 1: View Post button (if we successfully parsed the URL)
+        if bluesky_url:
+            button_rows.append([
+                {"text": "👀 View Post", "url": bluesky_url}
+            ])
+        
+        # Send notification (notification_manager will automatically add "Open in Chat" button)
         await self.notification_manager.send_notification(
             user_id=self.user_id,
             notification_type='bluesky',
             notification_subtype='engagement_opportunity',
             message_text=message,
-            buttons=button_rows,
+            buttons=button_rows if button_rows else None,
             message_data={
                 'opportunity_id': str(opp['id']),
+                'post_uri': post_uri,
                 'account': opp['detected_by_account'],
                 'author': author,
                 'score': score,

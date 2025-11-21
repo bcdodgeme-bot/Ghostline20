@@ -143,9 +143,17 @@ class NotificationManager:
                 # Continue sending notification even if thread fails
             
             # Add "Open in Chat" button if thread was created successfully
-            if thread_id and not buttons:
+            if thread_id:
                 chat_url = f"https://ghostline20-production.up.railway.app/chat?thread={thread_id}"
-                buttons = [[{"text": "💬 Open in Chat", "url": chat_url}]]
+                open_chat_button = [{"text": "💬 Open in Chat", "url": chat_url}]
+                
+                if buttons:
+                    # Append to existing buttons
+                    buttons.append(open_chat_button)
+                else:
+                    # Create new button row
+                    buttons = [open_chat_button]
+                
                 logger.info(f"🔗 Adding chat deeplink: {chat_url}")
             
             # Create inline keyboard if buttons provided
