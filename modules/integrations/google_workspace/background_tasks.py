@@ -33,7 +33,10 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 from . import SUPPORTED_SITES
-from ...core.database import db_manager
+from modules.core.database import db_manager
+
+# Single user ID (intentionally hardcoded for single-user system)
+DEFAULT_USER_ID = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
 # =============================================================================
 # CONFIGURATION - Intervals in seconds
@@ -142,19 +145,10 @@ class GoogleWorkspaceBackgroundTasks:
         logger.info("✅ All background tasks stopped")
     
     async def _get_user_id(self) -> Optional[str]:
-        """Get the user ID from database (single user system)"""
-        try:
-            conn = await db_manager.get_connection()
-            try:
-                user_id = await conn.fetchval("SELECT id FROM users WHERE is_active = TRUE LIMIT 1")
-                if user_id:
-                    logger.info(f"📌 Background tasks will run for user: {user_id}")
-                return str(user_id) if user_id else None
-            finally:
-                await db_manager.release_connection(conn)
-        except Exception as e:
-            logger.error(f"❌ Failed to get user ID: {e}")
-            return None
+        """Get the user ID (single user system - hardcoded)"""
+        # Single user system - use hardcoded ID to avoid database mismatch
+        logger.info(f"📌 Background tasks will run for user: {DEFAULT_USER_ID}")
+        return DEFAULT_USER_ID
     
     async def _run_periodic_task(self, task_name: str, interval: int, task_func):
         """
@@ -380,7 +374,7 @@ class GoogleWorkspaceBackgroundTasks:
             'tasks': {}
         }
         
-        for task_name in ['token_refresh', 'email_sync', 'analytics_sync', 
+        for task_name in ['token_refresh', 'email_sync', 'analytics_sync',
                           'search_console_sync', 'calendar_sync']:
             task_status = {
                 'last_run': self._last_run.get(task_name),

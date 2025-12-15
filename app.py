@@ -100,7 +100,7 @@ from modules.integrations.fathom import router as fathom_router
 from modules.integrations.fathom import get_integration_info as fathom_integration_info, check_module_health as fathom_module_health
 
 #-- Section 2l: Intelligence Hub Integration - added 10/22/25
-from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
+from modules.intelligence.intelligence_orchestrator import get_intelligence_orchestrator
 
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
@@ -475,8 +475,7 @@ async def trends_monitoring_cycle_task():
                 
                 from modules.integrations.google_trends.keyword_monitor import KeywordMonitor
                 
-                database_url = os.getenv('DATABASE_URL')
-                monitor = KeywordMonitor(database_url, mode='normal')
+                monitor = KeywordMonitor(mode='normal')
                 result = await monitor.run_monitoring_cycle()
                 
                 if result.get('success'):
@@ -508,8 +507,7 @@ async def bluesky_scanning_cycle_task():
                     engagement_detector_module = importlib.import_module('modules.integrations.bluesky.engagement_detector')
                     EngagementDetector = getattr(engagement_detector_module, 'BlueskyEngagementDetector')
                     
-                    database_url = os.getenv('DATABASE_URL')
-                    detector = EngagementDetector(database_url)
+                    detector = EngagementDetector()
                     results = await detector.scan_all_accounts()
                     
                 except AttributeError:
@@ -572,7 +570,7 @@ async def intelligence_cycle_task():
             if await app.state.telegram_kill_switch.is_enabled(DEFAULT_USER_ID):
                 logger.info("🧠 Running intelligence cycle...")
                 
-                orchestrator = IntelligenceOrchestrator(
+                orchestrator = get_intelligence_orchestrator(
                     db_manager=db_manager,
                     telegram_service=app.state.telegram_notification_manager,
                     user_id=DEFAULT_USER_ID
@@ -606,7 +604,7 @@ async def daily_intelligence_digest_task():
                 if await app.state.telegram_kill_switch.is_enabled(DEFAULT_USER_ID):
                     logger.info("📊 Sending daily intelligence digest...")
                     
-                    orchestrator = IntelligenceOrchestrator(
+                    orchestrator = get_intelligence_orchestrator(
                         db_manager=db_manager,
                         user_id=DEFAULT_USER_ID
                     )
