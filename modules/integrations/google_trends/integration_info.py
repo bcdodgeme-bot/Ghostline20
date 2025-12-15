@@ -20,7 +20,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-from ...core.database import db_manager
+from modules.core.database import db_manager
 
 # Import singleton getters for all module components
 try:

@@ -72,11 +72,11 @@ def _get_keyword_monitor(mode: str = 'normal'):
     
     if mode == 'normal':
         if _keyword_monitor_default is None:
-            _keyword_monitor_default = KeywordMonitor(_get_database_url(), mode='normal')
+            _keyword_monitor_default = KeywordMonitor(mode='normal')
         return _keyword_monitor_default
     else:
         # Non-default modes get fresh instances (they're rarely used)
-        return KeywordMonitor(_get_database_url(), mode=mode)
+        return KeywordMonitor(mode=mode)
 
 
 # ============================================================================

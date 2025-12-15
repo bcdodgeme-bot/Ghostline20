@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import logging
 import json
 
-from ...core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +121,9 @@ class RSSDatabase:
                     $1, $2, $3, $4, $5,
                     $6, $7, $8, $9,
                     NOW(), NOW(),
-                    setweight(to_tsvector('english', COALESCE($2, '')), 'A') ||
-                    setweight(to_tsvector('english', COALESCE($5, '')), 'B') ||
-                    setweight(to_tsvector('english', COALESCE($3, '')), 'C')
+                    setweight(to_tsvector('english', COALESCE($2::text, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE($5::text, '')), 'B') ||
+                    setweight(to_tsvector('english', COALESCE($3::text, '')), 'C')
                 )
                 ON CONFLICT DO NOTHING
             '''

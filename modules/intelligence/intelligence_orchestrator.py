@@ -136,20 +136,21 @@ class IntelligenceOrchestrator:
         self.user_id = user_id or USER_ID
         
         # Initialize all context collectors using singleton getters
-        self.calendar_collector = get_calendar_collector(db_manager=db_manager)
-        self.email_collector = get_email_collector(db_manager=db_manager)
-        self.meeting_collector = get_meeting_collector(db_manager=db_manager)
-        self.conversation_collector = get_conversation_collector(db_manager=db_manager)
-        self.trend_collector = get_trend_collector(db_manager=db_manager)
-        self.weather_collector = get_weather_collector(db_manager=db_manager)
-        self.knowledge_collector = get_knowledge_collector(db_manager=db_manager)
-        self.action_item_collector = get_performance_collector(db_manager=db_manager)
-        self.bluesky_collector = get_bluesky_collector(db_manager=db_manager)
+        # Note: Singleton getters use global db_manager from imports, no parameter needed
+        self.calendar_collector = get_calendar_collector()
+        self.email_collector = get_email_collector()
+        self.meeting_collector = get_meeting_collector()
+        self.conversation_collector = get_conversation_collector()
+        self.trend_collector = get_trend_collector()
+        self.weather_collector = get_weather_collector()
+        self.knowledge_collector = get_knowledge_collector()
+        self.action_item_collector = get_performance_collector()
+        self.bluesky_collector = get_bluesky_collector()
         
         # Initialize intelligence modules using singleton getters
         self.situation_detector = get_situation_detector()
-        self.situation_manager = get_situation_manager(db_manager=db_manager)
-        self.action_suggester = get_action_suggester(db_manager=db_manager)
+        self.situation_manager = get_situation_manager()
+        self.action_suggester = get_action_suggester()
         
         # Initialize action executor with integrations
         try:
@@ -168,7 +169,6 @@ class IntelligenceOrchestrator:
             logger.warning(f"Content generator not available: {e}")
 
         self.action_executor = get_action_executor(
-            db_manager=db_manager,
             clickup_handler=clickup_handler,
             content_generator=content_generator
         )

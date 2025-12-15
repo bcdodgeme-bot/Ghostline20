@@ -20,7 +20,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from ...core.database import db_manager
+from modules.core.database import db_manager
 from .keyword_expander import get_keyword_expander
 from .trends_client import get_google_trends_client
 from .database_manager import get_trends_database
