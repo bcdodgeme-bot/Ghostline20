@@ -3,11 +3,14 @@ Telegram Callback Handler - Button Click Processing
 Processes inline keyboard button clicks and updates notification state
 UPDATED: Added Contextual Intelligence Layer handlers
 FIXED: Corrected database connection patterns (db_manager instead of asyncpg.connect)
+FIXED: 2025-12-15 - Added html.escape() for user content to prevent Telegram parse errors
+FIXED: 2025-12-15 - Corrected button format (list not dict) in all handlers
 """
 
 import os
 import logging
 import json
+import html
 from typing import Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
@@ -15,7 +18,7 @@ from uuid import UUID
 from .bot_client import TelegramBotClient
 from .database_manager import TelegramDatabaseManager
 from .notification_manager import NotificationManager
-from ...core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +417,7 @@ class CallbackHandler:
         return {"success": False, "error": "Unknown ClickUp action"}
     
     # ========================================================================
-    # BLUESKY TRAINING CALLBACKS
+    # BLUESKY CALLBACKS
     # ========================================================================
     
     async def _handle_bluesky_callback(
@@ -534,22 +537,25 @@ class CallbackHandler:
                 
                 draft_text = draft_result['draft_text']
                 
-                # Build draft notification message
-                message_text = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
-                message_text += f"*Replying to:* @{opportunity['author_handle']}\n"
-                message_text += f'"{opportunity["post_text"][:100]}..."\n\n'
-                message_text += f"*Your reply:*\n{draft_text}\n\n"
-                message_text += f"_{len(draft_text)} characters_"
+                # Build draft notification message - ESCAPE USER CONTENT
+                post_preview = html.escape(str(opportunity['post_text'] or '')[:100])
+                escaped_draft = html.escape(str(draft_text or ''))
+                escaped_handle = html.escape(str(opportunity['author_handle'] or ''))
+                escaped_account = html.escape(str(opportunity['detected_by_account'] or ''))
                 
-                # Buttons for draft approval
-                buttons = {
-                    'inline_keyboard': [
-                        [
-                            {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}"},
-                            {'text': '⏭️ Skip', 'callback_data': f"bluesky:ignore:{opportunity_id}"}
-                        ]
+                message_text = f"💬 <b>Draft Reply</b> (@{escaped_account})\n\n"
+                message_text += f"<b>Replying to:</b> @{escaped_handle}\n"
+                message_text += f'"{post_preview}..."\n\n'
+                message_text += f"<b>Your reply:</b>\n{escaped_draft}\n\n"
+                message_text += f"<i>{len(draft_text)} characters</i>"
+                
+                # Buttons for draft approval - USE LIST FORMAT
+                buttons = [
+                    [
+                        {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}"},
+                        {'text': '⏭️ Skip', 'callback_data': f"bluesky:ignore:{opportunity_id}"}
                     ]
-                }
+                ]
                 
                 await self.bot_client.edit_message(
                     message_id,
@@ -563,7 +569,7 @@ class CallbackHandler:
                 logger.error(f"Reply draft generation failed: {e}", exc_info=True)
                 await self.bot_client.edit_message(
                     message_id,
-                    f"❌ Error: {str(e)}",
+                    f"❌ Error: {html.escape(str(e))}",
                     reply_markup=None
                 )
                 return {"success": False, "ack_text": "❌ Error"}
@@ -609,7 +615,7 @@ class CallbackHandler:
                     
                     await self.bot_client.edit_message(
                         message_id,
-                        f"🔗 [View Conversation]({url})",
+                        f"🔗 <a href=\"{url}\">View Conversation</a>",
                         reply_markup=None
                     )
                     return {"success": True, "ack_text": "Opening..."}
@@ -683,25 +689,28 @@ class CallbackHandler:
                 
                 draft_text = draft_result['draft_text']
                 
-                # Build draft notification message
-                message = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
-                message += f"*Replying to:* @{opportunity['author_handle']}\n"
-                message += f'"{opportunity["post_text"][:100]}..."\n\n'
-                message += f"*Your reply:*\n{draft_text}\n\n"
-                message += f"_{len(draft_text)} characters_"
+                # Build draft notification message - ESCAPE USER CONTENT
+                post_preview = html.escape(str(opportunity['post_text'] or '')[:100])
+                escaped_draft = html.escape(str(draft_text or ''))
+                escaped_handle = html.escape(str(opportunity['author_handle'] or ''))
+                escaped_account = html.escape(str(opportunity['detected_by_account'] or ''))
                 
-                # Buttons for draft approval
-                buttons = {
-                    'inline_keyboard': [
-                        [
-                            {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
-                            {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
-                        ],
-                        [
-                            {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
-                        ]
+                message = f"💬 <b>Draft Reply</b> (@{escaped_account})\n\n"
+                message += f"<b>Replying to:</b> @{escaped_handle}\n"
+                message += f'"{post_preview}..."\n\n'
+                message += f"<b>Your reply:</b>\n{escaped_draft}\n\n"
+                message += f"<i>{len(draft_text)} characters</i>"
+                
+                # Buttons for draft approval - USE LIST FORMAT
+                buttons = [
+                    [
+                        {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
+                        {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
+                    ],
+                    [
+                        {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
                     ]
-                }
+                ]
                 
                 await self.bot_client.edit_message(
                     message_id,
@@ -715,7 +724,7 @@ class CallbackHandler:
                 logger.error(f"Reply draft generation failed: {e}", exc_info=True)
                 await self.bot_client.edit_message(
                     message_id,
-                    f"❌ Error: {str(e)}",
+                    f"❌ Error: {html.escape(str(e))}",
                     reply_markup=None
                 )
                 return {"success": False, "ack_text": "❌ Error"}
@@ -771,7 +780,7 @@ class CallbackHandler:
                 logger.error(f"Like failed: {e}")
                 await self.edit_message(
                     message_id,
-                    f"❌ Failed to like: {str(e)}"
+                    f"❌ Failed to like: {html.escape(str(e))}"
                 )
                 return {"success": False, "ack_text": "Error"}
             
@@ -848,7 +857,7 @@ class CallbackHandler:
                 
                 await self.edit_message(
                     message_id,
-                    f"✅ Sent {item_count} action items to ClickUp!\n\n_Meeting marked as processed._"
+                    f"✅ Sent {item_count} action items to ClickUp!\n\n<i>Meeting marked as processed.</i>"
                 )
                 
                 logger.info(f"✅ Meeting {meeting_id} marked as processed")
@@ -856,7 +865,7 @@ class CallbackHandler:
                 
             except Exception as e:
                 logger.error(f"Failed to process meeting: {e}")
-                await self.edit_message(message_id, f"❌ Error: {str(e)}")
+                await self.edit_message(message_id, f"❌ Error: {html.escape(str(e))}")
                 return {"success": False, "ack_text": "Error"}
             
             finally:
@@ -986,17 +995,21 @@ class CallbackHandler:
                 if not situation:
                     return {"success": False, "error": "Situation not found"}
                 
-                # Format detailed view
-                details = f"""🧠 **Situation Details**
+                # Format detailed view - ESCAPE USER CONTENT
+                sit_type = html.escape(str(situation['situation_type']).replace('_', ' ').title())
+                context_summary = html.escape(str(situation.get('context_summary', 'No additional context')))
+                detected_at = html.escape(str(situation.get('detected_at', 'Unknown')))
+                
+                details = f"""🧠 <b>Situation Details</b>
 
-**Type:** {situation['situation_type'].replace('_', ' ').title()}
-**Priority:** {situation['priority_score']}/10
-**Confidence:** {int(situation['confidence_score']*100)}%
+<b>Type:</b> {sit_type}
+<b>Priority:</b> {situation['priority_score']}/10
+<b>Confidence:</b> {int(situation['confidence_score']*100)}%
 
-**Context:**
-{situation.get('context_summary', 'No additional context')}
+<b>Context:</b>
+{context_summary}
 
-**Detected:** {situation.get('detected_at', 'Unknown')}
+<b>Detected:</b> {detected_at}
 """
                 
                 await self.bot_client.edit_message(
@@ -1032,9 +1045,11 @@ class CallbackHandler:
                 )
                 
                 if result.get('success'):
+                    # ESCAPE the message from action executor
+                    result_message = html.escape(str(result.get('message', 'Action executed successfully')))
                     await self.bot_client.edit_message(
                         message_id,
-                        f"✅ {result.get('message', 'Action executed successfully')}",
+                        f"✅ {result_message}",
                         reply_markup=None
                     )
                     
@@ -1043,9 +1058,10 @@ class CallbackHandler:
                         "ack_text": "Action executed"
                     }
                 else:
+                    result_message = html.escape(str(result.get('message', 'Action failed')))
                     await self.bot_client.edit_message(
                         message_id,
-                        f"❌ {result.get('message', 'Action failed')}",
+                        f"❌ {result_message}",
                         reply_markup=None
                     )
                     

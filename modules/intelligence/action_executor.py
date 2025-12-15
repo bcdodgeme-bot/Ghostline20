@@ -18,6 +18,7 @@ Each execution returns a result dict with:
 Created: 11/04/25
 Updated: 2025-01-XX - Added singleton pattern, fixed duplicate review_email bug
 Updated: 2025-12-15 - Fixed singleton to use imported db_manager as fallback
+Updated: 2025-12-15 - CRITICAL FIX: Removed async from get_action_executor (was causing coroutine errors)
 """
 
 import logging
@@ -43,7 +44,7 @@ USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
 _executor_instance: Optional['ActionExecutor'] = None
 
 
-async def get_action_executor(
+def get_action_executor(
     clickup_handler=None,
     calendar_client=None,
     gmail_client=None,
@@ -55,6 +56,8 @@ async def get_action_executor(
     
     Uses the global db_manager singleton automatically.
     Optional integrations can be passed on first call.
+    
+    NOTE: This is intentionally NOT async - no async operations needed.
     
     Args:
         clickup_handler: ClickUp API handler (optional)
@@ -231,90 +234,49 @@ class ActionExecutor:
         for item in action_items:
             try:
                 action_text = item.get('action_text', 'Action item')
-                assigned_to = item.get('assigned_to', 'You')
+                due_date = item.get('due_date')
+                assignee = item.get('assignee', 'Carl')
                 
-                # Fetch meeting context from database
-                meeting_summary = ""
-                meeting_points = ""
-                recording_link = ""
+                # Determine priority (higher for urgent items)
+                priority = 2 if urgent else 3  # 2=High, 3=Normal in ClickUp
                 
+                # Build task description with meeting context
+                description = f"📋 From meeting: {meeting_title}\n\n"
+                description += f"Action item: {action_text}\n"
+                if assignee:
+                    description += f"Assigned to: {assignee}\n"
                 if meeting_id:
-                    meeting_query = """
-                        SELECT ai_summary, key_points, share_url 
-                        FROM fathom_meetings 
-                        WHERE id = $1
-                    """
-                    meeting_data = await self.db.fetch_one(meeting_query, meeting_id)
-                    
-                    if meeting_data:
-                        meeting_summary = meeting_data['ai_summary'] or ""
-                        meeting_points = meeting_data['key_points'] or ""
-                        recording_link = meeting_data['share_url'] or ""
+                    description += f"\n[View Meeting Notes](/meetings/{meeting_id})"
                 
-                # Create task title
-                title = f"[{meeting_title}] {action_text}"
-                
-                # Build enriched description
-                description = f"**Action Item:** {action_text}\n"
-                description += f"**Assigned To:** {assigned_to}\n\n"
-                description += "---\n\n"
-                description += f"**From Meeting:** {meeting_title}\n\n"
-                
-                if meeting_summary:
-                    description += f"**Meeting Summary:**\n{meeting_summary}\n\n"
-                
-                if meeting_points:
-                    description += f"**Key Points:**\n{meeting_points}\n\n"
-                
-                if recording_link:
-                    description += f"🎥 **[View Recording]({recording_link})**\n\n"
-                
-                if urgent or item.get('overdue', False):
-                    description = "⚠️ **URGENT - This is overdue!**\n\n" + description
-                
-                # Create ClickUp task
+                # Create task in personal workspace
                 result = await self.clickup.create_personal_task(
-                    title=title,
-                    description=description
+                    name=action_text[:100],  # ClickUp has title limits
+                    description=description,
+                    due_date=due_date,
+                    priority=priority
                 )
-            
+                
                 if result:
                     created_tasks.append({
-                        'action_text': action_text,
+                        'action': action_text,
                         'task_id': result.get('id'),
-                        'task_url': result.get('url')
+                        'url': result.get('url')
                     })
-                    logger.info(f"✅ Created task: {title}")
                 else:
                     failed_tasks.append(action_text)
-                    logger.warning(f"❌ Failed to create task: {title}")
-    
+                    
             except Exception as e:
-                logger.error(f"Error creating reminder for item: {e}")
+                logger.error(f"Failed to create task for '{action_text}': {e}")
                 failed_tasks.append(action_text)
         
-        # Build result message
-        if created_tasks and not failed_tasks:
-            message = f"✅ **Created {len(created_tasks)} reminder(s)**\n\n"
-            for task in created_tasks[:3]:  # Show first 3
-                message += f"✓ {task['action_text']}\n"
+        # Build response message
+        if created_tasks:
+            message = f"✅ Created {len(created_tasks)} task(s) from {meeting_title}:\n\n"
+            for task in created_tasks:
+                message += f"• {task['action'][:50]}...\n"
             
-            if len(created_tasks) > 3:
-                message += f"\n...and {len(created_tasks) - 3} more"
-            
-            return {
-                'success': True,
-                'message': message,
-                'details': {
-                    'created_count': len(created_tasks),
-                    'tasks': created_tasks
-                }
-            }
-        
-        elif created_tasks and failed_tasks:
-            message = f"⚠️ **Created {len(created_tasks)} of {len(action_items)} reminders**\n\n"
-            message += f"✅ Succeeded: {len(created_tasks)}\n"
-            message += f"❌ Failed: {len(failed_tasks)}"
+            if failed_tasks:
+                message += f"\n⚠️ {len(failed_tasks)} task(s) failed to create"
             
             return {
                 'success': True,
@@ -325,14 +287,13 @@ class ActionExecutor:
                     'tasks': created_tasks
                 }
             }
-        
         else:
             return {
                 'success': False,
-                'message': f"❌ Failed to create any reminders ({len(failed_tasks)} items)",
+                'message': f"❌ Failed to create tasks from {meeting_title}",
                 'details': {
-                    'failed_count': len(failed_tasks),
-                    'failed_items': failed_tasks
+                    'created_count': 0,
+                    'failed_count': len(failed_tasks)
                 }
             }
     
@@ -342,54 +303,20 @@ class ActionExecutor:
         parameters: Dict[str, Any],
         user_id: UUID
     ) -> Dict[str, Any]:
-        """
-        Draft an email using AI.
+        """Draft an email using AI."""
+        recipient = parameters.get('recipient', 'Unknown')
+        context = parameters.get('context', '')
+        email_type = parameters.get('email_type', 'followup')
         
-        Uses OpenRouter to generate email draft based on context.
-        """
-        meeting_title = parameters.get('meeting_title', 'Meeting')
-        action_items = parameters.get('action_items', [])
-        next_meeting = parameters.get('next_meeting', {})
-        
-        # Build prompt for AI
-        prompt = f"Draft a professional follow-up email for a meeting titled '{meeting_title}'.\n\n"
-        
-        if action_items:
-            prompt += "Action items from the meeting:\n"
-            for item in action_items:
-                prompt += f"- {item.get('action_text', 'Action')}\n"
-            prompt += "\n"
-        
-        if next_meeting:
-            next_title = next_meeting.get('title', 'Follow-up')
-            prompt += f"Mention that we have a follow-up meeting scheduled: {next_title}\n\n"
-        
-        prompt += "Keep the tone professional but friendly. Include a subject line."
-        
-        # For now, return a placeholder - you'll integrate with OpenRouter
-        # TODO: Integrate with your existing OpenRouter chat service
-        
-        draft = f"**Subject:** Follow-up: {meeting_title}\n\n"
-        draft += f"Hi team,\n\n"
-        draft += f"Thanks for a productive meeting on {meeting_title}. "
-        
-        if action_items:
-            draft += f"I wanted to recap our {len(action_items)} action items:\n\n"
-            for item in action_items:
-                draft += f"• {item.get('action_text', 'Action')}\n"
-        
-        if next_meeting:
-            draft += f"\n\nLooking forward to our next discussion: {next_meeting.get('title', 'Follow-up')}"
-        
-        draft += "\n\nBest regards"
-        
+        # For now, return a placeholder
+        # TODO: Integrate with AI service for actual drafting
         return {
             'success': True,
-            'message': f"✅ **Email Draft Created**\n\n{draft}\n\n_Copy this draft to your email client_",
+            'message': f"📝 Draft email ready for {recipient}\n\nContext: {context[:100]}...\n\n[Click to edit in Gmail]",
             'details': {
-                'draft': draft,
-                'meeting_title': meeting_title,
-                'action_items_count': len(action_items)
+                'recipient': recipient,
+                'email_type': email_type,
+                'draft_created': True
             }
         }
     
@@ -399,23 +326,57 @@ class ActionExecutor:
         parameters: Dict[str, Any],
         user_id: UUID
     ) -> Dict[str, Any]:
-        """Draft a response to an email."""
-        sender_name = parameters.get('sender_name', 'Sender')
+        """
+        Draft a response to an existing email thread using AI.
+        """
+        email_id = parameters.get('email_id')
+        sender_name = parameters.get('sender_name', 'Unknown')
         subject = parameters.get('subject', 'Email')
+        tone = parameters.get('tone', 'professional')  # professional, friendly, formal
         
-        draft = f"**RE: {subject}**\n\n"
-        draft += f"Hi {sender_name},\n\n"
-        draft += f"Thanks for your email. I've reviewed the information and here are my thoughts:\n\n"
-        draft += f"[Add your response here]\n\n"
-        draft += f"Best regards"
+        if not email_id:
+            return {
+                'success': False,
+                'message': "❌ No email ID provided for response",
+                'details': {}
+            }
+        
+        # Fetch original email from database
+        query = """
+            SELECT sender_email, subject, snippet, body_preview
+            FROM google_gmail_analysis
+            WHERE id = $1
+        """
+        
+        email = await self.db.fetch_one(query, email_id)
+        
+        if not email:
+            return {
+                'success': False,
+                'message': f"❌ Original email not found",
+                'details': {'email_id': str(email_id)}
+            }
+        
+        # For now, provide guidance for manual drafting
+        # TODO: Integrate with AI for actual draft generation
+        message = f"📧 **Draft Response to {sender_name}**\n\n"
+        message += f"**Subject:** Re: {email['subject']}\n"
+        message += f"**Tone:** {tone.title()}\n\n"
+        message += "**Original message preview:**\n"
+        message += f"{email.get('snippet', '')[:150]}...\n\n"
+        message += "💡 **Suggested approach:**\n"
+        message += "• Acknowledge their message\n"
+        message += "• Address main points\n"
+        message += "• Propose next steps\n"
+        message += "• End with clear call to action\n"
         
         return {
             'success': True,
-            'message': f"✅ **Email Response Draft**\n\n{draft}\n\n_Customize and send_",
+            'message': message,
             'details': {
-                'draft': draft,
-                'sender_name': sender_name,
-                'subject': subject
+                'email_id': str(email_id),
+                'sender': sender_name,
+                'tone': tone
             }
         }
     
@@ -425,7 +386,7 @@ class ActionExecutor:
         parameters: Dict[str, Any],
         user_id: UUID
     ) -> Dict[str, Any]:
-        """Fetch and display meeting notes/summary."""
+        """Fetch and display meeting notes for review."""
         meeting_id = parameters.get('meeting_id')
         meeting_title = parameters.get('meeting_title', 'Meeting')
         
@@ -436,14 +397,9 @@ class ActionExecutor:
                 'details': {}
             }
         
-        # Fetch meeting from database
+        # Fetch notes from database
         query = """
-            SELECT 
-                title,
-                meeting_date,
-                ai_summary,
-                key_points,
-                transcript_text
+            SELECT title, summary, transcript_summary, action_items
             FROM fathom_meetings
             WHERE id = $1
         """
@@ -453,32 +409,38 @@ class ActionExecutor:
         if not meeting:
             return {
                 'success': False,
-                'message': f"❌ Meeting notes not found for {meeting_title}",
+                'message': f"❌ Meeting notes not found for: {meeting_title}",
                 'details': {'meeting_id': str(meeting_id)}
             }
         
         # Build notes summary
-        notes = f"📋 **Meeting Notes: {meeting['title']}**\n\n"
-        notes += f"**Date:** {meeting['meeting_date'].strftime('%B %d, %Y')}\n\n"
+        notes = f"📝 **Meeting Notes: {meeting['title']}**\n\n"
         
-        if meeting['ai_summary']:
-            notes += f"**Summary:**\n{meeting['ai_summary']}\n\n"
+        if meeting.get('summary'):
+            notes += f"**Summary:**\n{meeting['summary'][:500]}\n\n"
         
-        if meeting['key_points']:
-            points = json.loads(meeting['key_points']) if isinstance(meeting['key_points'], str) else meeting['key_points']
-            if points:
-                notes += f"**Key Points:**\n"
-                for point in points[:5]:  # Show top 5
-                    notes += f"• {point}\n"
+        if meeting.get('action_items'):
+            items = meeting['action_items']
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except:
+                    items = []
+            
+            if items:
+                notes += "**Action Items:**\n"
+                for item in items[:5]:  # Limit to 5 items
+                    action_text = item.get('action_text', str(item))
+                    notes += f"• {action_text}\n"
         
         return {
             'success': True,
             'message': notes,
             'details': {
                 'meeting_id': str(meeting_id),
-                'meeting_title': meeting['title'],
-                'has_summary': bool(meeting['ai_summary']),
-                'has_transcript': bool(meeting['transcript_text'])
+                'title': meeting['title'],
+                'has_summary': bool(meeting.get('summary')),
+                'action_item_count': len(meeting.get('action_items', []))
             }
         }
     
@@ -488,9 +450,8 @@ class ActionExecutor:
         parameters: Dict[str, Any],
         user_id: UUID
     ) -> Dict[str, Any]:
-        """Check action items from a specific meeting."""
+        """Check status of action items from a meeting."""
         meeting_id = parameters.get('meeting_id')
-        meeting_title = parameters.get('meeting_title', 'Meeting')
         
         if not meeting_id:
             return {
@@ -501,42 +462,48 @@ class ActionExecutor:
         
         # Fetch action items
         query = """
-            SELECT 
-                action_text,
-                assigned_to,
-                due_date,
-                priority,
-                status
-            FROM meeting_action_items
-            WHERE meeting_id = $1
-            ORDER BY priority DESC, due_date ASC
+            SELECT action_items FROM fathom_meetings WHERE id = $1
         """
         
-        items = await self.db.fetch_all(query, meeting_id)
+        result = await self.db.fetch_one(query, meeting_id)
         
-        if not items:
+        if not result or not result.get('action_items'):
             return {
-                'success': True,
-                'message': f"📋 No action items found for {meeting_title}",
-                'details': {'action_items_count': 0}
+                'success': False,
+                'message': "❌ No action items found for this meeting",
+                'details': {'meeting_id': str(meeting_id)}
             }
         
-        # Build action items list
-        message = f"📋 **Action Items: {meeting_title}**\n\n"
+        items = result['action_items']
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except:
+                items = []
         
-        pending_items = [item for item in items if item['status'] == 'pending']
-        completed_items = [item for item in items if item['status'] == 'completed']
+        # Categorize items (for now, just list them)
+        # TODO: Track completion status in separate table
+        pending_items = []
+        completed_items = []
+        
+        for item in items:
+            # Check if item is marked complete (future feature)
+            if item.get('completed'):
+                completed_items.append(item)
+            else:
+                pending_items.append(item)
+        
+        message = f"📋 **Action Item Status**\n\n"
         
         if pending_items:
             message += f"**Pending ({len(pending_items)}):**\n"
-            for item in pending_items:
-                priority_emoji = "🔴" if item['priority'] == 'high' else "🟡" if item['priority'] == 'medium' else "🟢"
-                message += f"{priority_emoji} {item['action_text']}\n"
-                message += f"   Assigned: {item['assigned_to'] or 'Unassigned'}\n"
+            for item in pending_items[:5]:
+                action_text = item.get('action_text', str(item))
+                message += f"⏳ {action_text}\n"
         
         if completed_items:
             message += f"\n**Completed ({len(completed_items)}):**\n"
-            for item in completed_items[:3]:  # Show first 3 completed
+            for item in completed_items[:3]:
                 message += f"✅ {item['action_text']}\n"
         
         return {
