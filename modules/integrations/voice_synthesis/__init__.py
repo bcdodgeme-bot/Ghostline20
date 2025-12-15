@@ -20,31 +20,28 @@ Version: 1.0.0
 Date: September 2025
 """
 
-from .voice_client import ElevenLabsClient
-from .personality_voices import PersonalityVoiceManager
-from .audio_manager import AudioCacheManager
-from .router import router as voice_synthesis_router
-
 # Module metadata
 __version__ = "1.0.0"
 __author__ = "SyntaxPrime & Claude"
 __description__ = "ElevenLabs voice synthesis with personality-driven voice selection"
 
-# Export main components
-__all__ = [
-    'ElevenLabsClient',
-    'PersonalityVoiceManager', 
-    'AudioCacheManager',
-    'voice_synthesis_router',
-    'get_voice_client',
-    'get_personality_voice_manager',
-    'get_audio_cache_manager'
-]
+# =============================================================================
+# STEP 1: Import classes from submodules (no circular dependency risk)
+# =============================================================================
+from .voice_client import ElevenLabsClient
+from .personality_voices import PersonalityVoiceManager
+from .audio_manager import AudioCacheManager
+
+# =============================================================================
+# STEP 2: Define singleton instances and getters BEFORE importing router
+# (Router needs these getters, so they must exist first)
+# =============================================================================
 
 # Global instances (lazy initialization)
 _voice_client = None
 _personality_manager = None
 _audio_manager = None
+
 
 def get_voice_client() -> ElevenLabsClient:
     """Get the global ElevenLabs client instance"""
@@ -53,12 +50,14 @@ def get_voice_client() -> ElevenLabsClient:
         _voice_client = ElevenLabsClient()
     return _voice_client
 
+
 def get_personality_voice_manager() -> PersonalityVoiceManager:
     """Get the global personality voice manager instance"""
     global _personality_manager
     if _personality_manager is None:
         _personality_manager = PersonalityVoiceManager()
     return _personality_manager
+
 
 def get_audio_cache_manager() -> AudioCacheManager:
     """Get the global audio cache manager instance"""
@@ -67,7 +66,30 @@ def get_audio_cache_manager() -> AudioCacheManager:
         _audio_manager = AudioCacheManager()
     return _audio_manager
 
-# Integration info for health checks and module discovery
+
+# =============================================================================
+# STEP 3: NOW import router (getters are available)
+# =============================================================================
+from .router import router as voice_synthesis_router
+
+# =============================================================================
+# STEP 4: Define remaining module utilities
+# =============================================================================
+
+# Export main components
+__all__ = [
+    'ElevenLabsClient',
+    'PersonalityVoiceManager',
+    'AudioCacheManager',
+    'voice_synthesis_router',
+    'get_voice_client',
+    'get_personality_voice_manager',
+    'get_audio_cache_manager',
+    'get_integration_info',
+    'check_module_health'
+]
+
+
 def get_integration_info():
     """Get voice synthesis integration information"""
     return {
@@ -86,7 +108,7 @@ def get_integration_info():
         'personalities': {
             'syntaxprime': 'Adam (professional sass)',
             'syntaxbot': 'Josh/Adam (quick professional)',
-            'nil_exe': 'Daniel/Antoni (chaotic intelligence)', 
+            'nil_exe': 'Daniel/Antoni (chaotic intelligence)',
             'ggpt': 'Sam/Josh (gaming energy)'
         },
         'endpoints': [
@@ -101,6 +123,7 @@ def get_integration_info():
             'audio_cache_stats'
         ]
     }
+
 
 def check_module_health():
     """Basic health check for voice synthesis module"""
