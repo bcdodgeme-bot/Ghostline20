@@ -476,14 +476,15 @@ class IntelligenceOrchestrator:
                 # Successfully stored - now check for auto-execution
                 situation.situation_id = situation_id
                 
-                # Build pattern key from context (same logic as situation_manager)
-                pattern_key = self._build_pattern_key(situation)
-                
                 # Check if this pattern qualifies for auto-execution
-                should_auto = await self.situation_manager.should_auto_execute(
+                # Method extracts pattern_key internally from context
+                should_auto, learning_record = await self.situation_manager.should_auto_execute(
                     situation_type=situation.situation_type,
-                    pattern_key=pattern_key
+                    situation_context=situation.situation_context
                 )
+                
+                # Build pattern key for logging
+                pattern_key = self._build_pattern_key(situation)
                 
                 if should_auto and actions:
                     # AUTO-EXECUTE the primary action!

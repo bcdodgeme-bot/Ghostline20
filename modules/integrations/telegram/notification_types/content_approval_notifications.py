@@ -9,8 +9,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 import json
+import html
 
-from ....core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -156,17 +157,17 @@ class ContentApprovalNotificationHandler:
             return False
     
     async def _format_bluesky_approval(
-        self, 
-        content_data: Dict, 
+        self,
+        content_data: Dict,
         business_area: str,
         confidence: int
     ) -> str:
         """Format Bluesky post approval notification using HTML"""
         
-        # Extract post content
-        post_text = content_data.get('post_text', 'No content')
-        account = content_data.get('account_id', business_area)
-        keyword = content_data.get('keyword', 'topic')
+        # Extract post content and escape HTML special characters
+        post_text = html.escape(content_data.get('post_text', 'No content'))
+        account = html.escape(content_data.get('account_id', business_area))
+        keyword = html.escape(content_data.get('keyword', 'topic'))
         
         # Use HTML formatting (more forgiving than Markdown)
         message = f"📱 <b>Bluesky Draft Ready</b>\n\n"
@@ -176,7 +177,7 @@ class ContentApprovalNotificationHandler:
         message += f"<b>Preview:</b>\n"
         message += f"<i>{post_text[:280]}</i>\n\n"
         
-        char_count = len(post_text)
+        char_count = len(content_data.get('post_text', ''))
         message += f"📊 {char_count}/300 characters"
         
         return message
@@ -189,67 +190,41 @@ class ContentApprovalNotificationHandler:
     ) -> str:
         """Format blog post approval notification using HTML"""
         
-        title = content_data.get('title', 'Untitled')
+        # Escape HTML special characters in user content
+        title = html.escape(content_data.get('title', 'Untitled'))
+        business_area_escaped = html.escape(business_area)
         word_count = content_data.get('word_count', 0)
         
         message = f"📝 <b>Blog Post Draft Ready</b>\n\n"
         message += f"<b>Title:</b> {title}\n"
-        message += f"<b>Business:</b> {business_area}\n"
+        message += f"<b>Business:</b> {business_area_escaped}\n"
         message += f"<b>Confidence:</b> {confidence}%\n\n"
         message += f"📊 {word_count} words"
         
         return message
     
-    def _create_bluesky_buttons(self, queue_id: str, account: str) -> Dict:
+    def _create_bluesky_buttons(self, queue_id: str, account: str) -> list:
         """Create approval buttons for Bluesky post"""
-        return {
-            'inline_keyboard': [
-                [
-                    {
-                        'text': '✅ Post Now',
-                        'callback_data': f"content:post_now:{queue_id}:{account}"
-                    },
-                    {
-                        'text': '✏️ Edit',
-                        'callback_data': f"content:edit:{queue_id}"
-                    }
-                ],
-                [
-                    {
-                        'text': '💾 Save for Later',
-                        'callback_data': f"content:save:{queue_id}"
-                    },
-                    {
-                        'text': '❌ Dismiss',
-                        'callback_data': f"content:dismiss:{queue_id}"
-                    }
-                ]
+        return [
+            [
+                {'text': '✅ Post Now', 'callback_data': f"content:post_now:{queue_id}:{account}"},
+                {'text': '✏️ Edit', 'callback_data': f"content:edit:{queue_id}"}
+            ],
+            [
+                {'text': '💾 Save for Later', 'callback_data': f"content:save:{queue_id}"},
+                {'text': '❌ Dismiss', 'callback_data': f"content:dismiss:{queue_id}"}
             ]
-        }
+        ]
     
-    def _create_blog_buttons(self, queue_id: str) -> Dict:
+    def _create_blog_buttons(self, queue_id: str) -> list:
         """Create approval buttons for blog post"""
-        return {
-            'inline_keyboard': [
-                [
-                    {
-                        'text': '📄 View Full Post',
-                        'callback_data': f"content:view:{queue_id}"
-                    },
-                    {
-                        'text': '✏️ Edit',
-                        'callback_data': f"content:edit:{queue_id}"
-                    }
-                ],
-                [
-                    {
-                        'text': '💾 Save Draft',
-                        'callback_data': f"content:save:{queue_id}"
-                    },
-                    {
-                        'text': '❌ Dismiss',
-                        'callback_data': f"content:dismiss:{queue_id}"
-                    }
-                ]
+        return [
+            [
+                {'text': '📄 View Full Post', 'callback_data': f"content:view:{queue_id}"},
+                {'text': '✏️ Edit', 'callback_data': f"content:edit:{queue_id}"}
+            ],
+            [
+                {'text': '💾 Save Draft', 'callback_data': f"content:save:{queue_id}"},
+                {'text': '❌ Dismiss', 'callback_data': f"content:dismiss:{queue_id}"}
             ]
-        }
+        ]

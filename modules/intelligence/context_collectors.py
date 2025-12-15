@@ -171,7 +171,7 @@ class MeetingContextCollector(ContextCollector):
         Why 7 days? Meetings and action items typically have a weekly cadence.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Query 1: Get recent meetings with their details
@@ -305,7 +305,7 @@ class MeetingContextCollector(ContextCollector):
                 ORDER BY meeting_date ASC
             """
             
-            now_date = datetime.utcnow()
+            now_date = datetime.now(timezone.utc)
             two_days_ahead = now_date + timedelta(hours=48)
             
             upcoming = await self.db.fetch_all(
@@ -420,7 +420,7 @@ class ConversationContextCollector(ContextCollector):
         Uses 24-hour lookback by default since conversations are more ephemeral.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Query: Get recent messages grouped by thread
@@ -903,7 +903,7 @@ class EmailContextCollector(ContextCollector):
         with too many signals.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Query: Get high-priority emails from gmail analysis
@@ -948,7 +948,7 @@ class EmailContextCollector(ContextCollector):
             logger.info(f"EmailContextCollector: Processing {len(emails)} high-priority emails")
             
             for email in emails:
-                hours_old = (datetime.utcnow() - email['received_at']).total_seconds() / 3600
+                hours_old = (datetime.now(timezone.utc) - email['received_at']).total_seconds() / 3600
                 
                 # Determine base priority from email priority level
                 if email['priority_level'] == 'urgent':
@@ -1169,7 +1169,7 @@ class TrendContextCollector(ContextCollector):
         meaningful changes without missing spikes.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # First check if trend_monitoring has any data
@@ -1410,7 +1410,7 @@ class BlueskyContextCollector(ContextCollector):
         24-hour lookback to catch recent conversations.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Signal 1: Posts in approval queue
@@ -1589,7 +1589,7 @@ class KnowledgeContextCollector(ContextCollector):
         that might be useful for current context.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Query 1: Recently accessed knowledge entries
@@ -1893,7 +1893,7 @@ class WeatherContextCollector(ContextCollector):
             
             pressure_readings = await self.db.fetch_all(
                 pressure_change_query,
-                datetime.utcnow() - timedelta(hours=12)
+                datetime.now(timezone.utc) - timedelta(hours=12)
             )
             
             if len(pressure_readings) >= 2:
@@ -2090,7 +2090,7 @@ class PerformanceContextCollector(ContextCollector):
         7-day lookback to capture enough data for pattern detection.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         try:
             # Query 1: Get recent post analytics
