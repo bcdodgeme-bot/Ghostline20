@@ -1,6 +1,7 @@
 //=============================================================================
 // Syntax Prime V2 - Chat Interface JavaScript
 // Session 23: Removed embedded CSS, fixed auto-resize, added random greetings
+// Session 26: FIXED - Audio undefined error when messageId not returned by API
 // Original: 9/27/25 - Working sidebar + submit protection + Google Trends
 // Updated: Session 23 - CSS moved to style.css, greeting system added
 //=============================================================================
@@ -378,6 +379,13 @@ class SyntaxPrimeChat {
     
     async playVoiceMessage(messageId, speakerButton) {
         if (!this.voiceEnabled) return;
+        
+        // FIXED: Validate messageId before making API call
+        if (!messageId || messageId === 'undefined' || messageId === 'null') {
+            console.warn('⚠️ Invalid messageId for voice playback:', messageId);
+            this.showToast('❌ Cannot play audio - missing message ID', 'error');
+            return;
+        }
         
         try {
             // Stop any currently playing audio
@@ -1347,19 +1355,23 @@ class SyntaxPrimeChat {
         
         // Add voice controls for assistant messages
         if (role === 'assistant' && !metadata.error && this.voiceEnabled) {
-            const voiceControls = document.createElement('div');
-            voiceControls.className = 'voice-controls';
-            
-            const speakerButton = document.createElement('button');
-            speakerButton.className = 'speaker-button';
-            speakerButton.title = 'Play Audio';
-            speakerButton.innerHTML = '🔊';
-            speakerButton.addEventListener('click', () => {
-                this.playVoiceMessage(metadata.messageId, speakerButton);
-            });
-            
-            voiceControls.appendChild(speakerButton);
-            contentDiv.appendChild(voiceControls);
+            // Only add voice if we have a valid messageId
+            const voiceMessageId = metadata.messageId || messageDiv.dataset.messageId;
+            if (voiceMessageId && voiceMessageId !== 'undefined') {
+                const voiceControls = document.createElement('div');
+                voiceControls.className = 'voice-controls';
+                
+                const speakerButton = document.createElement('button');
+                speakerButton.className = 'speaker-button';
+                speakerButton.title = 'Play Audio';
+                speakerButton.innerHTML = '🔊';
+                speakerButton.addEventListener('click', () => {
+                    this.playVoiceMessage(voiceMessageId, speakerButton);
+                });
+                
+                voiceControls.appendChild(speakerButton);
+                contentDiv.appendChild(voiceControls);
+            }
         }
         
         // Add message actions for assistant messages with feedback buttons

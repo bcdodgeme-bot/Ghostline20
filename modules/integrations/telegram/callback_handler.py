@@ -141,6 +141,11 @@ class CallbackHandler:
                     action, notification_id, message_id, extra_params
                 )
             
+            elif notification_type == 'trend':
+                result = await self._handle_trend_callback(
+                    action, notification_id, message_id, extra_params
+                )
+            
             # ====== END NEW ======
             
             else:
@@ -1075,6 +1080,162 @@ class CallbackHandler:
         except Exception as e:
             logger.error(f"Situation callback error: {e}")
             return {"success": False, "error": str(e)}
+
+
+    # ========================================================================
+    # TREND CALLBACKS
+    # ========================================================================
+    
+    async def _handle_trend_callback(
+        self,
+        action: str,
+        notification_id: str,
+        message_id: int,
+        params: list
+    ) -> Dict[str, Any]:
+        """
+        Handle trend notification button clicks
+        
+        Actions:
+            - draft: Generate a Bluesky post draft for this trend
+            - skip: Dismiss this trend opportunity
+            - details: Show more details about the trend
+        """
+        
+        if action == 'draft':
+            # Generate a draft for this trend
+            opportunity_id = notification_id
+            account = params[0] if params else 'syntaxprime'
+            
+            try:
+                from modules.integrations.bluesky.approval_system import get_approval_system
+                
+                # Create draft using approval system
+                approval_system = get_approval_system()
+                
+                # Fetch trend details
+                conn = await db_manager.get_connection()
+                try:
+                    trend = await conn.fetchrow('''
+                        SELECT keyword, trend_score, area_id
+                        FROM google_trends_opportunities
+                        WHERE id = $1
+                    ''', UUID(opportunity_id))
+                    
+                    if not trend:
+                        await self.bot_client.edit_message(
+                            message_id,
+                            "❌ Trend opportunity not found",
+                            reply_markup=None
+                        )
+                        return {"success": False, "ack_text": "Not found"}
+                    
+                    keyword = trend['keyword']
+                    
+                    # Mark as drafting
+                    await conn.execute('''
+                        UPDATE google_trends_opportunities
+                        SET status = 'drafting', updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(opportunity_id))
+                    
+                finally:
+                    await db_manager.release_connection(conn)
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"✍️ Generating draft for '{html.escape(str(keyword))}'...",
+                    reply_markup=None
+                )
+                
+                return {"success": True, "ack_text": "Drafting..."}
+                
+            except Exception as e:
+                logger.error(f"Trend draft failed: {e}", exc_info=True)
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Error: {html.escape(str(e))}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "Error"}
+        
+        elif action == 'skip':
+            # Dismiss this trend
+            opportunity_id = notification_id
+            conn = None
+            
+            try:
+                conn = await db_manager.get_connection()
+                
+                await conn.execute('''
+                    UPDATE google_trends_opportunities
+                    SET status = 'dismissed', updated_at = NOW()
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    "⏭️ Trend dismissed",
+                    reply_markup=None
+                )
+                
+                return {"success": True, "ack_text": "Dismissed"}
+                
+            except Exception as e:
+                logger.error(f"Trend skip failed: {e}")
+                return {"success": False, "ack_text": "Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'details':
+            # Show more details
+            opportunity_id = notification_id
+            conn = None
+            
+            try:
+                conn = await db_manager.get_connection()
+                
+                trend = await conn.fetchrow('''
+                    SELECT keyword, trend_score, area_id, detected_at
+                    FROM google_trends_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not trend:
+                    return {"success": False, "ack_text": "Not found"}
+                
+                keyword = html.escape(str(trend['keyword'] or ''))
+                area = html.escape(str(trend['area_id'] or 'unknown'))
+                score = trend['trend_score'] or 0
+                detected = trend['detected_at'].strftime('%b %d at %I:%M %p') if trend['detected_at'] else 'Unknown'
+                
+                details = f"""📈 <b>Trend Details</b>
+
+<b>Keyword:</b> {keyword}
+<b>Area:</b> {area}
+<b>Score:</b> {score}
+<b>Detected:</b> {detected}
+"""
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    details,
+                    reply_markup=None
+                )
+                
+                return {"success": True, "ack_text": "Details shown"}
+                
+            except Exception as e:
+                logger.error(f"Trend details failed: {e}")
+                return {"success": False, "ack_text": "Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        return {"success": False, "error": "Unknown trend action"}
 
 
 # Global instance

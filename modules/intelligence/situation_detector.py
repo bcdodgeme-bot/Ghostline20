@@ -8,6 +8,7 @@ that warrant user notification and suggested actions.
 
 Created: 10/22/25
 Updated: 12/11/25 - Added singleton pattern
+Updated: 2025-12-15 - FIXED: Email classification too loose - added stop words, noreply filter
 """
 
 import logging
@@ -17,6 +18,42 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS - Stop words and automated email patterns
+#===============================================================================
+
+# Common words to exclude from keyword matching
+STOP_WORDS = {
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
+    'ought', 'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
+    'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above',
+    'below', 'between', 'under', 'again', 'further', 'then', 'once',
+    'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each',
+    'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+    'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'and',
+    'but', 'if', 'or', 'because', 'until', 'while', 'about', 'against',
+    'this', 'that', 'these', 'those', 'am', 'your', 'you', 'we', 'our',
+    'i', 'me', 'my', 'myself', 'he', 'him', 'his', 'she', 'her', 'it',
+    'its', 'they', 'them', 'their', 'what', 'which', 'who', 'whom',
+    # Common email/business words
+    'inc', 'inc.', 'llc', 'corp', 'corporation', 'company', 'co', 'co.',
+    'new', 'now', 'today', 'meeting', 'call', 'update', 'reminder',
+    'please', 're', 'fwd', 'fw', 'alert', 'notification', 'noreply',
+}
+
+# Patterns indicating automated/marketing emails (skip correlation)
+AUTOMATED_EMAIL_PATTERNS = [
+    'noreply@', 'no-reply@', 'donotreply@', 'notifications@',
+    'alerts@', 'mailer@', 'newsletter@', 'marketing@', 'info@',
+    'support@', 'help@', 'news@', 'updates@', 'team@',
+    '@linkedin.com', '@ziprecruiter.com', '@indeed.com', '@glassdoor.com',
+    '@careerbuilder.com', '@monster.com', '@dice.com', '@hired.com',
+    '@angel.co', '@lever.co', '@greenhouse.io', '@workday.com',
+    '@jobvite.com', '@taleo.net', '@icims.com', '@smartrecruiters.com',
+]
 
 #===============================================================================
 # BASE CLASSES - Situation data structure
@@ -761,9 +798,19 @@ class SituationDetector:
                 sender_email = (email_signal.data.get('sender_email') or '').lower()
                 subject = (email_signal.data.get('subject') or '').lower()
                 
-                # Extract keywords from email
-                email_keywords = set(sender_name.split() + subject.split())
-                email_keywords.discard('')
+                # SKIP automated/marketing/job recruitment emails
+                is_automated = any(pattern in sender_email for pattern in AUTOMATED_EMAIL_PATTERNS)
+                if is_automated:
+                    logger.debug(f"Skipping automated email from {sender_email}")
+                    continue
+                
+                # Extract keywords from email, filtering out stop words
+                raw_keywords = set(sender_name.split() + subject.split())
+                email_keywords = {kw for kw in raw_keywords if kw and kw not in STOP_WORDS and len(kw) > 2}
+                
+                # Need meaningful keywords to correlate
+                if len(email_keywords) < 2:
+                    continue
                 
                 # Check calendar events
                 for calendar_signal in calendar_signals:
@@ -774,12 +821,13 @@ class SituationDetector:
                     attendee_emails = [str(a).lower() for a in attendees if a]
                     sender_attending = sender_email in ' '.join(attendee_emails)
                     
-                    # Check if email keywords appear in event title
-                    event_keywords = set(event_title.split())
+                    # Check if email keywords appear in event title (filter stop words)
+                    raw_event_keywords = set(event_title.split())
+                    event_keywords = {kw for kw in raw_event_keywords if kw and kw not in STOP_WORDS and len(kw) > 2}
                     keyword_overlap = len(email_keywords & event_keywords)
                     
-                    # Correlation found if sender is attending OR significant keyword overlap
-                    if sender_attending or keyword_overlap >= 2:
+                    # Correlation found if sender is attending OR strong keyword overlap (3+ meaningful words)
+                    if sender_attending or keyword_overlap >= 3:
                         hours_until_event = calendar_signal.data.get('hours_until', 48)
                         
                         # Build context
@@ -835,12 +883,13 @@ class SituationDetector:
                     attendee_info = ' '.join([str(a).lower() for a in attendees])
                     sender_was_attendee = sender_email in attendee_info or sender_name in attendee_info
                     
-                    # Check keyword overlap
-                    meeting_keywords = set(meeting_title.split())
+                    # Check keyword overlap (filter stop words)
+                    raw_meeting_keywords = set(meeting_title.split())
+                    meeting_keywords = {kw for kw in raw_meeting_keywords if kw and kw not in STOP_WORDS and len(kw) > 2}
                     keyword_overlap = len(email_keywords & meeting_keywords)
                     
-                    # Correlation if sender was attendee OR strong keyword overlap
-                    if sender_was_attendee or keyword_overlap >= 3:
+                    # Correlation if sender was attendee OR very strong keyword overlap (4+ meaningful words)
+                    if sender_was_attendee or keyword_overlap >= 4:
                         # Build context
                         context = {
                             'email_id': str(email_signal.data.get('email_id')),

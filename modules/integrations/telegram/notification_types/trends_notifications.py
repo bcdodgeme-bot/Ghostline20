@@ -2,13 +2,16 @@
 """
 Trends Notification Handler
 Sends proactive notifications for trending topics and opportunities
+
+FIXED: 2025-12-15 - Fixed empty insights {} display, added html.escape for user content
 """
 
 import logging
+import html
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
-from ....core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +128,12 @@ class TrendsNotificationHandler:
     async def _send_individual_trend(self, trend: Dict[str, Any]) -> None:
         """Send a single trend opportunity notification with action buttons"""
         
-        # Format trend info
-        keyword = trend['keyword']
-        business_area = trend['business_area']
-        score = int(trend['trend_score_at_alert'])
-        momentum = trend['trend_momentum'].upper()
-        urgency = trend['urgency_level']
+        # Format trend info - escape user content
+        keyword = html.escape(str(trend.get('keyword') or 'Topic'))
+        business_area = html.escape(str(trend.get('business_area') or 'general'))
+        score = int(trend.get('trend_score_at_alert') or 0)
+        momentum = str(trend.get('trend_momentum') or 'STABLE').upper()
+        urgency = str(trend.get('urgency_level') or 'low')
         
         # Urgency emoji
         urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(urgency, "⚪")
@@ -145,22 +148,28 @@ class TrendsNotificationHandler:
         }.get(momentum, "📊")
         
         # Build message
-        message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
-        message += f"*Business:* {business_area}\n"
-        message += f"*Score:* {score}/100 | {urgency_emoji} {urgency.upper()}\n"
-        message += f"*Momentum:* {momentum}\n"
+        message = f"{momentum_emoji} <b>Trending: {keyword}</b>\n\n"
+        message += f"<b>Business:</b> {business_area}\n"
+        message += f"<b>Score:</b> {score}/100 | {urgency_emoji} {urgency.upper()}\n"
+        message += f"<b>Momentum:</b> {momentum}\n"
         
-        if trend.get('momentum_change_percent'):
+        if trend.get('momentum_change_percent') is not None:
             change = trend['momentum_change_percent']
-            message += f"*Change:* {change:+.1f}%\n"
+            message += f"<b>Change:</b> {change:+.1f}%\n"
         
-        if trend.get('related_rss_insights'):
-            message += f"\n💡 *Insights:* {trend['related_rss_insights'][:100]}...\n"
+        # FIXED: Only show insights if it's a non-empty string with actual content
+        insights = trend.get('related_rss_insights')
+        if insights and isinstance(insights, str) and insights.strip() and insights.strip() != '{}':
+            escaped_insights = html.escape(insights[:100])
+            message += f"\n💡 <b>Insights:</b> {escaped_insights}...\n"
         
-        if trend.get('bluesky_engagement_potential'):
-            message += f"🦋 *Bluesky Potential:* {trend['bluesky_engagement_potential']}\n"
+        # FIXED: Only show Bluesky potential if it's meaningful
+        bluesky_potential = trend.get('bluesky_engagement_potential')
+        if bluesky_potential and isinstance(bluesky_potential, str) and bluesky_potential.strip():
+            escaped_potential = html.escape(bluesky_potential)
+            message += f"🦋 <b>Bluesky Potential:</b> {escaped_potential}\n"
         
-        # Action buttons
+        # Action buttons - use list format
         buttons = [
             [
                 {"text": "💬 Draft Post", "callback_data": f"trend:draft:{trend['id']}"},
@@ -218,27 +227,27 @@ class TrendsNotificationHandler:
             result = await self.db.fetch_one(query)
             
             if not result or result['total_opportunities'] == 0:
-                message = "📈 *Daily Trends Summary*\n\n"
+                message = "📈 <b>Daily Trends Summary</b>\n\n"
                 message += "No new trends detected today.\n"
                 message += "Keep monitoring for opportunities!"
             else:
                 total = result['total_opportunities']
-                high_urgency = result['high_urgency']
-                rising = result['rising_trends']
-                top_score = result['top_score']
-                top_keyword = result['top_keyword']
+                high_urgency = result['high_urgency'] or 0
+                rising = result['rising_trends'] or 0
+                top_score = result['top_score'] or 0
+                top_keyword = html.escape(str(result['top_keyword'] or 'N/A'))
                 
-                message = "📈 *Daily Trends Summary*\n\n"
-                message += f"*Trends Detected:* {total}\n"
+                message = "📈 <b>Daily Trends Summary</b>\n\n"
+                message += f"<b>Trends Detected:</b> {total}\n"
                 
                 if rising > 0:
-                    message += f"*Rising:* {rising} 🚀\n"
+                    message += f"<b>Rising:</b> {rising} 🚀\n"
                 
                 if high_urgency > 0:
-                    message += f"*High Urgency:* {high_urgency} 🎯\n"
+                    message += f"<b>High Urgency:</b> {high_urgency} 🎯\n"
                 
                 if top_keyword and top_score:
-                    message += f"\n*Top Trend:*\n"
+                    message += f"\n<b>Top Trend:</b>\n"
                     message += f"{top_keyword} (Score: {top_score}/100)"
             
             await self.notification_manager.send_notification(
@@ -269,8 +278,10 @@ class TrendsNotificationHandler:
             True if successful
         """
         try:
-            message = "🔥 *BREAKING TREND ALERT*\n\n"
-            message += f"*{keyword}* is going viral!\n\n"
+            escaped_keyword = html.escape(str(keyword))
+            
+            message = "🔥 <b>BREAKING TREND ALERT</b>\n\n"
+            message += f"<b>{escaped_keyword}</b> is going viral!\n\n"
             message += f"Opportunity Score: {score}/100 🎯\n"
             message += "Status: 🚀 RAPIDLY RISING\n\n"
             message += "Act fast to capitalize on this opportunity!"

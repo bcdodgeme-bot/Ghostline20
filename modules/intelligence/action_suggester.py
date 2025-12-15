@@ -13,6 +13,7 @@ Each action includes:
 
 Created: 10/22/25
 Updated: 2025-01-XX - Added singleton pattern
+Updated: 2025-12-15 - FIXED: None safety for trend_score and knowledge_count comparisons
 """
 
 import logging
@@ -222,7 +223,7 @@ class ActionSuggester:
         actions = []
         
         event_title = context.get('event_title', 'Event')
-        hours_until = context.get('hours_until', 48)
+        hours_until = context.get('hours_until') or 48
         prep_required = context.get('prep_required', False)
         suggested_prep_hours = context.get('suggested_prep_hours', 1)
         related_actions = context.get('related_action_items', [])
@@ -295,9 +296,9 @@ class ActionSuggester:
         keyword = context.get('keyword', 'Topic')
         business_area = context.get('business_area', 'general')
         suggested_account = context.get('suggested_account', 'syntaxprime')
-        trend_score = context.get('trend_score', 0)
+        trend_score = context.get('trend_score') or 0
         discussed_recently = context.get('discussed_recently', False)
-        knowledge_count = context.get('knowledge_count', 0)
+        knowledge_count = context.get('knowledge_count') or 0
         
         # Action 1: Generate Bluesky post (primary action)
         action_params = {
@@ -523,7 +524,7 @@ class ActionSuggester:
             })
         else:
             # Review existing knowledge
-            knowledge_count = context.get('knowledge_count', 0)
+            knowledge_count = context.get('knowledge_count') or 0
             actions.append({
                 'action_type': 'review_knowledge',
                 'description': f"Review {knowledge_count} knowledge entries about {conversation_topic}",
@@ -828,7 +829,7 @@ class ActionSuggester:
         
         elif situation_type == 'trend_content_opportunity':
             keyword = context.get('keyword', 'Topic')
-            trend_score = context.get('trend_score', 0)
+            trend_score = context.get('trend_score') or 0
             
             summary = f"**Trending: {keyword}**\n"
             summary += f"Score: {trend_score}/100"
