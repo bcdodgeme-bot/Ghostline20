@@ -18,7 +18,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import json
 
-from ...core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
