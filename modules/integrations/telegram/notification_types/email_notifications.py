@@ -148,21 +148,13 @@ class EmailNotificationHandler:
         if requires_response:
             message += f"\n⚠️ *Requires Response*"
         
-        # Create action buttons
-        buttons = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "📖 Mark as Read",
-                        "callback_data": f"email_read:{email['id']}"
-                    },
-                    {
-                        "text": "🗑️ Archive",
-                        "callback_data": f"email_archive:{email['id']}"
-                    }
-                ]
+        # Create action buttons (list of rows, each row is list of buttons)
+        buttons = [
+            [
+                {"text": "📖 Mark as Read", "callback_data": f"email_read:{email['id']}"},
+                {"text": "🗑️ Archive", "callback_data": f"email_archive:{email['id']}"}
             ]
-        }
+        ]
         
         # Metadata
         metadata = {
@@ -180,7 +172,7 @@ class EmailNotificationHandler:
             notification_type='email',
             notification_subtype='important_email',
             message_text=message,
-            buttons=buttons,  # Note: convert reply_markup to simple list format
+            buttons=buttons,
             message_data=metadata
         )
         

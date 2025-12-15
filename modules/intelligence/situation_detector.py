@@ -957,7 +957,7 @@ class SituationDetector:
                         for knowledge_signal in knowledge_signals:
                             knowledge_title = (knowledge_signal.data.get('title') or '').lower()
                             
-                            if (conversation_topic in knowledge_title or 
+                            if (conversation_topic in knowledge_title or
                                 trend_keyword in knowledge_title):
                                 related_knowledge = knowledge_signal
                                 break
@@ -1072,7 +1072,7 @@ class SituationDetector:
                 
                 # Determine severity and impact
                 if signal_type == 'uv_index_alert':
-                    uv_index = weather_signal.data.get('uv_index')
+                    uv_index = weather_signal.data.get('uv_index') or 0
                     uv_level = weather_signal.data.get('uv_level')
                     
                     # Build context for UV alert
