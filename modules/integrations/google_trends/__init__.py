@@ -61,8 +61,8 @@ except ImportError:
     check_module_health = None
     get_integration_info_manager = None
 
-# Import db_manager for database operations
-from ...core.database import db_manager
+# Import db_manager for database operations - FIXED: use absolute import
+from modules.core.database import db_manager
 
 # Module metadata
 __version__ = '1.0.0'

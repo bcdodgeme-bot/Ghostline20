@@ -837,7 +837,7 @@ async def startup_event():
     
     # Check Google Trends integration health
     try:
-        trends_health = trends_module_health()
+        trends_health = await trends_module_health()
         if trends_health['healthy']:
             print("📈 Google Trends integration loaded successfully")
             print("   🔍 Trending keyword analysis enabled")
@@ -1198,7 +1198,7 @@ async def integrations_info():
                     "content planning assistance"
                 ]
             },
-            'health': trends_module_health()
+            'health': await trends_module_health()
         }
     except Exception as e:
         integrations['google_trends'] = {

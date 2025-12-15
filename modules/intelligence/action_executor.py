@@ -17,6 +17,7 @@ Each execution returns a result dict with:
 
 Created: 11/04/25
 Updated: 2025-01-XX - Added singleton pattern, fixed duplicate review_email bug
+Updated: 2025-12-15 - Fixed singleton to use imported db_manager as fallback
 """
 
 import logging
@@ -24,6 +25,8 @@ import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from uuid import UUID
+
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +43,7 @@ USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
 _executor_instance: Optional['ActionExecutor'] = None
 
 
-def get_action_executor(
-    db_manager=None,
+async def get_action_executor(
     clickup_handler=None,
     calendar_client=None,
     gmail_client=None,
@@ -51,8 +53,10 @@ def get_action_executor(
     """
     Get or create the singleton ActionExecutor instance.
     
+    Uses the global db_manager singleton automatically.
+    Optional integrations can be passed on first call.
+    
     Args:
-        db_manager: Database manager (required on first call)
         clickup_handler: ClickUp API handler (optional)
         calendar_client: Google Calendar client (optional)
         gmail_client: Gmail client (optional)
@@ -65,8 +69,6 @@ def get_action_executor(
     global _executor_instance
     
     if _executor_instance is None:
-        if db_manager is None:
-            raise ValueError("db_manager required for first ActionExecutor initialization")
         _executor_instance = ActionExecutor(
             db_manager=db_manager,
             clickup_handler=clickup_handler,

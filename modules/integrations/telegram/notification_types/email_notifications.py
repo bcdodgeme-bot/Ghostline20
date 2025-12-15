@@ -5,10 +5,10 @@ Sends proactive notifications for important emails
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
-from ....core.database import db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,6 @@ class EmailNotificationHandler:
         self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
-# 2. ADD THIS PROPERTY RIGHT AFTER __init__:
     @property
     def db_manager(self):
         """Lazy-load TelegramDatabaseManager"""
@@ -117,8 +116,14 @@ class EmailNotificationHandler:
         if isinstance(email_date, str):
             email_date = datetime.fromisoformat(email_date)
         
-        # Calculate time ago
-        time_ago = datetime.now() - email_date
+        # Ensure email_date is timezone-aware for comparison
+        if email_date.tzinfo is None:
+            email_date = email_date.replace(tzinfo=timezone.utc)
+        
+        # Calculate time ago using timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        time_ago = now - email_date
+        
         if time_ago.total_seconds() < 60:
             time_str = "Just now"
         elif time_ago.total_seconds() < 3600:
