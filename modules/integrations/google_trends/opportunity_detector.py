@@ -10,17 +10,20 @@ Key Features:
 - Content timing recommendations
 - User feedback integration for training
 - Cross-system opportunity identification
+
+FIXED: Now uses centralized db_manager instead of direct asyncpg.connect()
 """
 
-import asyncio
-import asyncpg
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta, date, timezone
 import logging
+from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import Enum
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
 
 class OpportunityType(Enum):
     """Types of content opportunities"""
@@ -30,12 +33,14 @@ class OpportunityType(Enum):
     SEASONAL = "seasonal"             # Recurring pattern opportunity
     CROSS_PROMOTION = "cross_promotion" # Opportunity across business areas
 
+
 class UrgencyLevel(Enum):
     """Urgency levels for opportunities"""
     CRITICAL = "critical"  # Act within hours
     HIGH = "high"         # Act within 1-2 days
     MEDIUM = "medium"     # Act within a week
     LOW = "low"          # Consider for future content
+
 
 @dataclass
 class ContentOpportunity:
@@ -65,11 +70,13 @@ class ContentOpportunity:
     processed: bool = False
     user_feedback: Optional[str] = None
 
+
 class OpportunityDetector:
     """Detects content creation opportunities from trend data"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self):
+        """Initialize OpportunityDetector - uses centralized db_manager"""
+        # No database_url needed - we use the centralized db_manager
         
         # Low threshold configuration (learned from TV signals issue)
         self.thresholds = {
@@ -108,10 +115,6 @@ class OpportunityDetector:
             ]
         }
     
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
-    
     # ============================================================================
     # OPPORTUNITY DETECTION
     # ============================================================================
@@ -119,9 +122,9 @@ class OpportunityDetector:
     async def detect_current_opportunities(self, business_area: Optional[str] = None,
                                          hours_lookback: int = 24) -> List[ContentOpportunity]:
         """Detect current content opportunities from recent trend data"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_lookback)
             
             # Build query based on business area filter
@@ -154,7 +157,7 @@ class OpportunityDetector:
             opportunities = []
             
             for row in rows:
-                opportunity = await self._evaluate_trend_opportunity(
+                opportunity = self._evaluate_trend_opportunity(
                     keyword=row['keyword'],
                     business_area=row['business_area'],
                     trend_score=row['trend_score'],
@@ -174,12 +177,16 @@ class OpportunityDetector:
             
             return opportunities
             
+        except Exception as e:
+            logger.error(f"Failed to detect current opportunities: {e}")
+            return []
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
-    async def _evaluate_trend_opportunity(self, keyword: str, business_area: str,
-                                        trend_score: int, trend_momentum: str,
-                                        regional_score: Optional[int]) -> Optional[ContentOpportunity]:
+    def _evaluate_trend_opportunity(self, keyword: str, business_area: str,
+                                    trend_score: int, trend_momentum: str,
+                                    regional_score: Optional[int]) -> Optional[ContentOpportunity]:
         """Evaluate if a trend represents a content opportunity"""
         
         # Calculate business relevance
@@ -441,9 +448,10 @@ class OpportunityDetector:
     
     async def save_opportunity(self, opportunity: ContentOpportunity) -> str:
         """Save opportunity to database and return ID"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             query = '''
                 INSERT INTO trend_opportunities 
                 (keyword, business_area, opportunity_type, urgency_level, trend_momentum,
@@ -470,15 +478,20 @@ class OpportunityDetector:
             logger.info(f"Saved opportunity {opportunity_id} for keyword '{opportunity.keyword}'")
             return str(opportunity_id)
             
+        except Exception as e:
+            logger.error(f"Failed to save opportunity: {e}")
+            return ""
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_active_opportunities(self, business_area: Optional[str] = None,
                                      urgency_filter: Optional[UrgencyLevel] = None) -> List[ContentOpportunity]:
         """Get active opportunities that haven't expired"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Build query with filters
             where_conditions = ["processed = FALSE", "optimal_content_window_end > NOW()"]
             params = []
@@ -535,8 +548,12 @@ class OpportunityDetector:
             
             return opportunities
             
+        except Exception as e:
+            logger.error(f"Failed to get active opportunities: {e}")
+            return []
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def process_opportunities_batch(self, limit: int = 20) -> List[ContentOpportunity]:
         """Detect and save a batch of new opportunities"""
@@ -561,62 +578,17 @@ class OpportunityDetector:
         logger.info(f"Processed and saved {len(saved_opportunities)} opportunities")
         return saved_opportunities
 
+
 # ============================================================================
-# TESTING AND UTILITIES
+# SINGLETON GETTER
 # ============================================================================
 
-async def test_opportunity_detector():
-    """Test the opportunity detector functionality"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    detector = OpportunityDetector(database_url)
-    
-    print("🧪 TESTING OPPORTUNITY DETECTOR")
-    print("=" * 40)
-    
-    # Test opportunity detection
-    print("\n🔍 Detecting current opportunities...")
-    opportunities = await detector.detect_current_opportunities(hours_lookback=48)
-    
-    print(f"   Found {len(opportunities)} opportunities")
-    
-    if opportunities:
-        print(f"\n📈 Top opportunities:")
-        for i, opp in enumerate(opportunities[:5], 1):
-            window_hours = (opp.content_window_end - opp.content_window_start).total_seconds() / 3600
-            print(f"   {i}. {opp.keyword} ({opp.business_area})")
-            print(f"      Type: {opp.opportunity_type.value}, Urgency: {opp.urgency_level.value}")
-            print(f"      Score: {opp.trend_score}, Opportunity: {opp.opportunity_score:.2f}")
-            print(f"      Window: {window_hours:.0f} hours")
-            print(f"      Reasoning: {opp.reasoning}")
-            print()
-    
-    # Test opportunity processing batch
-    print(f"\n💾 Processing opportunities batch...")
-    saved_opps = await detector.process_opportunities_batch(limit=5)
-    print(f"   Saved {len(saved_opps)} opportunities to database")
-    
-    # Test active opportunities retrieval
-    print(f"\n📋 Active opportunities...")
-    active_opps = await detector.get_active_opportunities()
-    print(f"   Found {len(active_opps)} active opportunities")
-    
-    for opp in active_opps[:3]:
-        # Use timezone-aware datetime for comparison
-        now = datetime.now(timezone.utc)
-        
-        # Handle both timezone-aware and timezone-naive datetimes
-        if opp.content_window_end.tzinfo is None:
-            # If the database datetime is timezone-naive, assume UTC
-            window_end = opp.content_window_end.replace(tzinfo=timezone.utc)
-        else:
-            window_end = opp.content_window_end
-        
-        time_left = (window_end - now).total_seconds() / 3600
-        print(f"   • {opp.keyword}: {opp.urgency_level.value} urgency, {time_left:.1f}h remaining")
-    
-    print("\n✅ Opportunity detector test complete!")
+_opportunity_detector: Optional[OpportunityDetector] = None
 
-if __name__ == "__main__":
-    asyncio.run(test_opportunity_detector())
+
+def get_opportunity_detector() -> OpportunityDetector:
+    """Get or create the OpportunityDetector singleton instance"""
+    global _opportunity_detector
+    if _opportunity_detector is None:
+        _opportunity_detector = OpportunityDetector()
+    return _opportunity_detector

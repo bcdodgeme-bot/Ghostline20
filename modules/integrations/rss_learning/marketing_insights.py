@@ -2,21 +2,42 @@
 """
 Marketing Insights Extractor - Provides insights for AI brain integration
 Formats RSS content for use in marketing email, blog, and social media writing
+
+UPDATED: Session 15 - Added singleton pattern, lazy-load database dependency
 """
 
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import logging
 
-from .database_manager import RSSDatabase
+from .database_manager import get_rss_database
 
 logger = logging.getLogger(__name__)
+
+# Singleton instance
+_marketing_insights_instance: Optional['MarketingInsightsExtractor'] = None
+
+
+def get_marketing_insights_extractor() -> 'MarketingInsightsExtractor':
+    """Get singleton MarketingInsightsExtractor instance"""
+    global _marketing_insights_instance
+    if _marketing_insights_instance is None:
+        _marketing_insights_instance = MarketingInsightsExtractor()
+    return _marketing_insights_instance
+
 
 class MarketingInsightsExtractor:
     """Extracts and formats marketing insights from RSS data for AI brain"""
     
     def __init__(self):
-        self.db = RSSDatabase()
+        self._db: Optional[Any] = None
+    
+    @property
+    def db(self):
+        """Lazy-load database manager"""
+        if self._db is None:
+            self._db = get_rss_database()
+        return self._db
     
     async def get_latest_trends(self, category: str = None, limit: int = 5) -> Dict[str, Any]:
         """Get latest marketing trends for content creation"""
@@ -170,50 +191,49 @@ class MarketingInsightsExtractor:
                 "Community building and engagement tactics",
                 "Social commerce and conversion optimization"
             ])
+        elif category == 'email_marketing':
+            angles.extend([
+                "Personalization and segmentation strategies",
+                "Email automation workflows",
+                "Deliverability and engagement optimization"
+            ])
         elif category == 'content_marketing':
             angles.extend([
-                "Storytelling frameworks for brand connection",
                 "Content distribution and amplification",
-                "Measuring content ROI and performance"
+                "Thought leadership positioning",
+                "Content repurposing strategies"
+            ])
+        else:
+            angles.extend([
+                "Data-driven marketing optimization",
+                "Customer journey mapping",
+                "Multi-channel marketing integration"
             ])
         
-        # Add insight-based angles
-        for insight in insights[:3]:
-            if insight.get('category'):
-                angles.append(f"Latest {insight['category']} best practices")
-        
-        return angles[:6]
+        return angles
     
     def _generate_content_ideas(self, content: List[Dict], content_type: str) -> List[str]:
         """Generate content ideas based on RSS insights"""
         ideas = []
         
-        # Content type specific ideas
-        if content_type == 'email':
-            templates = [
-                "Weekly marketing insights newsletter featuring {topic}",
-                "How to improve {topic} - step by step guide",
-                "{topic} mistakes that are costing you conversions"
-            ]
-        elif content_type == 'blog':
-            templates = [
-                "The complete guide to {topic} in 2025",
-                "Why {topic} is essential for modern marketers",
-                "Case study: How we improved {topic} by 200%"
-            ]
-        elif content_type == 'social':
-            templates = [
-                "Quick tip: {topic} strategy that works",
-                "Thread: Everything you need to know about {topic}",
-                "Behind the scenes: Our {topic} process"
-            ]
-        
-        # Generate ideas from insights
         for item in content[:3]:
             if item.get('title'):
-                topic = item['title'].split(':')[0] if ':' in item['title'] else item['category']
-                for template in templates:
-                    ideas.append(template.format(topic=topic))
+                # Transform titles into content ideas
+                title = item['title']
+                if content_type == 'email':
+                    ideas.append(f"Email series: Key takeaways from '{title}'")
+                elif content_type == 'social':
+                    ideas.append(f"Social post thread: Insights from '{title}'")
+                else:
+                    ideas.append(f"Deep dive: Expanding on '{title}'")
+        
+        # Add generic ideas
+        if content_type == 'email':
+            ideas.append("Weekly marketing trends roundup")
+        elif content_type == 'social':
+            ideas.append("Quick tips carousel based on latest trends")
+        else:
+            ideas.append("Comprehensive guide combining recent insights")
         
         return ideas[:5]
     
@@ -223,130 +243,115 @@ class MarketingInsightsExtractor:
         
         for item in content:
             if item.get('marketing_insights'):
+                # Take first sentence as key message
                 insight = item['marketing_insights']
-                # Split into sentences and take first one as key message
                 sentences = insight.split('.')
                 if sentences and len(sentences[0]) > 20:
                     messages.append(sentences[0].strip() + '.')
         
-        return messages[:4]
+        return messages[:5] if messages else ["Focus on providing value to your audience"]
     
     def _get_supporting_data(self, content: List[Dict]) -> List[str]:
-        """Find supporting data and statistics"""
+        """Get supporting data points from content"""
+        import re
         data_points = []
         
         for item in content:
-            full_content = item.get('full_content', '')
-            # Look for percentage patterns
-            import re
-            percentages = re.findall(r'\d+%', full_content)
-            numbers = re.findall(r'\d+[xX]', full_content)  # Like "5x increase"
-            
-            data_points.extend(percentages[:2])
-            data_points.extend(numbers[:2])
+            text = item.get('marketing_insights', '') + ' ' + item.get('title', '')
+            # Look for percentages and numbers
+            stats = re.findall(r'\d+%[^.]*', text)
+            data_points.extend(stats[:1])
         
-        return data_points[:6]
+        return data_points[:4] if data_points else ["Industry data supports these strategies"]
     
     def _suggest_cta_ideas(self, content_type: str, content: List[Dict]) -> List[str]:
         """Suggest call-to-action ideas"""
         cta_map = {
             'email': [
-                "Learn more about this strategy",
                 "Download our free guide",
-                "Book a consultation",
-                "Try our tool for free"
-            ],
-            'blog': [
-                "Share your thoughts in the comments",
-                "Subscribe for more insights",
-                "Download the complete guide",
-                "Start your free trial"
+                "Start your free trial today",
+                "Reply to share your thoughts",
+                "Click to learn more"
             ],
             'social': [
-                "Save this for later",
+                "Save this post for later",
                 "Tag someone who needs this",
-                "Follow for more tips",
-                "Try this and let us know how it goes"
+                "Share your experience below",
+                "Follow for more tips"
+            ],
+            'blog': [
+                "Subscribe for weekly insights",
+                "Download the complete checklist",
+                "Book a free consultation",
+                "Start implementing today"
             ]
         }
         
         return cta_map.get(content_type, cta_map['blog'])
     
     def _identify_trending_angles(self, content: List[Dict]) -> List[str]:
-        """Identify trending content angles"""
+        """Identify trending angles from content"""
         angles = []
         
-        common_trends = [
-            "AI-powered marketing automation",
-            "Privacy-first marketing strategies",
-            "Video-first content approach",
-            "Personalization at scale",
-            "Voice search optimization"
-        ]
+        trending_keywords = ['ai', 'automation', 'personalization', 'privacy', 'video']
         
-        # Check which trends appear in content
         for item in content:
-            full_text = f"{item.get('title', '')} {item.get('marketing_insights', '')}".lower()
-            for trend in common_trends:
-                if any(word in full_text for word in trend.lower().split()):
-                    angles.append(trend)
+            title_lower = item.get('title', '').lower()
+            for keyword in trending_keywords:
+                if keyword in title_lower:
+                    angles.append(f"{keyword.upper()}-focused approach")
                     break
         
-        return angles[:4] if angles else common_trends[:4]
+        return list(set(angles))[:3] if angles else ["Innovation-driven strategies"]
     
     def _get_audience_insights(self, content: List[Dict], target_audience: str) -> Dict[str, Any]:
-        """Get insights about target audience"""
-        insights = {
-            'pain_points': [],
-            'interests': [],
-            'preferred_content': []
+        """Get audience insights based on content"""
+        return {
+            'pain_points': [
+                "Keeping up with algorithm changes",
+                "Measuring ROI effectively",
+                "Resource constraints"
+            ],
+            'interests': [
+                "Automation and efficiency",
+                "Data-driven decision making",
+                "Industry best practices"
+            ],
+            'preferred_formats': [
+                "How-to guides",
+                "Case studies",
+                "Quick tips"
+            ]
         }
-        
-        # Default insights based on audience
-        if target_audience:
-            if 'marketer' in target_audience.lower():
-                insights['pain_points'] = ['ROI measurement', 'Lead generation', 'Attribution challenges']
-                insights['interests'] = ['Marketing automation', 'Data analytics', 'Growth strategies']
-            elif 'business owner' in target_audience.lower():
-                insights['pain_points'] = ['Limited budget', 'Time constraints', 'Scaling challenges']
-                insights['interests'] = ['Cost-effective marketing', 'Business growth', 'Efficiency tools']
-        
-        return insights
     
     def _create_research_summary(self, results: List[Dict]) -> str:
-        """Create a research summary from search results"""
+        """Create research summary from search results"""
         if not results:
-            return "No relevant research found for the specified keywords."
+            return "No specific research found for these keywords."
         
-        summary_parts = []
-        categories = set()
+        summaries = []
+        for result in results[:3]:
+            if result.get('marketing_insights'):
+                summaries.append(result['marketing_insights'])
         
-        for result in results:
-            if result.get('category'):
-                categories.add(result['category'])
-        
-        if categories:
-            summary_parts.append(f"Research spans {len(categories)} key areas: {', '.join(categories)}")
-        
-        insights_count = sum(1 for r in results if r.get('marketing_insights'))
-        if insights_count:
-            summary_parts.append(f"{insights_count} sources provide actionable insights")
-        
-        return ". ".join(summary_parts) + "." if summary_parts else "Research data compiled from recent marketing content."
+        return " ".join(summaries)[:500] + "..." if summaries else "Research indicates focus on value-driven content strategies."
     
     def _get_fallback_trends(self) -> Dict[str, Any]:
         """Fallback trends when database is unavailable"""
         return {
-            'trends_summary': "Current marketing focus on AI integration, privacy-first strategies, and personalization at scale.",
+            'trends_summary': "Marketing trends focus on AI, personalization, and data privacy.",
             'actionable_insights': [
-                "Implement AI-powered content personalization",
+                "Leverage AI for content creation and optimization",
                 "Focus on first-party data collection",
-                "Optimize for voice search queries",
-                "Create video-first content strategies"
+                "Prioritize video content across platforms"
             ],
-            'trending_keywords': ['AI marketing', 'personalization', 'privacy', 'automation', 'video content'],
-            'recent_topics': ['AI in marketing', 'Privacy regulations', 'Content automation'],
-            'content_angles': ['AI implementation guides', 'Privacy compliance tips', 'Automation case studies']
+            'trending_keywords': ['AI', 'personalization', 'video', 'automation', 'privacy'],
+            'recent_topics': ["AI in Marketing", "Privacy-First Marketing", "Video Marketing Strategies"],
+            'content_angles': [
+                "AI-powered marketing automation",
+                "Building trust through transparency",
+                "Multi-format content strategies"
+            ]
         }
     
     def _get_fallback_inspiration(self, content_type: str) -> Dict[str, Any]:

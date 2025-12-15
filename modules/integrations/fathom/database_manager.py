@@ -10,14 +10,23 @@ Key Features:
 - Search meetings by keywords, date, participants
 - Retrieve meeting history for conversational memory
 - Integration with Syntax's existing database architecture
+- Bridge meeting summaries to knowledge_entries for chat accessibility
 
 Database Tables:
 - fathom_meetings: Core meeting data (title, date, participants, transcript)
 - meeting_action_items: Extracted action items and tasks
 - meeting_topics: Key topics and themes discussed
+- knowledge_entries: Chat's searchable knowledge base (bridged to)
+
+FIXES APPLIED (Session 6 - Fathom Review):
+- Fixed _get_action_items() which had wrong variable names and tried to parse non-existent 'keywords' column
+- Fixed duplicate _get_action_items() call in get_meeting_by_recording_id()
+- Fixed _get_topics() to properly parse keywords JSON
+- Fixed get_meeting_statistics() which couldn't unnest JSON string participants
+- Added _get_topics() call to get_meeting_by_id() for consistency
+- ADDED: add_meeting_to_knowledge_base() to bridge meetings into chat's knowledge system
 """
 
-import asyncpg
 import logging
 import json
 from typing import Dict, List, Optional, Any
@@ -28,11 +37,14 @@ from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+# Hardcoded user ID - this is a single-user personal project
+DEFAULT_USER_ID = 'b7c60682-4815-4d9d-8ebe-66c6cd24eff9'
+
+
 @dataclass
 class MeetingRecord:
     """Container for meeting data"""
     id: str
-    # ✅ FIXED: Use recording_id instead of meeting_id
     fathom_recording_id: int
     title: str
     meeting_date: datetime
@@ -42,6 +54,7 @@ class MeetingRecord:
     ai_summary: str
     key_points: List[str]
     created_at: datetime
+
 
 @dataclass
 class ActionItem:
@@ -53,6 +66,7 @@ class ActionItem:
     due_date: Optional[datetime]
     priority: str
     status: str
+
 
 class FathomDatabaseManager:
     """
@@ -80,15 +94,15 @@ class FathomDatabaseManager:
             Meeting ID (UUID) from database
         """
         try:
-            # ✅ FIXED: Extract from correct structure
+            # Extract from correct structure
             details = recording_data.get('details', {})
             transcript_data = recording_data.get('transcript', {})
             
-            # ✅ FIXED: Use correct field names from Fathom API
+            # Use correct field names from Fathom API
             recording_id = details.get('id')  # This is an integer
             title = details.get('title', 'Untitled Meeting')
             
-            # ✅ FIXED: Handle start_time properly
+            # Handle start_time properly
             start_time_str = details.get('start_time', datetime.now().isoformat())
             if isinstance(start_time_str, str):
                 # Remove 'Z' and parse
@@ -97,18 +111,18 @@ class FathomDatabaseManager:
             else:
                 meeting_date = start_time_str
             
-            # ✅ FIXED: Duration is in seconds, convert to minutes
+            # Duration is in seconds, convert to minutes
             duration_seconds = details.get('duration', 0)
             duration_minutes = duration_seconds // 60
             
-            # ✅ FIXED: Extract participant names from attendees
+            # Extract participant names from attendees
             attendees = details.get('attendees', [])
             participants = [att.get('name', 'Unknown') for att in attendees]
             
-            # 🔧 FIX (Oct 27, 2025): Convert participants list to JSON string
+            # Convert participants list to JSON string
             participants_json = json.dumps(participants) if participants else json.dumps([])
             
-            # 🔧 FIX (Oct 28, 2025): Handle transcript that comes as list of segments
+            # Handle transcript that comes as list of segments
             transcript_text = self._extract_transcript_text(transcript_data)
             
             # Extract summary components
@@ -116,10 +130,10 @@ class FathomDatabaseManager:
             key_points = summary_data.get('key_points', [])
             sentiment = summary_data.get('sentiment', 'neutral')
             
-            # 🔧 FIX (Oct 27, 2025): Convert key_points list to JSON string
+            # Convert key_points list to JSON string
             key_points_json = json.dumps(key_points) if key_points else json.dumps([])
             
-            # ✅ FIXED: Use recording_id (BIGINT) instead of meeting_id
+            # Use recording_id (BIGINT) instead of meeting_id
             query = '''
                 INSERT INTO fathom_meetings 
                 (recording_id, title, meeting_date, duration_minutes,
@@ -162,11 +176,221 @@ class FathomDatabaseManager:
             if topics:
                 await self._store_topics(db_meeting_id, topics)
             
+            # Bridge to knowledge_entries for chat accessibility
+            await self._add_meeting_to_knowledge_base(
+                meeting_id=db_meeting_id,
+                title=title,
+                meeting_date=meeting_date,
+                participants=participants,
+                summary_data=summary_data
+            )
+            
             return db_meeting_id
             
         except Exception as e:
             logger.error(f"❌ Failed to store meeting: {e}")
             raise
+    
+    # ============================================================================
+    # KNOWLEDGE BASE BRIDGE
+    # ============================================================================
+    
+    async def _add_meeting_to_knowledge_base(
+        self,
+        meeting_id: str,
+        title: str,
+        meeting_date: datetime,
+        participants: List[str],
+        summary_data: Dict[str, Any]
+    ) -> None:
+        """
+        Bridge meeting data into knowledge_entries for chat accessibility.
+        
+        This allows the main chat AI to find and reference meeting content
+        through its normal knowledge retrieval process.
+        
+        Args:
+            meeting_id: Database UUID of the stored meeting
+            title: Meeting title
+            meeting_date: When the meeting occurred
+            participants: List of participant names
+            summary_data: AI-generated summary and insights
+        """
+        try:
+            # Get or create knowledge source for Fathom meetings
+            source_id = await self._ensure_fathom_knowledge_source()
+            
+            # Format meeting date nicely
+            date_str = meeting_date.strftime('%Y-%m-%d %H:%M') if meeting_date else 'Unknown date'
+            
+            # Build action items text
+            action_items = summary_data.get('action_items', [])
+            action_items_text = ""
+            if action_items:
+                action_lines = []
+                for item in action_items:
+                    if isinstance(item, dict):
+                        text = item.get('text', str(item))
+                        assigned = item.get('assigned_to')
+                        priority = item.get('priority', 'medium')
+                        if assigned:
+                            action_lines.append(f"• [{priority.upper()}] {text} (assigned to: {assigned})")
+                        else:
+                            action_lines.append(f"• [{priority.upper()}] {text}")
+                    else:
+                        action_lines.append(f"• {item}")
+                action_items_text = "\n".join(action_lines)
+            
+            # Build topics text
+            topics = summary_data.get('topics', [])
+            topics_text = ", ".join(t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in topics)
+            
+            # Build key points text
+            key_points = summary_data.get('key_points', [])
+            key_points_text = "\n".join(f"• {point}" for point in key_points)
+            
+            # Build decisions text
+            decisions = summary_data.get('decisions_made', [])
+            decisions_text = "\n".join(f"• {decision}" for decision in decisions) if decisions else ""
+            
+            # Build comprehensive, searchable content
+            content_parts = [
+                f"MEETING RECORDING: {title}",
+                f"DATE: {date_str}",
+                f"PARTICIPANTS: {', '.join(participants) if participants else 'Not specified'}",
+                "",
+                "=" * 50,
+                "",
+                "SUMMARY:",
+                summary_data.get('summary', 'No summary available'),
+                ""
+            ]
+            
+            if key_points_text:
+                content_parts.extend([
+                    "KEY POINTS:",
+                    key_points_text,
+                    ""
+                ])
+            
+            if decisions_text:
+                content_parts.extend([
+                    "DECISIONS MADE:",
+                    decisions_text,
+                    ""
+                ])
+            
+            if action_items_text:
+                content_parts.extend([
+                    "ACTION ITEMS:",
+                    action_items_text,
+                    ""
+                ])
+            
+            if topics_text:
+                content_parts.extend([
+                    "TOPICS DISCUSSED:",
+                    topics_text,
+                    ""
+                ])
+            
+            # Add metadata footer for deep-dive queries
+            content_parts.extend([
+                "",
+                "=" * 50,
+                f"[Meeting ID: {meeting_id} - Full transcript available via Fathom integration]"
+            ])
+            
+            content = "\n".join(content_parts)
+            
+            # Extract topic names for key_topics JSON
+            key_topics = [t.get('name', str(t)) if isinstance(t, dict) else str(t) for t in topics]
+            
+            # Check if we already have a knowledge entry for this meeting
+            existing = await self.db.fetch_one(
+                '''
+                SELECT id FROM knowledge_entries 
+                WHERE content_type = 'meeting_summary' 
+                AND title = $1 
+                AND user_id = $2
+                ''',
+                title,
+                DEFAULT_USER_ID
+            )
+            
+            if existing:
+                # Update existing entry
+                await self.db.execute(
+                    '''
+                    UPDATE knowledge_entries
+                    SET content = $1, summary = $2, key_topics = $3, updated_at = NOW()
+                    WHERE id = $4
+                    ''',
+                    content,
+                    summary_data.get('summary', ''),
+                    json.dumps(key_topics),
+                    existing['id']
+                )
+                logger.info(f"✅ Updated knowledge entry for meeting: {title}")
+            else:
+                # Insert new entry
+                await self.db.execute(
+                    '''
+                    INSERT INTO knowledge_entries 
+                    (source_id, title, content, content_type, summary, key_topics, user_id, created_at, updated_at)
+                    VALUES ($1, $2, $3, 'meeting_summary', $4, $5, $6, NOW(), NOW())
+                    ''',
+                    source_id,
+                    title,
+                    content,
+                    summary_data.get('summary', ''),
+                    json.dumps(key_topics),
+                    DEFAULT_USER_ID
+                )
+                logger.info(f"✅ Added knowledge entry for meeting: {title}")
+            
+        except Exception as e:
+            # Don't fail the whole meeting storage if knowledge bridge fails
+            logger.error(f"⚠️ Failed to bridge meeting to knowledge base: {e}")
+            logger.info("   Meeting still stored successfully in fathom_meetings")
+    
+    async def _ensure_fathom_knowledge_source(self) -> int:
+        """
+        Ensure a knowledge_source entry exists for Fathom meetings.
+        Creates one if it doesn't exist.
+        
+        Returns:
+            source_id (int) of the fathom_meetings knowledge source
+        """
+        try:
+            # Check if source exists
+            result = await self.db.fetch_one(
+                "SELECT id FROM knowledge_sources WHERE name = 'fathom_meetings'"
+            )
+            
+            if result:
+                return result['id']
+            
+            # Create new source
+            result = await self.db.fetch_one(
+                '''
+                INSERT INTO knowledge_sources (name, source_type, description, is_active)
+                VALUES ('fathom_meetings', 'integration', 'Meeting recordings and transcripts from Fathom with AI summaries', true)
+                RETURNING id
+                '''
+            )
+            
+            logger.info("✅ Created knowledge_source for fathom_meetings")
+            return result['id']
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure knowledge source: {e}")
+            # Return a fallback - source_id can be NULL
+            return None
+    
+    # ============================================================================
+    # TRANSCRIPT EXTRACTION
+    # ============================================================================
     
     def _extract_transcript_text(self, transcript_data: Any) -> str:
         """
@@ -253,6 +477,10 @@ class FathomDatabaseManager:
             except:
                 return ""
     
+    # ============================================================================
+    # ACTION ITEMS & TOPICS STORAGE
+    # ============================================================================
+    
     async def _store_action_items(self, meeting_id: str,
                                  action_items: List[Dict[str, Any]]) -> None:
         """Store action items extracted from meeting"""
@@ -290,7 +518,7 @@ class FathomDatabaseManager:
             '''
             
             for topic in topics:
-                # 🔧 FIX (Oct 27, 2025): Convert keywords list to JSON string
+                # Convert keywords list to JSON string
                 keywords = topic.get('keywords', [])
                 keywords_json = json.dumps(keywords) if keywords else json.dumps([])
                 
@@ -326,7 +554,7 @@ class FathomDatabaseManager:
             
             meeting = dict(result)
             
-            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            # Parse JSON strings back to lists
             if meeting.get('participants') and isinstance(meeting['participants'], str):
                 try:
                     meeting['participants'] = json.loads(meeting['participants'])
@@ -342,13 +570,15 @@ class FathomDatabaseManager:
             # Get action items
             meeting['action_items'] = await self._get_action_items(meeting_id)
             
+            # Get topics
+            meeting['topics'] = await self._get_topics(meeting_id)
+            
             return meeting
             
         except Exception as e:
             logger.error(f"❌ Failed to get meeting: {e}")
             return None
     
-    # ✅ ADDED: New method to get meeting by recording_id
     async def get_meeting_by_recording_id(self, recording_id: int) -> Optional[Dict[str, Any]]:
         """Get complete meeting data by Fathom recording_id"""
         try:
@@ -365,7 +595,7 @@ class FathomDatabaseManager:
             meeting = dict(result)
             meeting_id = str(meeting['id'])
             
-            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            # Parse JSON strings back to lists
             if meeting.get('participants') and isinstance(meeting['participants'], str):
                 try:
                     meeting['participants'] = json.loads(meeting['participants'])
@@ -381,9 +611,6 @@ class FathomDatabaseManager:
             # Get action items
             meeting['action_items'] = await self._get_action_items(meeting_id)
             
-            # Get action items
-            meeting['action_items'] = await self._get_action_items(meeting_id)
-            
             # Get topics
             meeting['topics'] = await self._get_topics(meeting_id)
             
@@ -394,7 +621,15 @@ class FathomDatabaseManager:
             return None
     
     async def _get_action_items(self, meeting_id: str) -> List[Dict[str, Any]]:
-        """Get action items for a meeting"""
+        """
+        Get action items for a meeting
+        
+        FIXED: Original code had wrong variable names ('topics' instead of 'items')
+        and tried to parse 'keywords' which doesn't exist on meeting_action_items table.
+        
+        meeting_action_items columns: id, meeting_id, action_text, assigned_to, 
+        due_date, priority, status, created_at, updated_at, completed_at
+        """
         try:
             query = '''
                 SELECT * FROM meeting_action_items
@@ -403,7 +638,31 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, meeting_id)
-            # 🔧 FIX (Oct 27, 2025): Parse keywords JSON back to list
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get action items: {e}")
+            return []
+    
+    async def _get_topics(self, meeting_id: str) -> List[Dict[str, Any]]:
+        """
+        Get topics for a meeting
+        
+        FIXED: Added JSON parsing for keywords column
+        
+        meeting_topics columns: id, meeting_id, topic_name, importance_score, 
+        keywords (jsonb), created_at
+        """
+        try:
+            query = '''
+                SELECT * FROM meeting_topics
+                WHERE meeting_id = $1
+                ORDER BY importance_score DESC
+            '''
+            
+            results = await self.db.fetch_all(query, meeting_id)
+            
+            # Parse keywords JSON back to list
             topics = []
             for row in results:
                 topic = dict(row)
@@ -417,29 +676,12 @@ class FathomDatabaseManager:
             return topics
             
         except Exception as e:
-            logger.error(f"❌ Failed to get action items: {e}")
-            return []
-    
-    async def _get_topics(self, meeting_id: str) -> List[Dict[str, Any]]:
-        """Get topics for a meeting"""
-        try:
-            query = '''
-                SELECT * FROM meeting_topics
-                WHERE meeting_id = $1
-                ORDER BY importance_score DESC
-            '''
-            
-            results = await self.db.fetch_all(query, meeting_id)
-            return [dict(row) for row in results]
-            
-        except Exception as e:
             logger.error(f"❌ Failed to get topics: {e}")
             return []
     
     async def get_recent_meetings(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent meetings ordered by date"""
         try:
-            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
                 SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
@@ -450,7 +692,8 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, limit)
-            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            
+            # Parse JSON strings back to lists
             meetings = []
             for row in results:
                 meeting = dict(row)
@@ -479,7 +722,6 @@ class FathomDatabaseManager:
         Uses PostgreSQL full-text search for better results
         """
         try:
-            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
                 SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
@@ -500,7 +742,8 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, query_text, limit)
-            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            
+            # Parse JSON strings back to lists
             meetings = []
             for row in results:
                 meeting = dict(row)
@@ -526,7 +769,6 @@ class FathomDatabaseManager:
                                         end_date: datetime) -> List[Dict[str, Any]]:
         """Get meetings within a date range"""
         try:
-            # ✅ FIXED: Use recording_id instead of fathom_meeting_id
             query = '''
                 SELECT id, recording_id, title, meeting_date,
                        duration_minutes, participants, ai_summary,
@@ -537,7 +779,8 @@ class FathomDatabaseManager:
             '''
             
             results = await self.db.fetch_all(query, start_date, end_date)
-            # 🔧 FIX (Oct 27, 2025): Parse JSON strings back to lists
+            
+            # Parse JSON strings back to lists
             meetings = []
             for row in results:
                 meeting = dict(row)
@@ -605,18 +848,41 @@ class FathomDatabaseManager:
     # ============================================================================
     
     async def get_meeting_statistics(self) -> Dict[str, Any]:
-        """Get overall meeting statistics"""
+        """
+        Get overall meeting statistics
+        
+        FIXED: Original query tried to use unnest() on participants which is stored
+        as a JSON string, not a PostgreSQL array. Now parses JSON in Python.
+        """
         try:
+            # Basic stats query (participants counted separately due to JSON string storage)
             query = '''
                 SELECT 
                     COUNT(*) as total_meetings,
-                    SUM(duration_minutes) as total_minutes,
-                    AVG(duration_minutes) as avg_duration,
-                    COUNT(DISTINCT unnest(participants)) as unique_participants
+                    COALESCE(SUM(duration_minutes), 0) as total_minutes,
+                    COALESCE(AVG(duration_minutes), 0) as avg_duration
                 FROM fathom_meetings
             '''
             
             result = await self.db.fetch_one(query)
+            
+            # Count unique participants by parsing JSON strings
+            # This is necessary because participants is stored as JSON string, not JSONB array
+            participants_query = '''
+                SELECT participants FROM fathom_meetings
+                WHERE participants IS NOT NULL AND participants != '[]'
+            '''
+            participant_rows = await self.db.fetch_all(participants_query)
+            
+            unique_participants = set()
+            for row in participant_rows:
+                try:
+                    participants_str = row['participants']
+                    if isinstance(participants_str, str):
+                        participants_list = json.loads(participants_str)
+                        unique_participants.update(participants_list)
+                except:
+                    pass
             
             # Get action items stats
             action_query = '''
@@ -633,7 +899,7 @@ class FathomDatabaseManager:
                 'total_meetings': result['total_meetings'] or 0,
                 'total_minutes': result['total_minutes'] or 0,
                 'avg_duration': float(result['avg_duration'] or 0),
-                'unique_participants': result['unique_participants'] or 0,
+                'unique_participants': len(unique_participants),
                 'total_action_items': action_result['total_actions'] or 0,
                 'pending_actions': action_result['pending'] or 0,
                 'completed_actions': action_result['completed'] or 0
@@ -646,9 +912,6 @@ class FathomDatabaseManager:
     # ============================================================================
     # HELPER METHODS
     # ============================================================================
-    
-    # ✅ REMOVED: _format_transcript_text() - no longer needed
-    # Transcript is already plain text from Fathom
     
     async def health_check(self) -> Dict[str, Any]:
         """Check database health and connectivity"""
@@ -680,12 +943,17 @@ class FathomDatabaseManager:
                 'last_check': datetime.now().isoformat()
             }
 
-# Convenience functions for external use
+
+# ============================================================================
+# CONVENIENCE FUNCTIONS FOR EXTERNAL USE
+# ============================================================================
+
 async def store_fathom_meeting(recording_data: Dict[str, Any],
                               summary_data: Dict[str, Any]) -> str:
     """Convenience function to store meeting"""
     db = FathomDatabaseManager()
     return await db.store_meeting(recording_data, summary_data)
+
 
 async def search_meeting_history(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """Convenience function to search meetings"""

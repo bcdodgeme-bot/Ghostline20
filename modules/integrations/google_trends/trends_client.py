@@ -9,20 +9,24 @@ Key Features:
 - Low threshold detection (learned from TV signals issue)
 - Regional focus (US/Virginia)
 - Momentum detection for trend alerts
+
+FIXED: Now uses centralized db_manager instead of direct asyncpg.connect()
 """
 
 import asyncio
-import asyncpg
-from pytrends.request import TrendReq
-import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta, date
-import time
 import random
 import logging
+from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime, timedelta, date
 from dataclasses import dataclass
 
+from pytrends.request import TrendReq
+import pandas as pd
+
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TrendData:
@@ -35,11 +39,13 @@ class TrendData:
     regional_score: Optional[int] = None
     raw_data: Optional[Dict] = None
 
+
 class GoogleTrendsClient:
     """Smart Google Trends monitoring with rate limiting and low thresholds"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self):
+        """Initialize GoogleTrendsClient - uses centralized db_manager"""
+        # No database_url needed - we use the centralized db_manager
         self.pytrends = None
         
         # Rate limiting - 45% under Google's limits for safety
@@ -59,7 +65,7 @@ class GoogleTrendsClient:
         # Regional settings
         self.primary_region = 'US'
         self.virginia_region = 'US-VA'  # Virginia-specific trends
-        
+    
     async def initialize_client(self):
         """Initialize pytrends client with proper settings"""
         try:
@@ -117,7 +123,7 @@ class GoogleTrendsClient:
                     inc_low_vol=True,
                     inc_geo_code=True
                 )
-            except:
+            except Exception:
                 region_data = pd.DataFrame()  # Fallback if region data fails
             
             self.requests_made_today += 1
@@ -220,9 +226,10 @@ class GoogleTrendsClient:
     
     async def save_trend_data(self, trend_data: TrendData, business_area: str):
         """Save trend data to database"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Update business area
             trend_data.business_area = business_area
             
@@ -238,7 +245,7 @@ class GoogleTrendsClient:
                     trend_momentum = EXCLUDED.trend_momentum,
                     regional_score = EXCLUDED.regional_score,
                     updated_at = NOW()
-            ''', 
+            ''',
                 trend_data.keyword,
                 trend_data.business_area,
                 trend_data.trend_score,
@@ -252,13 +259,16 @@ class GoogleTrendsClient:
             should_alert, alert_reason = self.should_create_alert(trend_data)
             
             if should_alert:
-                await self.create_opportunity_alert(conn, trend_data, alert_reason)
+                await self._create_opportunity_alert(conn, trend_data, alert_reason)
             
+        except Exception as e:
+            logger.error(f"Failed to save trend data for {trend_data.keyword}: {e}")
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
-    async def create_opportunity_alert(self, conn, trend_data: TrendData, reason: str):
-        """Create a trend opportunity alert"""
+    async def _create_opportunity_alert(self, conn, trend_data: TrendData, reason: str):
+        """Create a trend opportunity alert (uses passed connection)"""
         try:
             # Determine urgency based on momentum and score
             if trend_data.momentum == 'breakout' or trend_data.trend_score >= 50:
@@ -312,9 +322,10 @@ class GoogleTrendsClient:
     
     async def monitor_business_area_keywords(self, business_area: str, limit: int = 50):
         """Monitor keywords for a specific business area"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Get expanded keywords for this business area
             query = '''
                 SELECT DISTINCT expanded_keyword 
@@ -326,6 +337,10 @@ class GoogleTrendsClient:
             
             rows = await conn.fetch(query, business_area, limit)
             keywords = [row['expanded_keyword'] for row in rows]
+            
+            # Release connection before long-running operations
+            await db_manager.release_connection(conn)
+            conn = None
             
             if not keywords:
                 logger.warning(f"No expanded keywords found for {business_area}")
@@ -350,8 +365,11 @@ class GoogleTrendsClient:
                 if i + self.batch_size < len(keywords):
                     await self.smart_delay()
             
+        except Exception as e:
+            logger.error(f"Failed to monitor keywords for {business_area}: {e}")
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def monitor_all_business_areas(self, keywords_per_area: int = 25):
         """Monitor keywords across all business areas"""
@@ -376,27 +394,17 @@ class GoogleTrendsClient:
         print(f"\n🎯 Monitoring complete! Requests made today: {self.requests_made_today}")
         print(f"   Rate limit status: {self.requests_made_today}/{self.daily_request_limit}")
 
-async def main():
-    """Test the Google Trends client"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    client = GoogleTrendsClient(database_url)
-    
-    # Test single business area first
-    print("🧪 TESTING GOOGLE TRENDS CLIENT")
-    print("=" * 40)
-    
-    # Monitor just TV signals to start (smallest keyword set)
-    await client.monitor_business_area_keywords('tvsignals', limit=10)
 
-if __name__ == "__main__":
-    # Install pytrends if not already installed
-    try:
-        import pytrends
-    except ImportError:
-        print("📦 Installing pytrends...")
-        import subprocess
-        subprocess.check_call(['pip', 'install', 'pytrends'])
-    
-    asyncio.run(main())
+# ============================================================================
+# SINGLETON GETTER
+# ============================================================================
+
+_google_trends_client: Optional[GoogleTrendsClient] = None
+
+
+def get_google_trends_client() -> GoogleTrendsClient:
+    """Get or create the GoogleTrendsClient singleton instance"""
+    global _google_trends_client
+    if _google_trends_client is None:
+        _google_trends_client = GoogleTrendsClient()
+    return _google_trends_client

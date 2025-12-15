@@ -4,15 +4,15 @@ Scans timelines for conversations matching keywords
 """
 
 import asyncio
-import asyncpg
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 from datetime import datetime, timedelta
 import json
 import logging
-import os
-
 import sys
+
+from ...core.database import db_manager
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -20,12 +20,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Valid keyword tables - SQL injection prevention
+VALID_KEYWORD_TABLES = frozenset({
+    'bcdodge_keywords',
+    'roseandangel_keywords',
+    'tvsignals_keywords',
+    'mealsnfeelz_keywords',
+    'damnitcarl_keywords',
+    'amcf_keywords',
+})
+
 
 class BlueskyEngagementDetector:
     """Detect Bluesky conversations matching user's keywords"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self):
         self.bluesky_client = None
         self.telegram_manager = None
     
@@ -43,9 +52,9 @@ class BlueskyEngagementDetector:
             self.telegram_manager = get_notification_manager()
         return self.telegram_manager
     
-    async def get_connection(self):
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
+    def _validate_table_name(self, table_name: str) -> bool:
+        """Validate table name against allowlist to prevent SQL injection"""
+        return table_name in VALID_KEYWORD_TABLES
     
     # ========================================================================
     # KEYWORD MATCHING
@@ -53,8 +62,7 @@ class BlueskyEngagementDetector:
     
     async def _get_account_keywords(
         self,
-        account_id: str,
-        conn: asyncpg.Connection
+        account_id: str
     ) -> List[str]:
         """Get keywords for a Bluesky account"""
         
@@ -68,7 +76,16 @@ class BlueskyEngagementDetector:
             logger.warning(f"No keywords table for account: {account_id}")
             return []
         
+        # Validate table name against allowlist
+        if not self._validate_table_name(table_name):
+            logger.error(f"Invalid keywords table name: {table_name}")
+            return []
+        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
+            # Safe query - table name validated against allowlist
             query = f'''
                 SELECT keyword
                 FROM {table_name}
@@ -85,6 +102,9 @@ class BlueskyEngagementDetector:
         except Exception as e:
             logger.error(f"Failed to load keywords for {account_id}: {e}")
             return []
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     def _match_keywords(
         self,
@@ -202,7 +222,6 @@ class BlueskyEngagementDetector:
         Returns:
             List of opportunity dicts
         """
-        # ADD DEBUG LOGGING HERE
         logger.info(f"📊 Starting scan for {account_id}...")
         
         # Get keywords info from multi_account_client
@@ -212,10 +231,16 @@ class BlueskyEngagementDetector:
         keywords_table = account_info.get('keywords_table')
         logger.info(f"   Using keywords table: {keywords_table}")
         
-        conn = await self.get_connection()
+        # Validate table name
+        if not keywords_table or not self._validate_table_name(keywords_table):
+            logger.error(f"Invalid or missing keywords table for {account_id}")
+            return []
         
+        conn = None
         try:
-            # Get keyword count
+            conn = await db_manager.get_connection()
+            
+            # Get keyword count - table name already validated
             try:
                 keyword_count = await conn.fetchval(f'SELECT COUNT(*) FROM {keywords_table}')
                 logger.info(f"   📝 {keyword_count} keywords loaded for matching")
@@ -240,7 +265,7 @@ class BlueskyEngagementDetector:
                 return []
             
             # Get keywords for this account
-            keywords = await self._get_account_keywords(account_id, conn)
+            keywords = await self._get_account_keywords(account_id)
             
             if not keywords:
                 logger.warning(f"No keywords configured for {account_id}")
@@ -330,12 +355,13 @@ class BlueskyEngagementDetector:
             logger.error(f"Scan failed for {account_id}: {e}")
             return []
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _store_opportunity(
         self,
         opportunity: Dict[str, Any],
-        conn: asyncpg.Connection
+        conn
     ) -> bool:
         """Store opportunity in database"""
         try:
@@ -416,9 +442,10 @@ class BlueskyEngagementDetector:
         Returns:
             True if notification sent successfully
         """
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Get opportunity details
             opportunity = await conn.fetchrow('''
                 SELECT 
@@ -488,7 +515,8 @@ class BlueskyEngagementDetector:
             logger.error(f"Failed to send notification: {e}")
             return False
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     # ========================================================================
     # BATCH SCANNING
@@ -519,8 +547,9 @@ class BlueskyEngagementDetector:
                 )
                 
                 # Get IDs from database for notifications
-                conn = await self.get_connection()
+                conn = None
                 try:
+                    conn = await db_manager.get_connection()
                     for opp in sorted_opps[:3]:
                         opp_record = await conn.fetchrow('''
                             SELECT id FROM bluesky_engagement_opportunities
@@ -531,7 +560,8 @@ class BlueskyEngagementDetector:
                             await self.notify_about_opportunity(opp_record['id'])
                             await asyncio.sleep(2)  # Rate limit notifications
                 finally:
-                    await conn.close()
+                    if conn:
+                        await db_manager.release_connection(conn)
             
             # Rate limit between accounts
             await asyncio.sleep(5)
@@ -540,25 +570,24 @@ class BlueskyEngagementDetector:
 
 
 # Convenience function
-async def get_engagement_detector(database_url: str = None) -> BlueskyEngagementDetector:
+def get_engagement_detector() -> BlueskyEngagementDetector:
     """Get engagement detector instance"""
-    if not database_url:
-        database_url = os.getenv('DATABASE_URL')
-    return BlueskyEngagementDetector(database_url)
+    return BlueskyEngagementDetector()
 
 
 # Test script
 if __name__ == "__main__":
     async def test():
+        import os
         database_url = os.getenv('DATABASE_URL')
         if not database_url:
             print("❌ DATABASE_URL not set")
             return
         
-        detector = await get_engagement_detector(database_url)
+        detector = get_engagement_detector()
         
-        print("🧪 Testing engagement detection for bcdodge...")
-        opportunities = await detector.scan_for_opportunities('bcdodge')
+        print("🧪 Testing engagement detection for personal...")
+        opportunities = await detector.scan_for_opportunities('personal')
         
         print(f"\n✅ Found {len(opportunities)} opportunities")
         

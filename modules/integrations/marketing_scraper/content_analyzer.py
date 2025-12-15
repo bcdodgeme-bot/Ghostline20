@@ -10,10 +10,22 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 # Import existing AI components from Syntax Prime V2
-# from modules.ai.openrouter_client import get_openrouter_client
-# from modules.ai.personality_engine import get_personality_engine
+from ...ai.openrouter_client import get_openrouter_client
+from ...ai.personality_engine import get_personality_engine
 
 logger = logging.getLogger(__name__)
+
+# Singleton instance
+_content_analyzer: Optional['ContentAnalyzer'] = None
+
+
+def get_content_analyzer() -> 'ContentAnalyzer':
+    """Get singleton ContentAnalyzer instance"""
+    global _content_analyzer
+    if _content_analyzer is None:
+        _content_analyzer = ContentAnalyzer()
+    return _content_analyzer
+
 
 class ContentAnalyzer:
     """
@@ -190,13 +202,13 @@ Content Length: {scraped_data.get('content_length', 0)} characters
 
 Analyze:
 
-1. **UX Patterns**: What user experience patterns do they use?
-2. **Technical SEO**: How well optimized is their technical implementation?
-3. **Conversion Optimization**: What technical elements support conversions?
-4. **Performance**: How do they optimize for speed and user experience?
-5. **Accessibility**: How accessible is their website?
-6. **Mobile Experience**: How do they handle mobile users?
-7. **Technical Best Practices**: What can we learn from their implementation?
+1. **UX Patterns**: What user experience patterns do they employ?
+2. **Technical SEO**: How well-optimized is the page technically?
+3. **Conversion Elements**: What technical elements support conversion?
+4. **Performance**: Any performance insights from the structure?
+5. **Accessibility**: Any accessibility considerations visible?
+6. **Mobile Optimization**: Signs of mobile-first design?
+7. **Best Practices**: What technical best practices are evident?
 
 Respond in JSON format with technical insights and recommendations."""
 

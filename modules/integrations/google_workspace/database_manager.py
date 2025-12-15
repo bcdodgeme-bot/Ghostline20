@@ -29,6 +29,26 @@ logger = logging.getLogger(__name__)
 from . import SUPPORTED_SITES
 from ...core.database import db_manager
 
+# Allowlist of valid columns for google_oauth_status table
+# Prevents SQL injection in update_oauth_status()
+OAUTH_STATUS_ALLOWED_COLUMNS = frozenset({
+    'has_service_account',
+    'service_account_email',
+    'has_oauth_accounts',
+    'oauth_accounts_count',
+    'analytics_access',
+    'search_console_access',
+    'gmail_access',
+    'calendar_access',
+    'drive_access',
+    'last_analytics_sync',
+    'last_search_console_sync',
+    'last_gmail_check',
+    'last_calendar_sync',
+    'setup_completed_at',
+})
+
+
 class GoogleWorkspaceDatabase:
     """
     Centralized database manager for Google Workspace integration
@@ -56,7 +76,8 @@ class GoogleWorkspaceDatabase:
         try:
             cutoff_date = datetime.now().date() - timedelta(days=days)
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 result = await conn.fetchrow('''
                     SELECT 
                         site_name,
@@ -75,6 +96,8 @@ class GoogleWorkspaceDatabase:
                 if result:
                     return dict(result)
                 return None
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get Analytics summary: {e}")
@@ -106,7 +129,8 @@ class GoogleWorkspaceDatabase:
             List of top keywords with metrics
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 keywords = await conn.fetch('''
                     SELECT 
                         query as keyword,
@@ -122,6 +146,8 @@ class GoogleWorkspaceDatabase:
                 ''', user_id, site_name, limit)
                 
                 return [dict(kw) for kw in keywords]
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get top keywords: {e}")
@@ -139,7 +165,8 @@ class GoogleWorkspaceDatabase:
             Count of pending opportunities
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 if site_name:
                     count = await conn.fetchval('''
                         SELECT COUNT(*) FROM google_search_console_data
@@ -159,6 +186,8 @@ class GoogleWorkspaceDatabase:
                     ''', user_id)
                 
                 return count or 0
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get opportunities count: {e}")
@@ -176,7 +205,8 @@ class GoogleWorkspaceDatabase:
             Dict with counts by decision type
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 results = await conn.fetch('''
                     SELECT user_decision, COUNT(*) as count
                     FROM google_search_console_data
@@ -195,6 +225,8 @@ class GoogleWorkspaceDatabase:
                 summary['pending'] = pending
                 
                 return summary
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get keyword decisions summary: {e}")
@@ -205,7 +237,8 @@ class GoogleWorkspaceDatabase:
     async def get_recent_documents(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recently created Drive documents"""
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 docs = await conn.fetch('''
                     SELECT 
                         google_doc_id,
@@ -220,6 +253,8 @@ class GoogleWorkspaceDatabase:
                 ''', user_id, limit)
                 
                 return [dict(doc) for doc in docs]
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get recent documents: {e}")
@@ -238,7 +273,8 @@ class GoogleWorkspaceDatabase:
             Dict with OAuth status information
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 status = await conn.fetchrow('''
                     SELECT * FROM google_oauth_status
                     WHERE user_id = $1
@@ -261,6 +297,8 @@ class GoogleWorkspaceDatabase:
                     'search_console_access': False,
                     'drive_access': False
                 }
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get OAuth status: {e}")
@@ -272,10 +310,20 @@ class GoogleWorkspaceDatabase:
         
         Args:
             user_id: User ID
-            updates: Dict of fields to update
+            updates: Dict of fields to update (keys must be in OAUTH_STATUS_ALLOWED_COLUMNS)
         """
         try:
-            # Build dynamic update query
+            # SECURITY FIX: Validate column names against allowlist to prevent SQL injection
+            invalid_columns = set(updates.keys()) - OAUTH_STATUS_ALLOWED_COLUMNS
+            if invalid_columns:
+                logger.error(f"❌ Invalid columns in update_oauth_status: {invalid_columns}")
+                raise ValueError(f"Invalid column names: {invalid_columns}")
+            
+            if not updates:
+                logger.warning("⚠️ update_oauth_status called with empty updates")
+                return
+            
+            # Build dynamic update query (safe now because columns are validated)
             set_clauses = []
             values = []
             param_count = 1
@@ -293,8 +341,11 @@ class GoogleWorkspaceDatabase:
                 WHERE user_id = ${param_count}
             '''
             
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute(query, *values)
+            finally:
+                await db_manager.release_connection(conn)
             
             logger.info(f"✅ Updated OAuth status for user {user_id}")
             
@@ -306,7 +357,8 @@ class GoogleWorkspaceDatabase:
     async def get_site_config(self, user_id: str, site_name: str) -> Optional[Dict[str, Any]]:
         """Get configuration for a specific site"""
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 config = await conn.fetchrow('''
                     SELECT * FROM google_sites_config
                     WHERE user_id = $1 AND site_name = $2
@@ -315,6 +367,8 @@ class GoogleWorkspaceDatabase:
                 if config:
                     return dict(config)
                 return None
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get site config: {e}")
@@ -323,7 +377,8 @@ class GoogleWorkspaceDatabase:
     async def get_all_sites_config(self, user_id: str) -> List[Dict[str, Any]]:
         """Get configuration for all sites"""
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 configs = await conn.fetch('''
                     SELECT * FROM google_sites_config
                     WHERE user_id = $1 AND is_active = TRUE
@@ -331,6 +386,8 @@ class GoogleWorkspaceDatabase:
                 ''', user_id)
                 
                 return [dict(config) for config in configs]
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get all sites config: {e}")
@@ -404,7 +461,8 @@ class GoogleWorkspaceDatabase:
             Dict with last sync times for each data source
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 # Get last Analytics sync
                 analytics_sync = await conn.fetchval('''
                     SELECT MAX(created_at) FROM google_analytics_data
@@ -417,7 +475,7 @@ class GoogleWorkspaceDatabase:
                     WHERE user_id = $1
                 ''', user_id)
                 
-                # Get OAuth status
+                # Get OAuth status (this releases and reacquires connection, which is fine)
                 oauth_status = await self.get_oauth_status(user_id)
                 
                 return {
@@ -426,6 +484,8 @@ class GoogleWorkspaceDatabase:
                     'oauth_status': oauth_status,
                     'data_fresh': self._is_data_fresh(analytics_sync, search_console_sync)
                 }
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to check data freshness: {e}")
@@ -454,7 +514,8 @@ class GoogleWorkspaceDatabase:
             Dict with comprehensive stats
         """
         try:
-            async with db_manager.get_connection() as conn:
+            conn = await db_manager.get_connection()
+            try:
                 # Get counts
                 analytics_count = await conn.fetchval('''
                     SELECT COUNT(*) FROM google_analytics_data WHERE user_id = $1
@@ -468,6 +529,7 @@ class GoogleWorkspaceDatabase:
                     SELECT COUNT(*) FROM google_drive_documents WHERE user_id = $1
                 ''', user_id)
                 
+                # Note: This releases connection temporarily, but that's okay
                 opportunities_count = await self.get_keyword_opportunities_count(user_id)
                 
                 return {
@@ -477,10 +539,13 @@ class GoogleWorkspaceDatabase:
                     'pending_opportunities': opportunities_count,
                     'sites_configured': len(SUPPORTED_SITES)
                 }
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get integration stats: {e}")
             return {}
+
 
 # Global instance
 google_workspace_db = GoogleWorkspaceDatabase()

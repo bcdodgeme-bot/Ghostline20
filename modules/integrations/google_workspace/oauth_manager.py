@@ -39,13 +39,26 @@ except ImportError:
 from ...core.database import db_manager
 from ...core.crypto import encrypt_token, decrypt_token, encrypt_json, decrypt_json
 
+# How many minutes before expiry to proactively refresh
+TOKEN_REFRESH_BUFFER_MINUTES = 10
+
+# Maximum age for state tokens (OAuth CSRF protection)
+STATE_TOKEN_MAX_AGE_MINUTES = 10
+
+# Maximum entries in caches
+MAX_CREDENTIALS_CACHE_SIZE = 50
+MAX_STATE_CACHE_SIZE = 100
+
+
 class GoogleAuthenticationError(Exception):
     """Custom exception for Google authentication errors"""
     pass
 
+
 class GoogleTokenExpiredError(GoogleAuthenticationError):
     """Token expired and refresh failed"""
     pass
+
 
 class GoogleAuthManager:
     """
@@ -92,8 +105,8 @@ class GoogleAuthManager:
         
         # Authentication state
         self._service_credentials = None
-        self._oauth_credentials_cache = {}  # email -> credentials
-        self._state_cache = {}  # state -> user_id mapping
+        self._oauth_credentials_cache = {}  # email -> (credentials, cached_at)
+        self._state_cache = {}  # state -> {user_id, created_at}
         
         logger.info("Google Auth Manager initialized")
     
@@ -141,8 +154,21 @@ class GoogleAuthManager:
         try:
             import secrets
             
+            # Clean up expired state tokens first
+            self._cleanup_expired_states()
+            
             # Generate state token for CSRF protection
             state = secrets.token_urlsafe(32)
+            
+            # Enforce cache size limit
+            if len(self._state_cache) >= MAX_STATE_CACHE_SIZE:
+                # Remove oldest entries
+                sorted_states = sorted(
+                    self._state_cache.items(),
+                    key=lambda x: x[1]['created_at']
+                )
+                for old_state, _ in sorted_states[:10]:  # Remove 10 oldest
+                    del self._state_cache[old_state]
             
             # Store state temporarily (expires in 10 minutes)
             self._state_cache[state] = {
@@ -172,6 +198,19 @@ class GoogleAuthManager:
             logger.error(f"Web flow start failed: {e}")
             raise GoogleAuthenticationError(f"Failed to start web flow: {e}")
     
+    def _cleanup_expired_states(self):
+        """Remove expired state tokens from cache"""
+        now = datetime.now()
+        expired = [
+            state for state, data in self._state_cache.items()
+            if (now - data['created_at']) > timedelta(minutes=STATE_TOKEN_MAX_AGE_MINUTES)
+        ]
+        for state in expired:
+            del self._state_cache[state]
+        
+        if expired:
+            logger.debug(f"Cleaned up {len(expired)} expired OAuth state tokens")
+    
     async def handle_oauth_callback(self, code: str, state: str) -> Dict[str, Any]:
         """
         Handle OAuth callback and exchange code for tokens
@@ -184,6 +223,9 @@ class GoogleAuthManager:
             Dict with success status and user info
         """
         try:
+            # Clean up expired states
+            self._cleanup_expired_states()
+            
             # Verify state token
             if state not in self._state_cache:
                 raise GoogleAuthenticationError("Invalid or expired state token")
@@ -192,7 +234,7 @@ class GoogleAuthManager:
             user_id = state_data['user_id']
             
             # Check if state is expired (10 minutes)
-            if datetime.now() - state_data['created_at'] > timedelta(minutes=10):
+            if datetime.now() - state_data['created_at'] > timedelta(minutes=STATE_TOKEN_MAX_AGE_MINUTES):
                 del self._state_cache[state]
                 raise GoogleAuthenticationError("State token expired")
             
@@ -280,27 +322,44 @@ class GoogleAuthManager:
                 finally:
                     await db_manager.release_connection(conn)
             
-            # Use OAuth credentials for specific email (or auto-detected email)
+            # Check cache first
             if email in self._oauth_credentials_cache:
-                creds = self._oauth_credentials_cache[email]
-                if creds.expiry and creds.expiry <= datetime.now(timezone.utc) and creds.refresh_token:
+                creds, cached_at = self._oauth_credentials_cache[email]
+                
+                # Check if credentials need refresh (expired or expiring soon)
+                needs_refresh = False
+                if creds.expiry:
+                    # Refresh if expired OR expiring within buffer window
+                    buffer_time = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_REFRESH_BUFFER_MINUTES)
+                    if creds.expiry <= buffer_time:
+                        needs_refresh = True
+                        logger.info(f"Token for {email} is expired or expiring soon, refreshing...")
+                
+                if needs_refresh and creds.refresh_token:
                     try:
-                        creds.refresh(Request())
-                        # FIX: Google's refresh gives us naive datetime - add timezone immediately
-                        if creds.expiry and creds.expiry.tzinfo is None:
-                            creds._expiry = creds.expiry.replace(tzinfo=timezone.utc)
-                            
-                        # Update stored tokens
-                        await self._update_oauth_tokens(user_id, email, creds)
-                        return creds
-                    except RefreshError:
-                        logger.error(f"Token refresh failed for {email}")
-                        # Remove invalid credentials
+                        # Use async HTTP refresh instead of synchronous library
+                        refreshed_creds = await self._refresh_token_async(user_id, email, creds.refresh_token)
+                        if refreshed_creds:
+                            return refreshed_creds
+                        else:
+                            # Refresh failed, remove from cache
+                            del self._oauth_credentials_cache[email]
+                            raise GoogleTokenExpiredError(
+                                f"Token refresh failed for {email}. Use 'google auth setup' to re-authenticate."
+                            )
+                    except GoogleTokenExpiredError:
+                        raise
+                    except Exception as e:
+                        logger.error(f"Token refresh error for {email}: {e}")
                         del self._oauth_credentials_cache[email]
-                        raise GoogleTokenExpiredError(f"Hey, your Google Authorization expired again! Use 'google auth setup' to renew.")
+                        raise GoogleTokenExpiredError(
+                            f"Token refresh failed for {email}. Use 'google auth setup' to re-authenticate."
+                        )
+                
+                # Credentials are valid
                 return creds
             
-            # Load from database
+            # Not in cache - load from database
             return await self._load_oauth_credentials(user_id, email)
             
         except GoogleTokenExpiredError:
@@ -308,6 +367,177 @@ class GoogleAuthManager:
         except Exception as e:
             logger.error(f"Failed to get credentials: {e}")
             return None
+    
+    async def _refresh_token_async(self, user_id: str, email: str, refresh_token: str) -> Optional[Credentials]:
+        """
+        Refresh OAuth token using async HTTP request
+        
+        This is more reliable than using the synchronous Google library refresh
+        in an async context.
+        
+        Args:
+            user_id: User ID
+            email: Email address of the account
+            refresh_token: The refresh token to use
+            
+        Returns:
+            New Credentials object or None if refresh failed
+        """
+        try:
+            logger.info(f"🔄 Refreshing token for {email} via async HTTP...")
+            
+            payload = {
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'refresh_token': refresh_token,
+                'grant_type': 'refresh_token'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.token_url, data=payload) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Token refresh failed ({response.status}): {error_text}")
+                        
+                        # Check if refresh token is invalid/revoked
+                        if response.status == 400:
+                            error_data = await response.json()
+                            if error_data.get('error') == 'invalid_grant':
+                                logger.error(f"Refresh token revoked or expired for {email}")
+                                # Mark account as needing re-auth
+                                await self._mark_account_needs_reauth(user_id, email)
+                        return None
+                    
+                    token_data = await response.json()
+            
+            # Calculate new expiry time
+            expires_in = token_data.get('expires_in', 3600)
+            new_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            
+            # Create new credentials object
+            # Note: Google doesn't return a new refresh_token, so we keep the old one
+            new_creds = Credentials(
+                token=token_data['access_token'],
+                refresh_token=refresh_token,  # Keep existing refresh token
+                token_uri=self.token_url,
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+                scopes=self.oauth_scopes,
+                expiry=new_expiry
+            )
+            
+            # Update database with new access token
+            await self._update_oauth_tokens_from_refresh(user_id, email, token_data['access_token'], new_expiry)
+            
+            # Update cache
+            self._oauth_credentials_cache[email] = (new_creds, datetime.now())
+            
+            logger.info(f"✅ Token refreshed successfully for {email}, expires at {new_expiry}")
+            
+            return new_creds
+            
+        except Exception as e:
+            logger.error(f"❌ Async token refresh failed for {email}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+    
+    async def _mark_account_needs_reauth(self, user_id: str, email: str):
+        """Mark an account as needing re-authentication"""
+        try:
+            conn = await db_manager.get_connection()
+            try:
+                await conn.execute('''
+                    UPDATE google_oauth_accounts
+                    SET is_active = FALSE, updated_at = NOW()
+                    WHERE user_id = $1 AND email_address = $2
+                ''', user_id, email)
+                logger.warning(f"⚠️ Marked {email} as needing re-authentication")
+            finally:
+                await db_manager.release_connection(conn)
+        except Exception as e:
+            logger.error(f"Failed to mark account for reauth: {e}")
+    
+    async def _update_oauth_tokens_from_refresh(self, user_id: str, email: str,
+                                                 access_token: str, expires_at: datetime):
+        """Update only the access token after a refresh (refresh token stays the same)"""
+        try:
+            encrypted_access_token = encrypt_token(access_token)
+            
+            conn = await db_manager.get_connection()
+            try:
+                await conn.execute('''
+                    UPDATE google_oauth_accounts
+                    SET access_token_encrypted = $1, token_expires_at = $2, updated_at = NOW()
+                    WHERE user_id = $3 AND email_address = $4
+                ''', encrypted_access_token, expires_at, user_id, email)
+            finally:
+                await db_manager.release_connection(conn)
+                
+            logger.debug(f"Updated access token in database for {email}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update tokens for {email}: {e}")
+    
+    async def refresh_all_tokens(self, user_id: str) -> Dict[str, bool]:
+        """
+        Proactively refresh all tokens for a user
+        
+        Call this periodically (e.g., every 45 minutes) to keep tokens fresh.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Dict mapping email -> success status
+        """
+        results = {}
+        
+        try:
+            # Get all active accounts
+            conn = await db_manager.get_connection()
+            try:
+                rows = await conn.fetch('''
+                    SELECT email_address, refresh_token_encrypted, token_expires_at
+                    FROM google_oauth_accounts
+                    WHERE user_id = $1 AND is_active = TRUE
+                ''', user_id)
+            finally:
+                await db_manager.release_connection(conn)
+            
+            for row in rows:
+                email = row['email_address']
+                expires_at = row['token_expires_at']
+                
+                # Check if token needs refresh (expires within 15 minutes)
+                if expires_at:
+                    buffer_time = datetime.now(timezone.utc) + timedelta(minutes=15)
+                    if expires_at > buffer_time:
+                        logger.debug(f"Token for {email} still valid until {expires_at}, skipping refresh")
+                        results[email] = True
+                        continue
+                
+                # Decrypt refresh token and refresh
+                try:
+                    refresh_token = decrypt_token(row['refresh_token_encrypted'])
+                    if refresh_token:
+                        new_creds = await self._refresh_token_async(user_id, email, refresh_token)
+                        results[email] = new_creds is not None
+                    else:
+                        logger.warning(f"No refresh token for {email}")
+                        results[email] = False
+                except Exception as e:
+                    logger.error(f"Failed to refresh {email}: {e}")
+                    results[email] = False
+            
+            success_count = sum(1 for v in results.values() if v)
+            logger.info(f"🔄 Token refresh complete: {success_count}/{len(results)} accounts refreshed")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh all tokens: {e}")
+            return results
     
     async def get_analytics_credentials(self, user_id: str, email: Optional[str] = None):
         """
@@ -323,7 +553,6 @@ class GoogleAuthManager:
         # (Analytics uses synchronous google-analytics-data library which is stricter)
         if creds.expiry and creds.expiry.tzinfo is None:
             # Create new credentials with timezone-aware expiry
-            from google.oauth2.credentials import Credentials
             creds = Credentials(
                 token=creds.token,
                 refresh_token=creds.refresh_token,
@@ -361,13 +590,23 @@ class GoogleAuthManager:
                 
                 for row in rows:
                     scopes = row['scopes'] if row['scopes'] else []
+                    expires_at = row['token_expires_at']
+                    
+                    # Determine if expired or expiring soon
+                    is_expired = False
+                    expiring_soon = False
+                    if expires_at:
+                        now = datetime.now(timezone.utc)
+                        is_expired = now > expires_at
+                        expiring_soon = not is_expired and (expires_at - now) < timedelta(minutes=15)
                     
                     accounts.append({
                         'email': row['email_address'],
                         'scopes': scopes,
                         'authenticated_at': row['authenticated_at'],
-                        'expires_at': row['token_expires_at'],
-                        'is_expired': (datetime.now(timezone.utc) > row['token_expires_at']) if row['token_expires_at'] else False
+                        'expires_at': expires_at,
+                        'is_expired': is_expired,
+                        'expiring_soon': expiring_soon
                     })
             finally:
                 await db_manager.release_connection(conn)
@@ -380,7 +619,8 @@ class GoogleAuthManager:
                     'scopes': self.oauth_scopes,
                     'authenticated_at': datetime.now(),
                     'expires_at': None,
-                    'is_expired': False
+                    'is_expired': False,
+                    'expiring_soon': False
                 })
             
             return accounts
@@ -446,7 +686,6 @@ class GoogleAuthManager:
             encrypted_access_token = encrypt_token(token_data['access_token'])
             encrypted_refresh_token = encrypt_token(token_data.get('refresh_token', ''))
             
-            # Calculate expiration time
             # Calculate expiration time (timezone-aware)
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_data.get('expires_in', 3600))
             
@@ -459,6 +698,7 @@ class GoogleAuthManager:
                     access_token_encrypted = EXCLUDED.access_token_encrypted,
                     refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
                     token_expires_at = EXCLUDED.token_expires_at,
+                    is_active = TRUE,
                     updated_at = NOW()
             '''
             
@@ -482,14 +722,14 @@ class GoogleAuthManager:
             credentials = Credentials(
                 token=token_data['access_token'],
                 refresh_token=token_data.get('refresh_token'),
-                token_uri=self.token_url,  # ← ADD
+                token_uri=self.token_url,
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 scopes=self.oauth_scopes,
-                expiry=(datetime.now(timezone.utc) + timedelta(seconds=token_data.get('expires_in', 3600))) if token_data.get('expires_in') else None
+                expiry=expires_at
             )
             
-            self._oauth_credentials_cache[user_email] = credentials
+            self._oauth_credentials_cache[user_email] = (credentials, datetime.now())
             
             logger.info(f"OAuth tokens stored for {user_email}")
             
@@ -498,7 +738,7 @@ class GoogleAuthManager:
             raise
     
     async def _load_oauth_credentials(self, user_id: str, email: str):
-        """Load and decrypt OAuth credentials from database"""
+        """Load and decrypt OAuth credentials from database, refreshing if needed"""
         try:
             query = '''
                 SELECT access_token_encrypted, refresh_token_encrypted, token_expires_at
@@ -511,30 +751,68 @@ class GoogleAuthManager:
                 row = await conn.fetchrow(query, user_id, email)
                 
                 if not row:
+                    logger.warning(f"No credentials found for {email}")
                     return None
                 
                 # Decrypt tokens
                 access_token = decrypt_token(row['access_token_encrypted'])
                 refresh_token = decrypt_token(row['refresh_token_encrypted']) if row['refresh_token_encrypted'] else None
+                expires_at = row['token_expires_at']
                 
-                # Create credentials
-                credentials = Credentials(
-                    token=access_token,
-                    refresh_token=refresh_token,
-                    token_uri=self.token_url,           # ← ADD THIS
-                    client_id=self.client_id,           # ← ADD THIS
-                    client_secret=self.client_secret,
-                    scopes=self.oauth_scopes,
-                    expiry=row['token_expires_at'].replace(tzinfo=timezone.utc) if row['token_expires_at'] else None  # Keep it naive to match Google's library expectations
-                )
+                # Make expiry timezone-aware if it isn't
+                if expires_at and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
                 
-                # Cache for future use
-                self._oauth_credentials_cache[email] = credentials
-                
-                return credentials
             finally:
                 await db_manager.release_connection(conn)
-                
+            
+            # FIX: Check if token is expired or expiring soon, and refresh if needed
+            needs_refresh = False
+            if expires_at:
+                buffer_time = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_REFRESH_BUFFER_MINUTES)
+                if expires_at <= buffer_time:
+                    needs_refresh = True
+                    logger.info(f"Token for {email} from database is expired/expiring, attempting refresh...")
+            
+            if needs_refresh and refresh_token:
+                # Try to refresh
+                new_creds = await self._refresh_token_async(user_id, email, refresh_token)
+                if new_creds:
+                    return new_creds
+                else:
+                    # Refresh failed
+                    raise GoogleTokenExpiredError(
+                        f"Token expired and refresh failed for {email}. Use 'google auth setup' to re-authenticate."
+                    )
+            
+            # Create credentials object
+            credentials = Credentials(
+                token=access_token,
+                refresh_token=refresh_token,
+                token_uri=self.token_url,
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+                scopes=self.oauth_scopes,
+                expiry=expires_at
+            )
+            
+            # Enforce cache size limit
+            if len(self._oauth_credentials_cache) >= MAX_CREDENTIALS_CACHE_SIZE:
+                # Remove oldest entries
+                sorted_cache = sorted(
+                    self._oauth_credentials_cache.items(),
+                    key=lambda x: x[1][1]  # Sort by cached_at timestamp
+                )
+                for old_email, _ in sorted_cache[:10]:  # Remove 10 oldest
+                    del self._oauth_credentials_cache[old_email]
+            
+            # Cache for future use
+            self._oauth_credentials_cache[email] = (credentials, datetime.now())
+            
+            return credentials
+            
+        except GoogleTokenExpiredError:
+            raise
         except Exception as e:
             logger.error(f"Failed to load OAuth credentials for {email}: {e}")
             return None
@@ -578,33 +856,34 @@ class GoogleAuthManager:
             logger.error(f"Failed to update tokens for {email}: {e}")
 
     async def get_aiogoogle_creds(self, user_id: str, email: Optional[str] = None):
-            """
-            Get credentials in aiogoogle format
-            
-            Returns:
-                UserCreds object for aiogoogle
-            """
-            from aiogoogle.auth.creds import UserCreds
-            
-            logger.info(f"🔑 get_aiogoogle_creds called: user_id={user_id}, email={email}")
-            
-            # Get regular credentials first
-            credentials = await self.get_valid_credentials(user_id, email)
-            
-            logger.info(f"🔑 get_valid_credentials returned: {credentials is not None}")
-            
-            if not credentials:
-                return None
-            
-            # Convert to aiogoogle format
-            user_creds = UserCreds(
-                access_token=credentials.token,
-                refresh_token=credentials.refresh_token,
-                expires_at=credentials.expiry.isoformat() if credentials.expiry else None,
-                scopes=list(credentials.scopes) if credentials.scopes else []
-            )
-            
-            return user_creds
+        """
+        Get credentials in aiogoogle format
+        
+        Returns:
+            UserCreds object for aiogoogle
+        """
+        from aiogoogle.auth.creds import UserCreds
+        
+        logger.info(f"🔑 get_aiogoogle_creds called: user_id={user_id}, email={email}")
+        
+        # Get regular credentials first
+        credentials = await self.get_valid_credentials(user_id, email)
+        
+        logger.info(f"🔑 get_valid_credentials returned: {credentials is not None}")
+        
+        if not credentials:
+            return None
+        
+        # Convert to aiogoogle format
+        user_creds = UserCreds(
+            access_token=credentials.token,
+            refresh_token=credentials.refresh_token,
+            expires_at=credentials.expiry.isoformat() if credentials.expiry else None,
+            scopes=list(credentials.scopes) if credentials.scopes else []
+        )
+        
+        return user_creds
+
 
 # Global instance
 google_auth_manager = GoogleAuthManager()
@@ -629,3 +908,7 @@ async def get_google_accounts(user_id: str) -> List[Dict[str, Any]]:
 async def get_aiogoogle_credentials(user_id: str, email: Optional[str] = None):
     """Get aiogoogle-formatted credentials"""
     return await google_auth_manager.get_aiogoogle_creds(user_id, email)
+
+async def refresh_all_google_tokens(user_id: str) -> Dict[str, bool]:
+    """Proactively refresh all tokens for a user"""
+    return await google_auth_manager.refresh_all_tokens(user_id)

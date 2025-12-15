@@ -12,6 +12,7 @@ from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+
 class KillSwitch:
     """
     Emergency kill switch for Telegram notification system
@@ -237,3 +238,22 @@ class KillSwitch:
         else:
             await self.enable(user_id, reason)
             return True
+
+
+# Global singleton instance
+_kill_switch: Optional[KillSwitch] = None
+
+
+def get_kill_switch() -> KillSwitch:
+    """
+    Get the global KillSwitch instance (singleton pattern)
+    
+    Returns:
+        KillSwitch instance
+    """
+    global _kill_switch
+    
+    if _kill_switch is None:
+        _kill_switch = KillSwitch()
+    
+    return _kill_switch

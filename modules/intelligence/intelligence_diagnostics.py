@@ -2,6 +2,7 @@
 """
 Intelligence System Diagnostics
 Created: 2025-10-28
+Updated: 2025-01-XX - Added singleton pattern
 
 This module provides detailed diagnostic logging for the intelligence system.
 Use this to understand why situations aren't being detected.
@@ -14,11 +15,37 @@ Run this to see:
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import json
 
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_diagnostics_instance: Optional['IntelligenceDiagnostics'] = None
+
+
+def get_intelligence_diagnostics() -> 'IntelligenceDiagnostics':
+    """
+    Get or create the singleton IntelligenceDiagnostics instance.
+    
+    Returns:
+        IntelligenceDiagnostics singleton instance
+    """
+    global _diagnostics_instance
+    
+    if _diagnostics_instance is None:
+        _diagnostics_instance = IntelligenceDiagnostics()
+    
+    return _diagnostics_instance
+
+
+#===============================================================================
+# INTELLIGENCE DIAGNOSTICS
+#===============================================================================
 
 class IntelligenceDiagnostics:
     """
@@ -66,7 +93,7 @@ class IntelligenceDiagnostics:
         logger.info("-" * 80)
         
         # Log source breakdown
-        logger.info("📍 SIGNALS BY SOURCE:")
+        logger.info("🔎 SIGNALS BY SOURCE:")
         for source, source_signals in sorted(signals_by_source.items()):
             logger.info(f"   • {source}: {len(source_signals)} signals")
         
@@ -169,7 +196,7 @@ class IntelligenceDiagnostics:
         requirements = detector_requirements[detector_name]
         
         # Check for required signal types
-        logger.info(f"🔍 Checking for REQUIRED signal types:")
+        logger.info(f"🔎 Checking for REQUIRED signal types:")
         for required_type in requirements['required_types']:
             matching = [s for s in signals if s.signal_type == required_type]
             if matching:
@@ -177,7 +204,7 @@ class IntelligenceDiagnostics:
             else:
                 logger.error(f"   ❌ MISSING: No '{required_type}' signals found!")
         
-        logger.info(f"\n🔍 Checking for OPTIONAL signal types:")
+        logger.info(f"\n🔎 Checking for OPTIONAL signal types:")
         for optional_type in requirements['optional_types']:
             matching = [s for s in signals if s.signal_type == optional_type]
             if matching:
@@ -186,7 +213,7 @@ class IntelligenceDiagnostics:
                 logger.info(f"   ⚪ Not found: '{optional_type}' (optional, not critical)")
         
         # Check data structure of required signals
-        logger.info(f"\n🔍 Checking DATA STRUCTURE of required signals:")
+        logger.info(f"\n🔎 Checking DATA STRUCTURE of required signals:")
         for required_type in requirements['required_types']:
             matching = [s for s in signals if s.signal_type == required_type]
             if matching:
@@ -232,7 +259,7 @@ class IntelligenceDiagnostics:
         
         logger.info("\n\n")
         logger.info("=" * 80)
-        logger.info("🔍 ANALYZING ALL DETECTORS")
+        logger.info("🔎 ANALYZING ALL DETECTORS")
         logger.info("=" * 80)
         
         for detector in detectors:
@@ -308,7 +335,10 @@ class IntelligenceDiagnostics:
             logger.warning("   💡 Suggestion: Check if signal collectors are creating the right signal types")
 
 
-# Standalone diagnostic function
+#===============================================================================
+# STANDALONE DIAGNOSTIC FUNCTION
+#===============================================================================
+
 async def run_diagnostics_on_signals(signals: List) -> Dict[str, Any]:
     """
     Run full diagnostics on a list of signals
@@ -317,16 +347,16 @@ async def run_diagnostics_on_signals(signals: List) -> Dict[str, Any]:
         from modules.intelligence.intelligence_diagnostics import run_diagnostics_on_signals
         report = await run_diagnostics_on_signals(signals)
     """
-    diagnostics = IntelligenceDiagnostics()
+    diagnostics = get_intelligence_diagnostics()
     return await diagnostics.full_diagnostic_report(signals)
 
 
-# Add this to intelligence_orchestrator.py after signal collection:
-"""
-Example integration in intelligence_orchestrator.py:
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
 
-    # After collecting signals (Phase 1)
-    if len(signals) > 0:
-        from .intelligence_diagnostics import run_diagnostics_on_signals
-        await run_diagnostics_on_signals(signals)
-"""
+__all__ = [
+    'IntelligenceDiagnostics',
+    'get_intelligence_diagnostics',
+    'run_diagnostics_on_signals'
+]

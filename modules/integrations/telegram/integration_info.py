@@ -9,6 +9,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 def get_integration_info() -> Dict[str, Any]:
     """
     Get Telegram integration module information
@@ -104,6 +105,7 @@ def get_integration_info() -> Dict[str, Any]:
         }
     }
 
+
 async def check_module_health() -> Dict[str, Any]:
     """
     Perform health check on all Telegram components
@@ -120,7 +122,7 @@ async def check_module_health() -> Dict[str, Any]:
     # Check bot client
     try:
         from .bot_client import get_bot_client
-        bot_client = TelegramBotClient(os.getenv('TELEGRAM_BOT_TOKEN'))
+        bot_client = get_bot_client()
         connection_test = await bot_client.test_connection()
         
         health["components"]["bot_client"] = {
@@ -160,8 +162,8 @@ async def check_module_health() -> Dict[str, Any]:
         
         health["components"]["kill_switch"] = {
             "status": "healthy",
-            "global_kill_active": status['global_kill_active'],
-            "killed_types": status['killed_types']
+            "notifications_enabled": status['enabled'],
+            "reason": status.get('reason')
         }
     except Exception as e:
         health["components"]["kill_switch"] = {
@@ -186,6 +188,7 @@ async def check_module_health() -> Dict[str, Any]:
         health["overall_status"] = "unhealthy"
     
     return health
+
 
 async def get_notification_statistics(user_id: str) -> Dict[str, Any]:
     """
@@ -225,6 +228,7 @@ async def get_notification_statistics(user_id: str) -> Dict[str, Any]:
         return {
             "error": str(e)
         }
+
 
 def get_setup_instructions() -> str:
     """

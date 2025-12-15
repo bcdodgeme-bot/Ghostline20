@@ -16,6 +16,7 @@ Each execution returns a result dict with:
 - details: dict (execution details for learning)
 
 Created: 11/04/25
+Updated: 2025-01-XX - Added singleton pattern, fixed duplicate review_email bug
 """
 
 import logging
@@ -25,6 +26,58 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_executor_instance: Optional['ActionExecutor'] = None
+
+
+def get_action_executor(
+    db_manager=None,
+    clickup_handler=None,
+    calendar_client=None,
+    gmail_client=None,
+    ai_service=None,
+    content_generator=None
+) -> 'ActionExecutor':
+    """
+    Get or create the singleton ActionExecutor instance.
+    
+    Args:
+        db_manager: Database manager (required on first call)
+        clickup_handler: ClickUp API handler (optional)
+        calendar_client: Google Calendar client (optional)
+        gmail_client: Gmail client (optional)
+        ai_service: AI service for drafting (optional)
+        content_generator: Content generator for Bluesky posts (optional)
+        
+    Returns:
+        ActionExecutor singleton instance
+    """
+    global _executor_instance
+    
+    if _executor_instance is None:
+        if db_manager is None:
+            raise ValueError("db_manager required for first ActionExecutor initialization")
+        _executor_instance = ActionExecutor(
+            db_manager=db_manager,
+            clickup_handler=clickup_handler,
+            calendar_client=calendar_client,
+            gmail_client=gmail_client,
+            ai_service=ai_service,
+            content_generator=content_generator
+        )
+    
+    return _executor_instance
+
 
 #===============================================================================
 # ACTION EXECUTOR - Makes actions happen
@@ -110,9 +163,6 @@ class ActionExecutor:
             
             elif action_type == 'create_clickup_task':
                 return await self._execute_create_clickup_task(parameters, user_id)
-            
-            elif action_type == 'review_email':
-                return await self._execute_review_email(parameters, user_id)
             
             elif action_type == 'review_email':
                 return await self._execute_review_email(parameters, user_id)
@@ -706,3 +756,14 @@ class ActionExecutor:
                     'account': account
                 }
             }
+
+
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'ActionExecutor',
+    'get_action_executor',
+    'USER_ID'
+]

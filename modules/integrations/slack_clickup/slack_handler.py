@@ -1,6 +1,8 @@
 """
 Slack API Handler - Environment-Driven Configuration
 Handles all Slack API interactions for the integration
+
+Updated: Session 13 - Added singleton getter pattern
 """
 import os
 import aiohttp
@@ -10,7 +12,19 @@ import json
 from typing import Dict, List, Optional
 from datetime import datetime
 
-#--Section 1: Class Initialization & Environment Setup 9/23/25
+#--Section 1: Singleton Pattern
+_slack_handler_instance: Optional['SlackHandler'] = None
+
+
+def get_slack_handler() -> 'SlackHandler':
+    """Get singleton SlackHandler instance"""
+    global _slack_handler_instance
+    if _slack_handler_instance is None:
+        _slack_handler_instance = SlackHandler()
+    return _slack_handler_instance
+
+
+#--Section 2: Class Initialization & Environment Setup
 class SlackHandler:
     def __init__(self):
         self.bot_token = os.getenv('SLACK_BOT_TOKEN')
@@ -21,7 +35,7 @@ class SlackHandler:
         if not all([self.bot_token, self.signing_secret, self.user_id]):
             raise ValueError("Missing required Slack environment variables")
 
-#--Section 2: HTTP Headers & Authentication 9/23/25
+    #--Section 3: HTTP Headers & Authentication
     def _get_headers(self) -> Dict[str, str]:
         """Get standard headers for Slack API calls"""
         return {
@@ -29,7 +43,7 @@ class SlackHandler:
             'Content-Type': 'application/json'
         }
 
-#--Section 3: Webhook Security & Verification 9/23/25
+    #--Section 4: Webhook Security & Verification
     def verify_request(self, body: bytes, timestamp: str, signature: str) -> bool:
         """Verify Slack webhook request signature"""
         if abs(int(datetime.now().timestamp()) - int(timestamp)) > 300:
@@ -37,15 +51,15 @@ class SlackHandler:
         
         sig_basestring = f"v0:{timestamp}:{body.decode()}"
         computed_hash = hmac.new(
-            self.signing_secret.encode(), 
-            sig_basestring.encode(), 
+            self.signing_secret.encode(),
+            sig_basestring.encode(),
             hashlib.sha256
         ).hexdigest()
         computed_signature = f"v0={computed_hash}"
         
         return hmac.compare_digest(computed_signature, signature)
 
-#--Section 4: Message Context & Thread Handling 9/23/25
+    #--Section 5: Message Context & Thread Handling
     async def get_message_context(self, channel_id: str, message_ts: str) -> Optional[Dict]:
         """Get full message context including thread replies"""
         async with aiohttp.ClientSession() as session:
@@ -58,7 +72,7 @@ class SlackHandler:
                     return data.get('messages', [])
                 return None
 
-#--Section 5: User Mention Detection & Parsing 9/23/25
+    #--Section 6: User Mention Detection & Parsing
     def extract_mentions(self, message_text: str) -> List[str]:
         """Extract user mentions from message text"""
         import re
@@ -70,7 +84,7 @@ class SlackHandler:
         mentions = self.extract_mentions(message_text)
         return self.user_id in mentions
 
-#--Section 6: Response & Communication 9/23/25
+    #--Section 7: Response & Communication
     async def send_response(self, channel_id: str, text: str, thread_ts: str = None) -> bool:
         """Send a response message to Slack"""
         payload = {
@@ -81,8 +95,8 @@ class SlackHandler:
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{self.base_url}/chat.postMessage", 
-                headers=self._get_headers(), 
+                f"{self.base_url}/chat.postMessage",
+                headers=self._get_headers(),
                 json=payload
             ) as resp:
                 return resp.status == 200

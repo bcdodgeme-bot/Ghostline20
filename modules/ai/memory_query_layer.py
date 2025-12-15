@@ -1,6 +1,7 @@
 """
 SYNTAX PRIME V2 - MEMORY QUERY LAYER
 Created: 2024-10-26
+Updated: 2025 - Fixed SQL injection vulnerabilities (INTERVAL string formatting)
 
 PURPOSE:
 Transform Syntax from conversation-window memory to database-driven memory.
@@ -21,9 +22,10 @@ Called from modules/ai/router.py before building AI context window
 """
 
 import logging
+import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
-import re
 
 # Import database manager
 from modules.core.database import db_manager
@@ -38,18 +40,18 @@ logger = logging.getLogger(__name__)
 CONTEXT_CONFIG = {
     'hot_cache_days': 60,           # Always loaded (recent discussions)
     'warm_cache_days': 90,          # Loaded on new day/thread
-    'cold_cache_days': 150,          # Query-based (everything in V2)
+    'cold_cache_days': 150,         # Query-based (everything in V2)
     'hours_gap_threshold': 8,       # Hours before comprehensive context
     
     'limits': {
         'hot_conversations': 800,    # Recent messages always available
-        'warm_conversations': 1300,   # Comprehensive context
-        'cold_conversations': 250,    # Semantic search results
+        'warm_conversations': 1300,  # Comprehensive context
+        'cold_conversations': 250,   # Semantic search results
         'meetings': 14,              # From last 14 days
         'emails': 50,                # Unread/important
         'calendar_events': 30,       # Upcoming events
         'trends': 30,                # High-priority trends
-        'knowledge_base': 100,        # Semantic search results
+        'knowledge_base': 100,       # Semantic search results
         'weather': 1,                # Current reading
         'tasks': 20                  # Active tasks
     }
@@ -137,12 +139,14 @@ async def query_conversations(
     """
     try:
         where_clauses = ["cm.user_id = $1"]
-        params = [user_id]
+        params: List[Any] = [user_id]
         param_count = 1
         
-        # Time filter
+        # Time filter - using parameterized interval
         if days:
-            where_clauses.append(f"cm.created_at >= NOW() - INTERVAL '{days} days'")
+            param_count += 1
+            where_clauses.append(f"cm.created_at >= NOW() - INTERVAL '1 day' * ${param_count}")
+            params.append(days)
         
         # Exclude current thread (to avoid duplication)
         if exclude_thread_id:
@@ -202,7 +206,7 @@ async def query_meetings(
         SELECT 
             id,
             title,
-            summary,
+            ai_summary,
             transcript_text,
             meeting_date,
             duration_minutes,
@@ -210,12 +214,12 @@ async def query_meetings(
             key_points,
             created_at
         FROM fathom_meetings
-        WHERE meeting_date >= NOW() - INTERVAL '%s days'
+        WHERE meeting_date >= NOW() - INTERVAL '1 day' * $1
         ORDER BY meeting_date DESC
-        LIMIT $1
-        """ % days
+        LIMIT $2
+        """
         
-        meetings = await db_manager.fetch_all(query, limit)
+        meetings = await db_manager.fetch_all(query, days, limit)
         logger.info(f"📅 Found {len(meetings)} meetings (last {days} days)")
         return meetings
         
@@ -235,9 +239,14 @@ async def query_emails(
     Query google_gmail_analysis for recent emails
     """
     try:
-        where_clauses = ["user_id = $1", f"received_at >= NOW() - INTERVAL '{days} days'"]
-        params = [user_id]
+        where_clauses = ["user_id = $1"]
+        params: List[Any] = [user_id]
         param_count = 1
+        
+        # Time filter - parameterized
+        param_count += 1
+        where_clauses.append(f"received_at >= NOW() - INTERVAL '1 day' * ${param_count}")
+        params.append(days)
         
         if important_only:
             where_clauses.append("priority_level IN ('high', 'urgent')")
@@ -299,12 +308,12 @@ async def query_calendar(
         FROM google_calendar_events
         WHERE user_id = $1
         AND start_time >= NOW()
-        AND start_time <= NOW() + INTERVAL '%s days'
+        AND start_time <= NOW() + INTERVAL '1 day' * $2
         ORDER BY start_time ASC
-        LIMIT $2
-        """ % days_ahead
+        LIMIT $3
+        """
         
-        events = await db_manager.fetch_all(query, user_id, limit)
+        events = await db_manager.fetch_all(query, user_id, days_ahead, limit)
         logger.info(f"📆 Found {len(events)} calendar events (next {days_ahead} days)")
         return events
         
@@ -324,7 +333,7 @@ async def query_trends(
     TODO: Implement with expanded_keywords_for_trends table
     """
     try:
-        logger.info(f"📊 Trends query disabled - table structure needs updating")
+        logger.info("📊 Trends query disabled - table structure needs updating")
         return []
         
     except Exception as e:
@@ -345,7 +354,7 @@ async def query_knowledge_base(
         # Simple keyword search (can be enhanced with vector search later)
         keywords = query_text.lower().split()
         keyword_conditions = []
-        params = [user_id]
+        params: List[Any] = [user_id]
         param_count = 1
         
         for keyword in keywords[:5]:  # Limit to 5 keywords
@@ -436,7 +445,7 @@ async def query_tasks(
     """
     try:
         where_clauses = ["user_id = $1"]
-        params = [user_id]
+        params: List[Any] = [user_id]
         param_count = 1
         
         if status:
@@ -671,9 +680,8 @@ def format_meetings_context(meetings: List[Dict]) -> str:
     for meeting in meetings:
         title = meeting.get('title') or 'Untitled Meeting'
         
-        # 🔧 FIX (Nov 6, 2025): Convert UTC to user timezone
+        # Convert UTC to user timezone
         from modules.ai.chat import convert_utc_to_user_timezone
-        from datetime import datetime
         
         meeting_date = meeting.get('meeting_date')
         if meeting_date and isinstance(meeting_date, datetime):
@@ -687,16 +695,13 @@ def format_meetings_context(meetings: List[Dict]) -> str:
         lines.append(f"\n📌 {title}")
         lines.append(f"   Time: {start} ({duration} min)")
         
-        # 🔧 FIX (Nov 6, 2025): Parse JSON strings and fix column name
-        import json
-
         # Parse participants if it's a JSON string
         if meeting.get('participants'):
             parts = meeting['participants']
             if isinstance(parts, str):
                 try:
                     parts = json.loads(parts)
-                except:
+                except (json.JSONDecodeError, TypeError):
                     parts = []
             if isinstance(parts, list) and parts:
                 parts_str = ', '.join(parts[:3])  # First 3 participants
@@ -713,10 +718,10 @@ def format_meetings_context(meetings: List[Dict]) -> str:
             if isinstance(key_points, str):
                 try:
                     key_points = json.loads(key_points)
-                except:
+                except (json.JSONDecodeError, TypeError):
                     key_points = []
             if isinstance(key_points, list) and key_points:
-                lines.append(f"   Key Points:")
+                lines.append("   Key Points:")
                 for item in key_points[:3]:  # First 3 items
                     lines.append(f"      • {item}")
     
@@ -797,7 +802,7 @@ def format_calendar_context(events: List[Dict]) -> str:
     ]
     
     # Group by day
-    by_day = {}
+    by_day: Dict[str, List[Dict]] = {}
     for event in events:
         day = event['start_time'].strftime('%Y-%m-%d')
         if day not in by_day:
@@ -980,7 +985,7 @@ def format_tasks_context(tasks: List[Dict]) -> str:
     ]
     
     # Group by priority
-    by_priority = {}
+    by_priority: Dict[str, List[Dict]] = {}
     for task in tasks:
         priority = task.get('priority', 'normal')
         if priority not in by_priority:

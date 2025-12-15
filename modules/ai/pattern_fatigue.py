@@ -5,6 +5,8 @@ The "Stop Being Annoying" system for Syntax Prime
 
 This module tracks repetitive patterns in AI responses and suppresses them
 when they become overused or when the user complains about them.
+
+Updated: Fixed SQL injection vulnerability in _was_similar_joke_used_recently
 """
 
 import re
@@ -13,10 +15,12 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import json
+import random
 
 from ..core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
 
 class PatternFatigueTracker:
     """
@@ -63,9 +67,9 @@ class PatternFatigueTracker:
             r"I.*code",
         ]
         
-    async def should_suppress_response(self, 
-                                     response: str, 
-                                     user_id: str, 
+    async def should_suppress_response(self,
+                                     response: str,
+                                     user_id: str,
                                      current_timestamp: datetime = None) -> Tuple[bool, str]:
         """
         Check if response contains patterns that should be suppressed
@@ -73,7 +77,6 @@ class PatternFatigueTracker:
         Returns:
             (should_suppress: bool, reason: str)
         """
-        
         if current_timestamp is None:
             current_timestamp = datetime.now()
         
@@ -118,14 +121,13 @@ class PatternFatigueTracker:
         
         return False, "pattern_check_passed"
     
-    async def filter_response(self, 
-                            response: str, 
-                            user_id: str, 
+    async def filter_response(self,
+                            response: str,
+                            user_id: str,
                             current_timestamp: datetime = None) -> str:
         """
         Filter out annoying patterns from response and return cleaned version
         """
-        
         should_suppress, reason = await self.should_suppress_response(
             response, user_id, current_timestamp
         )
@@ -154,14 +156,13 @@ class PatternFatigueTracker:
         
         return filtered_response
     
-    async def record_user_complaint(self, 
-                                  user_id: str, 
-                                  pattern_type: str, 
+    async def record_user_complaint(self,
+                                  user_id: str,
+                                  pattern_type: str,
                                   complaint_text: str) -> bool:
         """
         Record when user complains about a specific pattern
         """
-        
         try:
             # Set immediate cooldown when user complains
             cooldown_days = 14  # 2 weeks for user complaints
@@ -181,13 +182,15 @@ class PatternFatigueTracker:
                 updated_at = NOW()
             """
             
-            await db_manager.execute(query, 
-                                   user_id, 
-                                   pattern_type, 
-                                   f"User complaint: {pattern_type}",
-                                   True,
-                                   complaint_text,
-                                   cooldown_until)
+            await db_manager.execute(
+                query,
+                user_id,
+                pattern_type,
+                f"User complaint: {pattern_type}",
+                True,
+                complaint_text,
+                cooldown_until
+            )
             
             logger.info(f"Recorded user complaint about {pattern_type} for user {user_id}")
             return True
@@ -196,7 +199,9 @@ class PatternFatigueTracker:
             logger.error(f"Failed to record user complaint: {e}")
             return False
     
+    # =========================================================================
     # Private helper methods
+    # =========================================================================
     
     async def _contains_duplicate_callout(self, response: str) -> bool:
         """Check if response contains duplicate detection commentary"""
@@ -227,7 +232,6 @@ class PatternFatigueTracker:
     
     async def _is_pattern_on_cooldown(self, user_id: str, pattern_type: str) -> bool:
         """Check if a pattern is currently on cooldown"""
-        
         try:
             query = """
             SELECT EXISTS (
@@ -248,7 +252,6 @@ class PatternFatigueTracker:
     
     async def _user_complained_about_pattern(self, user_id: str, pattern_type: str) -> bool:
         """Check if user has complained about this pattern recently"""
-        
         try:
             query = """
             SELECT EXISTS (
@@ -269,7 +272,6 @@ class PatternFatigueTracker:
     
     async def _get_weekly_usage_count(self, user_id: str, pattern_type: str) -> int:
         """Get usage count for pattern in the last 7 days"""
-        
         try:
             query = """
             SELECT COALESCE(SUM(occurrences), 0) as usage_count
@@ -289,7 +291,6 @@ class PatternFatigueTracker:
     
     async def _record_pattern_usage(self, user_id: str, pattern_type: str, content: str):
         """Record usage of a pattern"""
-        
         try:
             query = """
             INSERT INTO pattern_fatigue_tracker 
@@ -312,7 +313,6 @@ class PatternFatigueTracker:
     
     async def _set_pattern_cooldown(self, user_id: str, pattern_type: str, days: int):
         """Set a cooldown period for a pattern"""
-        
         try:
             cooldown_until = datetime.now() + timedelta(days=days)
             
@@ -326,37 +326,47 @@ class PatternFatigueTracker:
                 updated_at = NOW()
             """
             
-            await db_manager.execute(query, 
-                                   user_id, 
-                                   pattern_type, 
-                                   f"Auto-cooldown: {pattern_type}",
-                                   cooldown_until)
+            await db_manager.execute(
+                query,
+                user_id,
+                pattern_type,
+                f"Auto-cooldown: {pattern_type}",
+                cooldown_until
+            )
             
             logger.info(f"Set {days}-day cooldown for {pattern_type} for user {user_id}")
             
         except Exception as e:
             logger.error(f"Failed to set pattern cooldown: {e}")
     
-    async def _was_similar_joke_used_recently(self, 
-                                            user_id: str, 
-                                            pattern_type: str, 
-                                            content: str, 
+    async def _was_similar_joke_used_recently(self,
+                                            user_id: str,
+                                            pattern_type: str,
+                                            content: str,
                                             days: int) -> bool:
-        """Check if a similar joke was used recently (for novelty requirement)"""
+        """
+        Check if a similar joke was used recently (for novelty requirement)
         
+        FIXED: Previously used string formatting which was SQL injection vulnerable.
+        Now uses parameterized queries for all user-provided content.
+        """
         try:
-            # Simple similarity check - could be enhanced with more sophisticated matching
+            # Use parameterized query - $3 for days (via interval multiplication),
+            # $4 for the ILIKE pattern
             query = """
             SELECT EXISTS (
                 SELECT 1 FROM pattern_fatigue_tracker
                 WHERE user_id = $1
                 AND pattern_type = $2
-                AND last_used >= NOW() - INTERVAL '%s days'
-                AND pattern_content ILIKE '%s'
+                AND last_used >= NOW() - INTERVAL '1 day' * $3
+                AND pattern_content ILIKE $4
             )    
-            """ % (days, '%' + content[:50] + '%')
+            """
             
-            result = await db_manager.fetch_one(query, user_id, pattern_type)
+            # Build the ILIKE pattern safely as a parameter value
+            search_pattern = f"%{content[:50]}%"
+            
+            result = await db_manager.fetch_one(query, user_id, pattern_type, days, search_pattern)
             return result['exists'] if result else False
             
         except Exception as e:
@@ -365,7 +375,6 @@ class PatternFatigueTracker:
     
     def _clean_filtered_response(self, response: str) -> str:
         """Clean up response after filtering out patterns"""
-        
         # Remove double spaces, fix punctuation, etc.
         cleaned = re.sub(r'\s+', ' ', response)  # Multiple spaces -> single space
         cleaned = re.sub(r'\s+([.!?])', r'\1', cleaned)  # Space before punctuation
@@ -376,7 +385,6 @@ class PatternFatigueTracker:
     
     def _get_minimal_helpful_response(self) -> str:
         """Get a minimal helpful response when filtering makes response too short"""
-        
         minimal_responses = [
             "Got it! Let me help with that.",
             "I understand. How can I assist?",
@@ -385,11 +393,15 @@ class PatternFatigueTracker:
             "Understood. Let's tackle this.",
         ]
         
-        import random
         return random.choice(minimal_responses)
 
-# Global pattern fatigue tracker
+
+# =============================================================================
+# Global instance and factory
+# =============================================================================
+
 _pattern_fatigue_tracker = None
+
 
 def get_pattern_fatigue_tracker() -> PatternFatigueTracker:
     """Get the global pattern fatigue tracker"""
@@ -398,10 +410,13 @@ def get_pattern_fatigue_tracker() -> PatternFatigueTracker:
         _pattern_fatigue_tracker = PatternFatigueTracker()
     return _pattern_fatigue_tracker
 
+
+# =============================================================================
 # Chat command handlers for user complaints
+# =============================================================================
+
 async def handle_duplicate_complaint(user_id: str, complaint_text: str) -> str:
     """Handle user complaint about duplicate callouts"""
-    
     tracker = get_pattern_fatigue_tracker()
     success = await tracker.record_user_complaint(user_id, 'duplicate_callouts', complaint_text)
     
@@ -410,9 +425,9 @@ async def handle_duplicate_complaint(user_id: str, complaint_text: str) -> str:
     else:
         return "❌ Sorry, I had trouble recording that. Can you try again?"
 
+
 async def handle_time_joke_complaint(user_id: str, complaint_text: str) -> str:
     """Handle user complaint about 2am jokes"""
-    
     tracker = get_pattern_fatigue_tracker()
     success = await tracker.record_user_complaint(user_id, '2am_jokes', complaint_text)
     
@@ -421,10 +436,13 @@ async def handle_time_joke_complaint(user_id: str, complaint_text: str) -> str:
     else:
         return "❌ Sorry, I had trouble recording that. Can you try again?"
 
+
+# =============================================================================
 # Debug and monitoring functions
+# =============================================================================
+
 async def get_pattern_stats(user_id: str) -> Dict[str, Any]:
     """Get pattern usage statistics for debugging"""
-    
     try:
         query = """
         SELECT 
@@ -459,8 +477,12 @@ async def get_pattern_stats(user_id: str) -> Dict[str, Any]:
         logger.error(f"Failed to get pattern stats: {e}")
         return {}
 
+
+# =============================================================================
+# Test runner
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test the pattern detection
     async def test_patterns():
         print("🧪 Testing Pattern Fatigue Detection")
         

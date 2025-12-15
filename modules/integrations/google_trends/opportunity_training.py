@@ -7,18 +7,32 @@ This creates the training loop for improving trend detection accuracy.
 """
 
 import asyncio
-import asyncpg
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import logging
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
+
+# Singleton instance
+_opportunity_training_instance: Optional['OpportunityTraining'] = None
+
+
+def get_opportunity_training() -> 'OpportunityTraining':
+    """Get singleton OpportunityTraining instance"""
+    global _opportunity_training_instance
+    if _opportunity_training_instance is None:
+        _opportunity_training_instance = OpportunityTraining()
+    return _opportunity_training_instance
+
 
 class OpportunityTraining:
     """Manages the training interface for opportunity feedback"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self):
+        pass  # No database_url needed - using db_manager
     
     def _make_timezone_aware(self, dt: datetime) -> datetime:
         """Make a datetime timezone-aware if it isn't already"""
@@ -28,9 +42,10 @@ class OpportunityTraining:
     
     async def get_pending_opportunities(self, limit: int = 5) -> List[Dict[str, Any]]:
         """Get opportunities waiting for training feedback"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             query = '''
                 SELECT id, keyword, business_area, opportunity_type, urgency_level,
                        trend_score_at_alert, optimal_content_window_end,
@@ -76,14 +91,16 @@ class OpportunityTraining:
             return opportunities
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def submit_feedback(self, opportunity_id: str, feedback: str,
                             feedback_details: Optional[str] = None) -> bool:
         """Submit Good Match/Bad Match feedback"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Validate feedback
             valid_feedback = ['good_match', 'bad_match']
             if feedback not in valid_feedback:
@@ -114,13 +131,15 @@ class OpportunityTraining:
             logger.error(f"Failed to submit feedback: {e}")
             return False
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_training_stats(self) -> Dict[str, Any]:
         """Get training statistics"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Overall feedback counts
             feedback_stats = await conn.fetch('''
                 SELECT user_feedback, COUNT(*) as count
@@ -152,14 +171,17 @@ class OpportunityTraining:
             }
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
+
 
 # Create feedback training table if it doesn't exist
-async def ensure_training_table_exists(database_url: str):
+async def ensure_training_table_exists():
     """Ensure the feedback training table exists"""
-    conn = await asyncpg.connect(database_url)
-    
+    conn = None
     try:
+        conn = await db_manager.get_connection()
+        
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS trend_feedback_training (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -170,17 +192,16 @@ async def ensure_training_table_exists(database_url: str):
             );
         ''')
     finally:
-        await conn.close()
+        if conn:
+            await db_manager.release_connection(conn)
+
 
 async def test_training_interface():
     """Test the training interface"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
     # Ensure training table exists
-    await ensure_training_table_exists(database_url)
+    await ensure_training_table_exists()
     
-    trainer = OpportunityTraining(database_url)
+    trainer = get_opportunity_training()
     
     print("🎯 TRAINING INTERFACE TEST")
     print("=" * 30)
@@ -203,6 +224,7 @@ async def test_training_interface():
     print(f"   Total trained: {stats['total_trained']}")
     print(f"   Pending: {stats['pending_training']}")
     print(f"   Feedback distribution: {stats['feedback_distribution']}")
+
 
 if __name__ == "__main__":
     asyncio.run(test_training_interface())

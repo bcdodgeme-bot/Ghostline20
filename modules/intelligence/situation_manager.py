@@ -9,8 +9,10 @@ Responsibilities:
 - Expire old situations
 - Generate daily digests
 - Learn from patterns in user responses
+- Check if patterns qualify for auto-execution
 
 Created: 10/22/25
+Updated: 12/11/25 - Added singleton pattern, auto-execution support
 """
 
 import logging
@@ -19,7 +21,34 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 import json
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+# Auto-execution thresholds - pattern must meet ALL of these
+AUTO_EXECUTE_MIN_APPROVALS = 5      # Minimum times user must have approved
+AUTO_EXECUTE_MIN_ACTION_RATE = 0.8  # 80% action rate required
+AUTO_EXECUTE_MIN_CONFIDENCE = 0.6   # Minimum average confidence score
+
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_manager_instance: Optional['SituationManager'] = None
+
+
+def get_situation_manager() -> 'SituationManager':
+    """Get singleton SituationManager instance"""
+    global _manager_instance
+    if _manager_instance is None:
+        _manager_instance = SituationManager()
+    return _manager_instance
+
 
 #===============================================================================
 # SITUATION MANAGER - Database operations and lifecycle management
@@ -33,13 +62,157 @@ class SituationManager:
     situations were detected, how you responded, and learns from patterns.
     """
     
-    def __init__(self, db_manager):
-        """
-        Args:
-            db_manager: Database manager for running queries
-        """
+    def __init__(self):
+        """Initialize with centralized db_manager"""
         self.db = db_manager
         self.manager_name = "SituationManager"
+    
+    #===========================================================================
+    # AUTO-EXECUTION CHECK - New proactive feature
+    #===========================================================================
+    
+    async def should_auto_execute(
+        self,
+        situation_type: str,
+        situation_context: Dict[str, Any]
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """
+        Check if this situation pattern qualifies for automatic execution.
+        
+        A pattern qualifies when:
+        - User has acted on it 5+ times
+        - Action rate is 80%+
+        - Average confidence is 60%+
+        - can_act_on flag is True
+        
+        Args:
+            situation_type: Type of situation
+            situation_context: Context data for pattern extraction
+            
+        Returns:
+            Tuple of (should_auto_execute: bool, learning_record: dict or None)
+        """
+        try:
+            # Extract the pattern key for this situation
+            pattern_key = self._extract_pattern_key(situation_type, situation_context)
+            
+            # Query the learning record
+            query = """
+                SELECT 
+                    id,
+                    pattern_key,
+                    total_occurrences,
+                    acted_count,
+                    dismissed_count,
+                    action_rate,
+                    avg_confidence,
+                    can_act_on,
+                    last_occurrence
+                FROM contextual_learnings
+                WHERE situation_type = $1
+                AND pattern_key = $2
+            """
+            
+            result = await self.db.fetch_one(query, situation_type, pattern_key)
+            
+            if not result:
+                logger.debug(f"No learning record for {situation_type}/{pattern_key} - cannot auto-execute")
+                return False, None
+            
+            # Check if it meets auto-execute criteria
+            acted_count = result['acted_count'] or 0
+            action_rate = float(result['action_rate']) if result['action_rate'] else 0
+            avg_confidence = float(result['avg_confidence']) if result['avg_confidence'] else 0
+            can_act_on = result['can_act_on']
+            
+            learning_record = {
+                'pattern_key': pattern_key,
+                'acted_count': acted_count,
+                'action_rate': action_rate,
+                'avg_confidence': avg_confidence,
+                'can_act_on': can_act_on
+            }
+            
+            # All conditions must be met
+            if (can_act_on and 
+                acted_count >= AUTO_EXECUTE_MIN_APPROVALS and
+                action_rate >= AUTO_EXECUTE_MIN_ACTION_RATE and
+                avg_confidence >= AUTO_EXECUTE_MIN_CONFIDENCE):
+                
+                logger.info(f"✅ Pattern qualifies for auto-execute: {situation_type}/{pattern_key} "
+                           f"(acted {acted_count}x, {action_rate:.0%} rate, {avg_confidence:.0%} confidence)")
+                return True, learning_record
+            
+            # Log why it didn't qualify
+            reasons = []
+            if not can_act_on:
+                reasons.append("can_act_on=False")
+            if acted_count < AUTO_EXECUTE_MIN_APPROVALS:
+                reasons.append(f"acted_count={acted_count} < {AUTO_EXECUTE_MIN_APPROVALS}")
+            if action_rate < AUTO_EXECUTE_MIN_ACTION_RATE:
+                reasons.append(f"action_rate={action_rate:.0%} < {AUTO_EXECUTE_MIN_ACTION_RATE:.0%}")
+            if avg_confidence < AUTO_EXECUTE_MIN_CONFIDENCE:
+                reasons.append(f"avg_confidence={avg_confidence:.0%} < {AUTO_EXECUTE_MIN_CONFIDENCE:.0%}")
+            
+            logger.debug(f"Pattern {pattern_key} doesn't qualify for auto-execute: {', '.join(reasons)}")
+            return False, learning_record
+            
+        except Exception as e:
+            logger.error(f"Error checking auto-execute eligibility: {e}", exc_info=True)
+            return False, None
+    
+    async def get_auto_executable_patterns(self) -> List[Dict[str, Any]]:
+        """
+        Get all patterns that are eligible for auto-execution.
+        
+        Useful for showing user what actions Syntax will take automatically.
+        
+        Returns:
+            List of learning records that have can_act_on=True
+        """
+        try:
+            query = """
+                SELECT 
+                    situation_type,
+                    pattern_key,
+                    total_occurrences,
+                    acted_count,
+                    action_rate,
+                    avg_confidence,
+                    last_occurrence
+                FROM contextual_learnings
+                WHERE can_act_on = true
+                AND acted_count >= $1
+                AND action_rate >= $2
+                AND avg_confidence >= $3
+                ORDER BY acted_count DESC, action_rate DESC
+            """
+            
+            results = await self.db.fetch_all(
+                query,
+                AUTO_EXECUTE_MIN_APPROVALS,
+                AUTO_EXECUTE_MIN_ACTION_RATE,
+                AUTO_EXECUTE_MIN_CONFIDENCE
+            )
+            
+            patterns = []
+            for row in results:
+                patterns.append({
+                    'situation_type': row['situation_type'],
+                    'pattern_key': row['pattern_key'],
+                    'total_occurrences': row['total_occurrences'],
+                    'acted_count': row['acted_count'],
+                    'action_rate': float(row['action_rate']),
+                    'avg_confidence': float(row['avg_confidence']),
+                    'last_occurrence': row['last_occurrence'].isoformat() if row['last_occurrence'] else None
+                })
+            
+            logger.info(f"Found {len(patterns)} patterns eligible for auto-execution")
+            return patterns
+            
+        except Exception as e:
+            logger.error(f"Error getting auto-executable patterns: {e}", exc_info=True)
+            return []
     
     #===========================================================================
     # CORE DATABASE OPERATIONS
@@ -208,7 +381,7 @@ class SituationManager:
         """
         # Define key fields to compare for each situation type
         comparison_fields = {
-            'post_meeting_action_required': ['meeting_id', 'action_item_ids'],
+            'post_meeting_action_required': ['meeting_id'],
             'deadline_approaching_prep_needed': ['event_id'],
             'trend_content_opportunity': ['keyword'],
             'email_priority_meeting_context': ['email_id', 'event_id'],
@@ -321,6 +494,7 @@ class SituationManager:
         - 'dismissed': User explicitly dismissed/ignored
         - 'snoozed': User postponed action
         - 'saved_for_later': User bookmarked for future reference
+        - 'auto_executed': System automatically executed (new)
         
         This also triggers learning updates to improve future detections.
         
@@ -334,7 +508,7 @@ class SituationManager:
         """
         try:
             # Validate response type
-            valid_responses = ['acted', 'dismissed', 'snoozed', 'saved_for_later']
+            valid_responses = ['acted', 'dismissed', 'snoozed', 'saved_for_later', 'auto_executed']
             if response not in valid_responses:
                 logger.error(f"Invalid response type: {response}")
                 return False
@@ -365,12 +539,15 @@ class SituationManager:
             logger.info(f"✅ Recorded response '{response}' for situation {result['situation_type']}")
             
             # Update learning based on this response
+            # Note: auto_executed counts as 'acted' for learning purposes
+            learning_response = 'acted' if response == 'auto_executed' else response
+            
             await self.update_learning_from_response(
                 situation_type=result['situation_type'],
                 situation_context=json.loads(result['situation_context']) if isinstance(result['situation_context'], str) else result['situation_context'],
                 confidence_score=float(result['confidence_score']),
                 priority_score=result['priority_score'],
-                user_response=response
+                user_response=learning_response
             )
             
             return True
@@ -505,6 +682,7 @@ class SituationManager:
         Shows:
         - Count of situations detected by type
         - Count of actions taken vs dismissed
+        - Auto-executed actions
         - Trending patterns
         
         Args:
@@ -539,6 +717,7 @@ class SituationManager:
                 'dismissed': 0,
                 'snoozed': 0,
                 'saved_for_later': 0,
+                'auto_executed': 0,
                 'expired': 0,
                 'pending': 0
             }
@@ -596,10 +775,12 @@ class SituationManager:
             
             # Response summary
             digest += "\n**Your Actions:**\n"
-            total_responded = response_counts['acted'] + response_counts['dismissed'] + response_counts['snoozed'] + response_counts['saved_for_later']
+            total_responded = response_counts['acted'] + response_counts['dismissed'] + response_counts['snoozed'] + response_counts['saved_for_later'] + response_counts['auto_executed']
             
             if total_responded > 0:
                 digest += f"  • ✅ Acted on: {response_counts['acted']}\n"
+                if response_counts['auto_executed'] > 0:
+                    digest += f"  • 🤖 Auto-executed: {response_counts['auto_executed']}\n"
                 if response_counts['dismissed'] > 0:
                     digest += f"  • ⏭️ Dismissed: {response_counts['dismissed']}\n"
                 if response_counts['snoozed'] > 0:
@@ -626,14 +807,18 @@ class SituationManager:
             if priority_distribution['low'] > 0:
                 digest += f"  • 🟢 Low (1-4): {priority_distribution['low']}\n"
             
-            # Action rate
+            # Action rate (including auto-executed)
             if len(situations) > 0:
-                action_rate = (response_counts['acted'] / len(situations)) * 100
+                total_actions = response_counts['acted'] + response_counts['auto_executed']
+                action_rate = (total_actions / len(situations)) * 100
                 digest += f"\n**Action Rate:** {action_rate:.0f}%"
                 if action_rate >= 80:
                     digest += " 🌟 (Highly engaged!)"
                 elif action_rate >= 50:
                     digest += " 👍 (Good engagement)"
+                
+                if response_counts['auto_executed'] > 0:
+                    digest += f"\n_({response_counts['auto_executed']} handled automatically by Syntax)_"
             
             logger.info(f"Generated daily digest with {len(situations)} situations")
             
@@ -667,7 +852,7 @@ class SituationManager:
         Over time, this allows the system to:
         - Boost confidence for patterns you consistently act on
         - Lower confidence for patterns you consistently dismiss
-        - Eventually auto-act on high-confidence patterns
+        - Eventually auto-act on high-confidence patterns (5+ approvals)
         
         Args:
             situation_type: Type of situation
@@ -681,7 +866,6 @@ class SituationManager:
         """
         try:
             # Extract key pattern indicators from context
-            # Different situation types have different patterns to learn from
             pattern_key = self._extract_pattern_key(situation_type, situation_context)
             
             # Check if we already have a learning record for this pattern
@@ -716,11 +900,11 @@ class SituationManager:
                 avg_confidence = confidence_sum / total_occurrences
                 
                 # Determine if we can auto-act on this pattern
-                # Require: 5+ occurrences, 80%+ action rate, 0.7+ avg confidence
+                # Require: 5+ acted, 80%+ action rate, 60%+ avg confidence
                 can_act_on = (
-                    total_occurrences >= 5 and
-                    action_rate >= 0.8 and
-                    avg_confidence >= 0.7
+                    acted_count >= AUTO_EXECUTE_MIN_APPROVALS and
+                    action_rate >= AUTO_EXECUTE_MIN_ACTION_RATE and
+                    avg_confidence >= AUTO_EXECUTE_MIN_CONFIDENCE
                 )
                 
                 update_query = """
@@ -750,7 +934,11 @@ class SituationManager:
                     existing['id']
                 )
                 
-                logger.info(f"📚 Updated learning: {situation_type} - {pattern_key} (action rate: {action_rate:.0%}, can_act_on: {can_act_on})")
+                # Log if pattern just became auto-executable
+                if can_act_on and acted_count == AUTO_EXECUTE_MIN_APPROVALS:
+                    logger.info(f"🎉 NEW AUTO-EXECUTE PATTERN: {situation_type}/{pattern_key} - Will auto-execute next time!")
+                else:
+                    logger.info(f"📚 Updated learning: {situation_type}/{pattern_key} (acted: {acted_count}, rate: {action_rate:.0%}, can_act_on: {can_act_on})")
                 
             else:
                 # Create new learning record
@@ -785,14 +973,14 @@ class SituationManager:
                     acted_count,
                     dismissed_count,
                     confidence_score,  # confidence_sum
-                    acted_count,  # action_rate (0 or 1 for first occurrence)
+                    float(acted_count),  # action_rate (0.0 or 1.0 for first occurrence)
                     confidence_score,  # avg_confidence
-                    False,  # can_act_on (needs more data)
+                    False,  # can_act_on (needs 5 approvals)
                     datetime.utcnow(),
                     datetime.utcnow()
                 )
                 
-                logger.info(f"📚 Created learning record: {situation_type} - {pattern_key}")
+                logger.info(f"📚 Created learning record: {situation_type}/{pattern_key}")
             
             return True
             
@@ -869,15 +1057,12 @@ class SituationManager:
             return f"unknown_{situation_type}"
     
     
-    async def get_learning_insights(self, user_id: UUID) -> Dict[str, Any]:
+    async def get_learning_insights(self) -> Dict[str, Any]:
         """
         Get insights about what patterns the system has learned.
         
         Useful for showing the user what the system knows about their preferences.
         
-        Args:
-            user_id: User to get insights for (future: for multi-user support)
-            
         Returns:
             Dictionary with learning insights
         """
@@ -888,6 +1073,7 @@ class SituationManager:
                     situation_type,
                     pattern_key,
                     total_occurrences,
+                    acted_count,
                     action_rate,
                     avg_confidence,
                     can_act_on
@@ -923,6 +1109,7 @@ class SituationManager:
                     situation_type,
                     pattern_key,
                     total_occurrences,
+                    acted_count,
                     action_rate,
                     avg_confidence
                 FROM contextual_learnings
@@ -932,6 +1119,27 @@ class SituationManager:
             
             auto_action_patterns = await self.db.fetch_all(auto_action_query)
             
+            # Get patterns close to auto-action (4 acted, need 1 more)
+            almost_auto_query = """
+                SELECT 
+                    situation_type,
+                    pattern_key,
+                    acted_count,
+                    action_rate,
+                    avg_confidence
+                FROM contextual_learnings
+                WHERE acted_count >= 3
+                AND acted_count < $1
+                AND action_rate >= $2
+                ORDER BY acted_count DESC
+            """
+            
+            almost_auto_patterns = await self.db.fetch_all(
+                almost_auto_query,
+                AUTO_EXECUTE_MIN_APPROVALS,
+                AUTO_EXECUTE_MIN_ACTION_RATE
+            )
+            
             # Get overall stats
             stats_query = """
                 SELECT 
@@ -939,7 +1147,8 @@ class SituationManager:
                     SUM(total_occurrences) as total_situations,
                     SUM(acted_count) as total_acted,
                     SUM(dismissed_count) as total_dismissed,
-                    AVG(action_rate) as avg_action_rate
+                    AVG(action_rate) as avg_action_rate,
+                    SUM(CASE WHEN can_act_on THEN 1 ELSE 0 END) as auto_executable_count
                 FROM contextual_learnings
             """
             
@@ -949,12 +1158,19 @@ class SituationManager:
                 'high_action_patterns': [dict(row) for row in high_action_patterns],
                 'low_action_patterns': [dict(row) for row in low_action_patterns],
                 'auto_action_patterns': [dict(row) for row in auto_action_patterns],
+                'almost_auto_patterns': [dict(row) for row in almost_auto_patterns],
                 'overall_stats': {
                     'total_patterns': stats['total_patterns'] if stats else 0,
                     'total_situations': stats['total_situations'] if stats else 0,
                     'total_acted': stats['total_acted'] if stats else 0,
                     'total_dismissed': stats['total_dismissed'] if stats else 0,
-                    'avg_action_rate': float(stats['avg_action_rate']) if stats and stats['avg_action_rate'] else 0.0
+                    'avg_action_rate': float(stats['avg_action_rate']) if stats and stats['avg_action_rate'] else 0.0,
+                    'auto_executable_count': stats['auto_executable_count'] if stats else 0
+                },
+                'thresholds': {
+                    'min_approvals': AUTO_EXECUTE_MIN_APPROVALS,
+                    'min_action_rate': AUTO_EXECUTE_MIN_ACTION_RATE,
+                    'min_confidence': AUTO_EXECUTE_MIN_CONFIDENCE
                 }
             }
             
@@ -964,5 +1180,24 @@ class SituationManager:
                 'high_action_patterns': [],
                 'low_action_patterns': [],
                 'auto_action_patterns': [],
-                'overall_stats': {}
+                'almost_auto_patterns': [],
+                'overall_stats': {},
+                'thresholds': {
+                    'min_approvals': AUTO_EXECUTE_MIN_APPROVALS,
+                    'min_action_rate': AUTO_EXECUTE_MIN_ACTION_RATE,
+                    'min_confidence': AUTO_EXECUTE_MIN_CONFIDENCE
+                }
             }
+
+
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'SituationManager',
+    'get_situation_manager',
+    'AUTO_EXECUTE_MIN_APPROVALS',
+    'AUTO_EXECUTE_MIN_ACTION_RATE',
+    'AUTO_EXECUTE_MIN_CONFIDENCE',
+]

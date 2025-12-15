@@ -2,18 +2,19 @@
 """
 FastAPI Router for Google Trends Integration
 Provides API endpoints for the Google Trends monitoring system
+
+FIXED: Uses lazy initialization pattern with singletons instead of creating
+new instances per request.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Body
-from typing import Dict, List, Any, Optional
-from datetime import datetime
-import logging
 import os
+import logging
+from datetime import datetime
+from typing import Dict, List, Any, Optional
 
-from .database_manager import TrendsDatabase
-from .opportunity_detector import OpportunityDetector
-from .opportunity_training import OpportunityTraining
-from .keyword_monitor import KeywordMonitor
+from fastapi import APIRouter, HTTPException, Query, Body
+
+from .database_manager import get_trends_database
 from .integration_info import check_module_health, get_system_statistics, get_integration_info
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,62 @@ logger = logging.getLogger(__name__)
 # Create FastAPI router
 router = APIRouter()
 
-# Database URL from environment
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
+# ============================================================================
+# LAZY INITIALIZATION - SINGLETONS
+# ============================================================================
+
+# Database URL for components not yet converted to db_manager
+_DATABASE_URL: Optional[str] = None
+
+def _get_database_url() -> str:
+    """Get database URL lazily"""
+    global _DATABASE_URL
+    if _DATABASE_URL is None:
+        _DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
+    return _DATABASE_URL
+
+
+# OpportunityDetector singleton (still uses database_url until converted)
+_opportunity_detector = None
+
+def _get_opportunity_detector():
+    """Get or create OpportunityDetector singleton"""
+    global _opportunity_detector
+    if _opportunity_detector is None:
+        from .opportunity_detector import OpportunityDetector
+        _opportunity_detector = OpportunityDetector(_get_database_url())
+    return _opportunity_detector
+
+
+# OpportunityTraining singleton (still uses database_url until converted)
+_opportunity_training = None
+
+def _get_opportunity_training():
+    """Get or create OpportunityTraining singleton"""
+    global _opportunity_training
+    if _opportunity_training is None:
+        from .opportunity_training import OpportunityTraining
+        _opportunity_training = OpportunityTraining(_get_database_url())
+    return _opportunity_training
+
+
+# KeywordMonitor - NOT a singleton (mode can vary per request)
+# But we cache the default instance
+_keyword_monitor_default = None
+
+def _get_keyword_monitor(mode: str = 'normal'):
+    """Get KeywordMonitor instance - caches default mode only"""
+    global _keyword_monitor_default
+    from .keyword_monitor import KeywordMonitor
+    
+    if mode == 'normal':
+        if _keyword_monitor_default is None:
+            _keyword_monitor_default = KeywordMonitor(_get_database_url(), mode='normal')
+        return _keyword_monitor_default
+    else:
+        # Non-default modes get fresh instances (they're rarely used)
+        return KeywordMonitor(_get_database_url(), mode=mode)
+
 
 # ============================================================================
 # HEALTH AND STATUS ENDPOINTS
@@ -42,6 +97,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Health check error: {str(e)}")
 
+
 @router.get("/info")
 async def integration_info():
     """Get comprehensive integration information"""
@@ -51,6 +107,7 @@ async def integration_info():
     except Exception as e:
         logger.error(f"Integration info failed: {e}")
         raise HTTPException(status_code=500, detail=f"Integration info error: {str(e)}")
+
 
 @router.get("/statistics")
 async def system_statistics():
@@ -65,6 +122,7 @@ async def system_statistics():
         logger.error(f"Statistics retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Statistics error: {str(e)}")
 
+
 # ============================================================================
 # TREND MONITORING ENDPOINTS
 # ============================================================================
@@ -77,7 +135,7 @@ async def get_recent_trends(
 ):
     """Get recent trend data"""
     try:
-        db = TrendsDatabase(DATABASE_URL)
+        db = get_trends_database()
         trends = await db.get_recent_trends(business_area=business_area, days=days, limit=limit)
         
         return {
@@ -89,6 +147,7 @@ async def get_recent_trends(
     except Exception as e:
         logger.error(f"Recent trends retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Trends retrieval error: {str(e)}")
+
 
 @router.get("/trends/business/{business_area}")
 async def get_business_trends(
@@ -103,7 +162,7 @@ async def get_business_trends(
         if business_area not in valid_areas:
             raise HTTPException(status_code=400, detail=f"Invalid business area. Must be one of: {valid_areas}")
         
-        db = TrendsDatabase(DATABASE_URL)
+        db = get_trends_database()
         trends = await db.get_trending_keywords(business_area=business_area, min_score=min_score, days=days)
         
         return {
@@ -118,6 +177,7 @@ async def get_business_trends(
     except Exception as e:
         logger.error(f"Business trends retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Business trends error: {str(e)}")
+
 
 # ============================================================================
 # OPPORTUNITY ENDPOINTS
@@ -135,9 +195,9 @@ async def get_current_opportunities(
             if business_area not in valid_areas:
                 raise HTTPException(status_code=400, detail=f"Invalid business area. Must be one of: {valid_areas}")
         
-        detector = OpportunityDetector(DATABASE_URL)
+        detector = _get_opportunity_detector()
         opportunities = await detector.detect_current_opportunities(
-            business_area=business_area, 
+            business_area=business_area,
             hours_lookback=hours_lookback
         )
         
@@ -171,6 +231,7 @@ async def get_current_opportunities(
         logger.error(f"Current opportunities retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Opportunities error: {str(e)}")
 
+
 @router.get("/opportunities/active")
 async def get_active_opportunities(
     business_area: Optional[str] = Query(None, description="Filter by business area"),
@@ -188,7 +249,7 @@ async def get_active_opportunities(
             if urgency_filter not in valid_urgency:
                 raise HTTPException(status_code=400, detail=f"Invalid urgency level. Must be one of: {valid_urgency}")
         
-        detector = OpportunityDetector(DATABASE_URL)
+        detector = _get_opportunity_detector()
         
         # Convert urgency filter to enum if provided
         urgency_enum = None
@@ -201,7 +262,7 @@ async def get_active_opportunities(
             urgency_filter=urgency_enum
         )
         
-        # Convert opportunities to dictionaries
+        # Convert to JSON-serializable format
         opportunity_dicts = []
         for opp in opportunities:
             opportunity_dicts.append({
@@ -230,6 +291,7 @@ async def get_active_opportunities(
         logger.error(f"Active opportunities retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Active opportunities error: {str(e)}")
 
+
 # ============================================================================
 # TRAINING ENDPOINTS
 # ============================================================================
@@ -240,7 +302,7 @@ async def get_pending_training_opportunities(
 ):
     """Get opportunities pending training feedback"""
     try:
-        trainer = OpportunityTraining(DATABASE_URL)
+        trainer = _get_opportunity_training()
         opportunities = await trainer.get_pending_opportunities(limit=limit)
         
         return {
@@ -250,6 +312,7 @@ async def get_pending_training_opportunities(
     except Exception as e:
         logger.error(f"Pending training opportunities retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Training opportunities error: {str(e)}")
+
 
 @router.post("/training/feedback")
 async def submit_training_feedback(
@@ -264,7 +327,7 @@ async def submit_training_feedback(
         if feedback not in valid_feedback:
             raise HTTPException(status_code=400, detail=f"Invalid feedback. Must be one of: {valid_feedback}")
         
-        trainer = OpportunityTraining(DATABASE_URL)
+        trainer = _get_opportunity_training()
         success = await trainer.submit_feedback(
             opportunity_id=opportunity_id,
             feedback=feedback,
@@ -286,11 +349,12 @@ async def submit_training_feedback(
         logger.error(f"Training feedback submission failed: {e}")
         raise HTTPException(status_code=500, detail=f"Feedback submission error: {str(e)}")
 
+
 @router.get("/training/statistics")
 async def get_training_statistics():
     """Get training statistics and progress"""
     try:
-        trainer = OpportunityTraining(DATABASE_URL)
+        trainer = _get_opportunity_training()
         stats = await trainer.get_training_stats()
         
         return {
@@ -300,6 +364,7 @@ async def get_training_statistics():
     except Exception as e:
         logger.error(f"Training statistics retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Training statistics error: {str(e)}")
+
 
 # ============================================================================
 # MONITORING ENDPOINTS
@@ -315,7 +380,7 @@ async def run_monitoring_cycle(
         if mode not in valid_modes:
             raise HTTPException(status_code=400, detail=f"Invalid mode. Must be one of: {valid_modes}")
         
-        monitor = KeywordMonitor(DATABASE_URL, mode=mode)
+        monitor = _get_keyword_monitor(mode=mode)
         result = await monitor.run_monitoring_cycle()
         
         return {
@@ -329,11 +394,12 @@ async def run_monitoring_cycle(
         logger.error(f"Monitoring cycle failed: {e}")
         raise HTTPException(status_code=500, detail=f"Monitoring cycle error: {str(e)}")
 
+
 @router.get("/monitoring/status")
 async def get_monitoring_status():
     """Get current monitoring system status"""
     try:
-        monitor = KeywordMonitor(DATABASE_URL)
+        monitor = _get_keyword_monitor()
         status = await monitor.get_monitoring_status()
         
         return {
@@ -343,6 +409,7 @@ async def get_monitoring_status():
     except Exception as e:
         logger.error(f"Monitoring status retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Monitoring status error: {str(e)}")
+
 
 # ============================================================================
 # BUSINESS AREA ANALYSIS ENDPOINTS
@@ -360,7 +427,7 @@ async def get_business_analysis(
         if business_area not in valid_areas:
             raise HTTPException(status_code=400, detail=f"Invalid business area. Must be one of: {valid_areas}")
         
-        db = TrendsDatabase(DATABASE_URL)
+        db = get_trends_database()
         summary = await db.get_business_area_summary(business_area=business_area, days=days)
         
         return {
@@ -382,6 +449,7 @@ async def get_business_analysis(
         logger.error(f"Business analysis failed: {e}")
         raise HTTPException(status_code=500, detail=f"Business analysis error: {str(e)}")
 
+
 # ============================================================================
 # UTILITY ENDPOINTS
 # ============================================================================
@@ -395,7 +463,7 @@ async def root():
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "health": "/health",
-            "info": "/info", 
+            "info": "/info",
             "statistics": "/statistics",
             "trends": "/trends/*",
             "opportunities": "/opportunities/*",

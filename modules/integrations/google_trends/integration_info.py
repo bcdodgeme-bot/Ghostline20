@@ -13,35 +13,41 @@ Key Features:
 """
 
 import asyncio
-import asyncpg
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import sys
 from dataclasses import dataclass
 
-# Import all module components for testing
+from ...core.database import db_manager
+
+# Import singleton getters for all module components
 try:
-    from .keyword_expander import KeywordExpander
-    from .trends_client import GoogleTrendsClient
-    from .keyword_monitor import KeywordMonitor
-    from .database_manager import TrendsDatabase
-    from .trend_analyzer import TrendAnalyzer
-    from .opportunity_detector import OpportunityDetector
-    from .rss_cross_reference import RSSCrossReference
+    from .keyword_expander import get_keyword_expander
+    from .trends_client import get_google_trends_client
+    from .keyword_monitor import get_keyword_monitor
+    from .database_manager import get_trends_database
+    from .trend_analyzer import get_trend_analyzer
+    from .opportunity_detector import get_opportunity_detector
+    from .rss_cross_reference import get_rss_cross_reference
 except ImportError:
-    # Fallback for direct execution
-    sys.path.append(os.path.dirname(__file__))
-    from keyword_expander import KeywordExpander
-    from trends_client import GoogleTrendsClient
-    from keyword_monitor import KeywordMonitor
-    from database_manager import TrendsDatabase
-    from trend_analyzer import TrendAnalyzer
-    from opportunity_detector import OpportunityDetector
-    from rss_cross_reference import RSSCrossReference
+    # Fallback for direct execution - these will be None
+    get_keyword_expander = None
+    get_google_trends_client = None
+    get_keyword_monitor = None
+    get_trends_database = None
+    get_trend_analyzer = None
+    get_opportunity_detector = None
+    get_rss_cross_reference = None
 
 logger = logging.getLogger(__name__)
+
+# Valid business areas whitelist for safe table queries
+VALID_BUSINESS_AREAS = frozenset([
+    'amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals'
+])
+
 
 @dataclass
 class ComponentStatus:
@@ -52,6 +58,7 @@ class ComponentStatus:
     last_used: Optional[datetime] = None
     error_message: Optional[str] = None
     performance_metrics: Optional[Dict[str, Any]] = None
+
 
 @dataclass
 class SystemHealth:
@@ -65,21 +72,32 @@ class SystemHealth:
     critical_issues: List[str]
     warnings: List[str]
 
+
+# Singleton instance
+_integration_info_manager_instance: Optional['GoogleTrendsIntegrationInfo'] = None
+
+
+def get_integration_info_manager() -> 'GoogleTrendsIntegrationInfo':
+    """Get singleton GoogleTrendsIntegrationInfo instance"""
+    global _integration_info_manager_instance
+    if _integration_info_manager_instance is None:
+        _integration_info_manager_instance = GoogleTrendsIntegrationInfo()
+    return _integration_info_manager_instance
+
+
 class GoogleTrendsIntegrationInfo:
     """Comprehensive system information and health monitoring"""
     
-    def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-        
-        # Component registry
-        self.components = {
-            'keyword_expander': KeywordExpander,
-            'trends_client': GoogleTrendsClient,
-            'keyword_monitor': KeywordMonitor,
-            'database_manager': TrendsDatabase,
-            'trend_analyzer': TrendAnalyzer,
-            'opportunity_detector': OpportunityDetector,
-            'rss_cross_reference': RSSCrossReference
+    def __init__(self):
+        # Component singleton getters registry
+        self.component_getters = {
+            'keyword_expander': get_keyword_expander,
+            'trends_client': get_google_trends_client,
+            'keyword_monitor': get_keyword_monitor,
+            'database_manager': get_trends_database,
+            'trend_analyzer': get_trend_analyzer,
+            'opportunity_detector': get_opportunity_detector,
+            'rss_cross_reference': get_rss_cross_reference
         }
         
         # Integration metadata
@@ -87,7 +105,7 @@ class GoogleTrendsIntegrationInfo:
             'module_name': 'google_trends',
             'version': '1.0.0',
             'description': 'Google Trends monitoring with smart keyword expansion',
-            'business_areas': ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals'],
+            'business_areas': list(VALID_BUSINESS_AREAS),
             'features': [
                 'Smart keyword expansion (11.2x multiplier)',
                 'Low threshold trend detection',
@@ -156,14 +174,8 @@ class GoogleTrendsIntegrationInfo:
             
             if last_monitoring_cycle:
                 # Handle timezone-aware datetime comparison
-                now = datetime.now()
-                if last_monitoring_cycle.tzinfo is not None and now.tzinfo is None:
-                    # If last_monitoring_cycle is timezone-aware but now isn't
-                    from datetime import timezone
-                    now = now.replace(tzinfo=timezone.utc)
-                elif last_monitoring_cycle.tzinfo is None and now.tzinfo is not None:
-                    # If now is timezone-aware but last_monitoring_cycle isn't
-                    from datetime import timezone
+                now = datetime.now(timezone.utc)
+                if last_monitoring_cycle.tzinfo is None:
                     last_monitoring_cycle = last_monitoring_cycle.replace(tzinfo=timezone.utc)
                 
                 hours_since_last = (now - last_monitoring_cycle).total_seconds() / 3600
@@ -196,45 +208,48 @@ class GoogleTrendsIntegrationInfo:
     
     async def _check_database_connection(self) -> bool:
         """Check if database connection is working"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             await conn.fetchval('SELECT 1')
-            await conn.close()
             return True
         except Exception as e:
             logger.error(f"Database connection failed: {e}")
             return False
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _check_all_components(self) -> Dict[str, ComponentStatus]:
         """Check status of all module components"""
         component_status = {}
         
-        for name, component_class in self.components.items():
+        for name, getter_func in self.component_getters.items():
             try:
-                # Try to instantiate the component
-                if name in ['keyword_expander', 'trends_client', 'keyword_monitor',
-                           'database_manager', 'trend_analyzer', 'opportunity_detector',
-                           'rss_cross_reference']:
-                    instance = component_class(self.database_url)
-                    
-                    # Basic functionality test
-                    if hasattr(instance, 'health_check'):
-                        health_result = await instance.health_check()
-                        available = health_result.get('database_connected', True)
-                    else:
-                        available = True
-                    
+                # Check if getter function is available
+                if getter_func is None:
                     component_status[name] = ComponentStatus(
                         name=name,
-                        available=available,
-                        version='1.0.0'
+                        available=False,
+                        error_message="Getter function not imported"
                     )
+                    continue
+                
+                # Try to get the singleton instance
+                instance = getter_func()
+                
+                # Basic functionality test
+                if hasattr(instance, 'health_check'):
+                    health_result = await instance.health_check()
+                    available = health_result.get('database_connected', True)
                 else:
-                    component_status[name] = ComponentStatus(
-                        name=name,
-                        available=True,
-                        version='1.0.0'
-                    )
+                    available = True
+                
+                component_status[name] = ComponentStatus(
+                    name=name,
+                    available=available,
+                    version='1.0.0'
+                )
                     
             except Exception as e:
                 component_status[name] = ComponentStatus(
@@ -247,8 +262,9 @@ class GoogleTrendsIntegrationInfo:
     
     async def _assess_data_quality(self) -> float:
         """Assess overall data quality (0.0 to 1.0)"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             quality_metrics = {}
             
@@ -278,8 +294,6 @@ class GoogleTrendsIntegrationInfo:
             ''') or 0
             quality_metrics['business_coverage'] = min(1.0, business_coverage / 6.0)  # 6 business areas
             
-            await conn.close()
-            
             # Calculate weighted average
             weights = {
                 'tables_exist': 0.3,
@@ -294,26 +308,33 @@ class GoogleTrendsIntegrationInfo:
         except Exception as e:
             logger.error(f"Data quality assessment failed: {e}")
             return 0.0
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _get_last_monitoring_cycle(self) -> Optional[datetime]:
         """Get timestamp of last monitoring cycle"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             last_trend = await conn.fetchval('''
                 SELECT MAX(created_at) FROM trend_monitoring
             ''')
             
-            await conn.close()
             return last_trend
             
         except Exception:
             return None
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_system_statistics(self) -> Dict[str, Any]:
         """Get comprehensive system statistics"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             # Basic counts
             stats = {}
@@ -324,9 +345,10 @@ class GoogleTrendsIntegrationInfo:
                 'by_business_area': {}
             }
             
-            business_areas = ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals']
-            for area in business_areas:
-                original_count = await conn.fetchval(f'SELECT COUNT(*) FROM {area}_keywords WHERE is_active = true') or 0
+            for area in VALID_BUSINESS_AREAS:
+                original_count = await conn.fetchval(
+                    f'SELECT COUNT(*) FROM {area}_keywords WHERE is_active = true'
+                ) or 0
                 expanded_count = await conn.fetchval(
                     'SELECT COUNT(*) FROM expanded_keywords_for_trends WHERE business_area = $1', area
                 ) or 0
@@ -372,24 +394,30 @@ class GoogleTrendsIntegrationInfo:
                 ''', urgency) or 0
                 stats['opportunities']['by_urgency'][urgency] = count
             
-            # Performance statistics
+            # Performance statistics - release connection before calling other methods
+            await db_manager.release_connection(conn)
+            conn = None
+            
             stats['performance'] = {
                 'monitoring_frequency': await self._calculate_monitoring_frequency(),
                 'data_coverage_days': await self._calculate_data_coverage(),
                 'expansion_efficiency': await self._calculate_expansion_efficiency()
             }
             
-            await conn.close()
             return stats
             
         except Exception as e:
             logger.error(f"Failed to get system statistics: {e}")
             return {'error': str(e)}
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _calculate_monitoring_frequency(self) -> float:
         """Calculate average monitoring frequency (cycles per day)"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             # Count distinct days with trend data in last 7 days
             monitoring_days = await conn.fetchval('''
@@ -405,48 +433,52 @@ class GoogleTrendsIntegrationInfo:
                 WHERE created_at >= NOW() - INTERVAL '7 days'
             ''') or 0
             
-            await conn.close()
-            
             if monitoring_days > 0:
                 return round(monitoring_events / monitoring_days, 1)
             return 0.0
             
         except Exception:
             return 0.0
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _calculate_data_coverage(self) -> int:
         """Calculate how many days of trend data we have"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             coverage = await conn.fetchval('''
                 SELECT COUNT(DISTINCT DATE(created_at)) 
                 FROM trend_monitoring
             ''') or 0
             
-            await conn.close()
             return coverage
             
         except Exception:
             return 0
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _calculate_expansion_efficiency(self) -> float:
         """Calculate keyword expansion efficiency"""
+        conn = None
         try:
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             # Get total original keywords
             total_original = 0
-            business_areas = ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals']
             
-            for area in business_areas:
-                count = await conn.fetchval(f'SELECT COUNT(*) FROM {area}_keywords WHERE is_active = true') or 0
+            for area in VALID_BUSINESS_AREAS:
+                count = await conn.fetchval(
+                    f'SELECT COUNT(*) FROM {area}_keywords WHERE is_active = true'
+                ) or 0
                 total_original += count
             
             # Get total expanded keywords
             total_expanded = await conn.fetchval('SELECT COUNT(*) FROM expanded_keywords_for_trends') or 0
-            
-            await conn.close()
             
             if total_original > 0:
                 return round(total_expanded / total_original, 1)
@@ -454,11 +486,14 @@ class GoogleTrendsIntegrationInfo:
             
         except Exception:
             return 0.0
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def run_integration_test(self) -> Dict[str, Any]:
         """Run comprehensive integration test"""
         test_results = {
-            'test_timestamp': datetime.now().isoformat(),
+            'test_timestamp': datetime.now(timezone.utc).isoformat(),
             'tests_passed': 0,
             'tests_failed': 0,
             'test_details': {}
@@ -527,17 +562,15 @@ class GoogleTrendsIntegrationInfo:
             test_results['tests_failed'] += 1
         
         # Test 4: System functionality (basic operations)
+        conn = None
         try:
-            # Test basic database operations
-            conn = await asyncpg.connect(self.database_url)
+            conn = await db_manager.get_connection()
             
             # Check if we can query trend data
             trend_count = await conn.fetchval('SELECT COUNT(*) FROM trend_monitoring')
             
             # Check if we can query opportunities
             opp_count = await conn.fetchval('SELECT COUNT(*) FROM trend_opportunities')
-            
-            await conn.close()
             
             passed = True  # If we get here without exception, basic operations work
             test_results['test_details']['system_functionality'] = {
@@ -554,6 +587,9 @@ class GoogleTrendsIntegrationInfo:
                 'message': f'System functionality test error: {e}'
             }
             test_results['tests_failed'] += 1
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
         
         # Calculate overall test result
         total_tests = test_results['tests_passed'] + test_results['tests_failed']
@@ -562,18 +598,20 @@ class GoogleTrendsIntegrationInfo:
         
         return test_results
 
+
 # ============================================================================
 # PUBLIC API FUNCTIONS
 # ============================================================================
 
 async def get_integration_info() -> Dict[str, Any]:
     """Get comprehensive integration information"""
-    info_manager = GoogleTrendsIntegrationInfo()
+    info_manager = get_integration_info_manager()
     return await info_manager.get_integration_info()
+
 
 async def check_module_health() -> Dict[str, Any]:
     """Check module health and return status"""
-    info_manager = GoogleTrendsIntegrationInfo()
+    info_manager = get_integration_info_manager()
     health = await info_manager.check_module_health()
     
     # Check if health is a dict or an object
@@ -592,15 +630,18 @@ async def check_module_health() -> Dict[str, Any]:
         'warnings': getattr(health, 'warnings', [])
     }
 
+
 async def get_system_statistics() -> Dict[str, Any]:
     """Get comprehensive system statistics"""
-    info_manager = GoogleTrendsIntegrationInfo()
+    info_manager = get_integration_info_manager()
     return await info_manager.get_system_statistics()
+
 
 async def run_integration_test() -> Dict[str, Any]:
     """Run comprehensive integration test"""
-    info_manager = GoogleTrendsIntegrationInfo()
+    info_manager = get_integration_info_manager()
     return await info_manager.run_integration_test()
+
 
 # ============================================================================
 # TESTING
@@ -649,6 +690,7 @@ async def test_integration_info():
     print(f"   Overall success: {'✅' if test_results['overall_success'] else '❌'}")
     
     print("\n✅ Integration info test complete!")
+
 
 if __name__ == "__main__":
     asyncio.run(test_integration_info())

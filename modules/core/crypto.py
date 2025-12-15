@@ -14,6 +14,8 @@ Usage:
     
     encrypted = encrypt_token("sensitive_oauth_token")
     original = decrypt_token(encrypted)
+
+Updated: Session 19 - Added __all__ exports
 """
 
 import os
@@ -25,6 +27,18 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    'CryptoManager',
+    'crypto_manager',
+    'encrypt_token',
+    'decrypt_token',
+    'encrypt_json',
+    'decrypt_json',
+    'test_encryption',
+    'get_encryption_info',
+]
+
 
 class CryptoManager:
     """Fort Knox encryption manager for sensitive data"""
@@ -226,35 +240,49 @@ class CryptoManager:
             logger.error(f"❌ Encryption test failed: {e}")
             return False
 
+
+# =============================================================================
+# Global Instance & Convenience Functions
+# =============================================================================
+
 # Global instance for use throughout the application
 crypto_manager = CryptoManager()
 
-# Convenience functions for other modules
+
 def encrypt_token(token: str) -> str:
     """Encrypt a token using the global crypto manager"""
     return crypto_manager.encrypt_token(token)
+
 
 def decrypt_token(encrypted_token: str) -> str:
     """Decrypt a token using the global crypto manager"""
     return crypto_manager.decrypt_token(encrypted_token)
 
+
 def encrypt_json(data: Dict[str, Any]) -> str:
     """Encrypt JSON data using the global crypto manager"""
     return crypto_manager.encrypt_json(data)
+
 
 def decrypt_json(encrypted_data: str) -> Dict[str, Any]:
     """Decrypt JSON data using the global crypto manager"""
     return crypto_manager.decrypt_json(encrypted_data)
 
+
 def test_encryption() -> bool:
     """Test encryption functionality"""
     return crypto_manager.test_encryption()
+
 
 def get_encryption_info() -> Dict[str, Any]:
     """Get encryption system information"""
     return crypto_manager.get_encryption_info()
 
-# Development utility
+
+# =============================================================================
+# Development Utility
+# =============================================================================
+
 if __name__ == "__main__":
     print("🔐 CRYPTO MANAGER TEST")
     print("=" * 30)

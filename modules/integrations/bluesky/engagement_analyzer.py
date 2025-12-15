@@ -14,6 +14,17 @@ from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+# Valid keyword tables - SQL injection prevention
+VALID_KEYWORD_TABLES = frozenset({
+    'bcdodge_keywords',
+    'roseandangel_keywords',
+    'tvsignals_keywords',
+    'mealsnfeelz_keywords',
+    'damnitcarl_keywords',
+    'amcf_keywords',
+})
+
+
 class EngagementAnalyzer:
     """Analyzes Bluesky posts for engagement opportunities using keyword intelligence"""
     
@@ -25,11 +36,15 @@ class EngagementAnalyzer:
         self.opportunity_types = {
             'high_match': 'High keyword match (80%+)',
             'conversation_starter': 'Post asks questions or seeks input',
-            'expertise_showcase': 'Opportunity to demonstrate knowledge', 
+            'expertise_showcase': 'Opportunity to demonstrate knowledge',
             'community_building': 'Community/networking opportunity',
             'trending_topic': 'Trending topic relevant to keywords',
             'cross_account': 'Could work across multiple accounts'
         }
+    
+    def _validate_table_name(self, table_name: str) -> bool:
+        """Validate table name against allowlist to prevent SQL injection"""
+        return table_name in VALID_KEYWORD_TABLES
     
     async def get_account_keywords(self, account_id: str, keywords_table: str) -> List[str]:
         """Get keywords for specific account from database"""
@@ -40,9 +55,14 @@ class EngagementAnalyzer:
             if (datetime.now() - cached_time).total_seconds() < self.cache_duration:
                 return keywords
         
+        # Validate table name against allowlist
+        if not self._validate_table_name(keywords_table):
+            logger.error(f"Invalid keywords table name: {keywords_table}")
+            return []
+        
         try:
-            # Query the keywords table - you'll update this with actual table structure
-            query = f"SELECT keyword FROM {keywords_table} WHERE active = true"
+            # Safe query - table name validated against allowlist
+            query = f"SELECT keyword FROM {keywords_table} WHERE is_active = true"
             results = await db_manager.fetch_all(query)
             
             keywords = [row['keyword'].lower() for row in results]
@@ -155,8 +175,8 @@ class EngagementAnalyzer:
         
         return opportunities
     
-    async def analyze_post_for_account(self, 
-                                     post: Dict[str, Any], 
+    async def analyze_post_for_account(self,
+                                     post: Dict[str, Any],
                                      account_id: str,
                                      account_config: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze a single post for a specific account"""
@@ -188,7 +208,7 @@ class EngagementAnalyzer:
         keyword_score, matched_keywords = self.calculate_keyword_match_score(post_text, keywords)
         
         # Skip low-relevance posts early (lowered threshold for testing)
-        if keyword_score < 0.02:  # 5% instead of 10%
+        if keyword_score < 0.02:  # 2% threshold
             logger.debug(f"Skipped post from {author_handle}: keyword_score too low ({keyword_score:.2f})")
             return None
         
@@ -204,7 +224,7 @@ class EngagementAnalyzer:
         
         # Calculate engagement potential
         engagement_potential = self._calculate_engagement_potential(
-            keyword_score, 
+            keyword_score,
             conversation_ops,
             like_count,
             reply_count
@@ -244,14 +264,6 @@ class EngagementAnalyzer:
             }
         }
         
-        # Calculate final engagement potential
-        engagement_potential = self._calculate_engagement_potential(
-            keyword_score,
-            conversation_ops,
-            like_count,
-            reply_count
-        )
-        
         # Log the final decision
         logger.info(f"   📊 Engagement potential: {engagement_potential:.3f}")
         logger.info(f"   🎯 Priority: {self._calculate_priority_level(keyword_score, engagement_potential)}")
@@ -260,7 +272,7 @@ class EngagementAnalyzer:
         
         return analysis
     
-    def _calculate_engagement_potential(self, 
+    def _calculate_engagement_potential(self,
                                       keyword_score: float,
                                       conversation_ops: Dict[str, Any],
                                       like_count: int,
@@ -294,8 +306,8 @@ class EngagementAnalyzer:
         final_score = min(base_score + conversation_boost + social_boost, 1.0)
         return final_score
     
-    def _suggest_engagement_type(self, 
-                                post_text: str, 
+    def _suggest_engagement_type(self,
+                                post_text: str,
                                 conversation_ops: Dict[str, Any],
                                 account_config: Dict[str, Any]) -> str:
         """Suggest type of engagement based on post content and account config"""
@@ -345,7 +357,7 @@ class EngagementAnalyzer:
         else:
             return "minimal"
     
-    async def find_cross_account_opportunities(self, 
+    async def find_cross_account_opportunities(self,
                                              analyses: List[Dict[str, Any]],
                                              account_configs: Dict[str, Dict]) -> List[Dict[str, Any]]:
         """Find posts that could work across multiple accounts"""

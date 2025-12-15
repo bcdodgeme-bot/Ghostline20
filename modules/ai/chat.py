@@ -18,8 +18,6 @@ from pathlib import Path
 import logging
 import warnings
 import httpx
-import os
-database_url = os.getenv('DATABASE_URL')
 
 # File processing imports
 from PIL import Image, ImageOps
@@ -94,7 +92,7 @@ def get_current_datetime_context() -> dict:
     try:
         user_timezone = pytz.timezone('America/New_York')  # Default to Eastern
         now_user_tz = now.astimezone(user_timezone)
-    except:
+    except Exception:
         now_user_tz = now
     
     return {
@@ -355,6 +353,81 @@ def detect_bluesky_command(message: str) -> bool:
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in bluesky_keywords)
+
+def detect_bluesky_reply_approval(message: str) -> bool:
+    """Detect when user approves a Bluesky reply draft"""
+    approval_keywords = [
+        "post it", "send it", "post that", "send that",
+        "yes post", "approve", "looks good",
+        "post the reply", "send the reply"
+    ]
+    message_lower = message.lower().strip()
+    return any(keyword in message_lower for keyword in approval_keywords)
+
+async def post_bluesky_reply_from_thread(
+    reply_text: str,
+    opportunity_id: str,
+    user_id: str
+) -> Dict[str, Any]:
+    """
+    Post a reply to Bluesky from chat thread
+    
+    Args:
+        reply_text: The reply text to post
+        opportunity_id: UUID of the engagement opportunity
+        user_id: User ID
+    
+    Returns:
+        Result dict with success status
+    """
+    try:
+        from modules.core.database import db_manager
+        from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
+        
+        # Get opportunity details from database
+        opportunity = await db_manager.fetch_one('''
+            SELECT post_uri, detected_by_account, author_handle
+            FROM bluesky_engagement_opportunities
+            WHERE id = $1
+        ''', opportunity_id)
+        
+        if not opportunity:
+            return {"success": False, "error": "Opportunity not found"}
+        
+        # Post the reply
+        multi_client = get_bluesky_multi_client()
+        account_id = opportunity['detected_by_account']
+        
+        result = await multi_client.create_reply(
+            account_id=account_id,
+            reply_to_uri=opportunity['post_uri'],
+            text=reply_text
+        )
+        
+        if result.get('success'):
+            # Mark as replied in database
+            await db_manager.execute('''
+                UPDATE bluesky_engagement_opportunities
+                SET user_response = 'replied', 
+                    already_engaged = true,
+                    updated_at = NOW()
+                WHERE id = $1
+            ''', opportunity_id)
+            
+            return {
+                "success": True,
+                "message": f"✅ Posted reply to @{opportunity['author_handle']}",
+                "post_uri": result.get('uri')
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get('error', 'Failed to post')
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to post Bluesky reply: {e}")
+        return {"success": False, "error": str(e)}
 
 async def process_bluesky_post_command(command_type: str, account: Optional[str],
                                       text: str, user_id: str) -> str:
@@ -4202,17 +4275,16 @@ async def format_recent_meetings_response(user_id: str, days: int = 14, limit: i
         meetings = [dict(row) for row in results] if results else []
         
         # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
-        import json
         for meeting in meetings:
             if meeting.get('participants') and isinstance(meeting['participants'], str):
                 try:
                     meeting['participants'] = json.loads(meeting['participants'])
-                except:
+                except Exception:
                     meeting['participants'] = []
             if meeting.get('key_points') and isinstance(meeting['key_points'], str):
                 try:
                     meeting['key_points'] = json.loads(meeting['key_points'])
-                except:
+                except Exception:
                     meeting['key_points'] = []
         
         if not meetings or len(meetings) == 0:
@@ -4369,17 +4441,16 @@ async def search_meetings(
             meetings = [dict(row) for row in results]
             
             # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
-            import json
             for meeting in meetings:
                 if meeting.get('participants') and isinstance(meeting['participants'], str):
                     try:
                         meeting['participants'] = json.loads(meeting['participants'])
-                    except:
+                    except Exception:
                         meeting['participants'] = []
                 if meeting.get('key_points') and isinstance(meeting['key_points'], str):
                     try:
                         meeting['key_points'] = json.loads(meeting['key_points'])
-                    except:
+                    except Exception:
                         meeting['key_points'] = []
         
         elif query_type == 'action_items':
@@ -4463,17 +4534,16 @@ async def search_meetings(
                 meetings = [dict(row) for row in results]
                 
                 # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
-                import json
                 for meeting in meetings:
                     if meeting.get('participants') and isinstance(meeting['participants'], str):
                         try:
                             meeting['participants'] = json.loads(meeting['participants'])
-                        except:
+                        except Exception:
                             meeting['participants'] = []
                     if meeting.get('key_points') and isinstance(meeting['key_points'], str):
                         try:
                             meeting['key_points'] = json.loads(meeting['key_points'])
-                        except:
+                        except Exception:
                             meeting['key_points'] = []
                 
             else:
@@ -4501,17 +4571,16 @@ async def search_meetings(
                 meetings = [dict(row) for row in results]
                 
                 # 🔧 FIX (Nov 6, 2025): Parse JSON strings back to lists
-                import json
                 for meeting in meetings:
                     if meeting.get('participants') and isinstance(meeting['participants'], str):
                         try:
                             meeting['participants'] = json.loads(meeting['participants'])
-                        except:
+                        except Exception:
                             meeting['participants'] = []
                     if meeting.get('key_points') and isinstance(meeting['key_points'], str):
                         try:
                             meeting['key_points'] = json.loads(meeting['key_points'])
-                        except:
+                        except Exception:
                             meeting['key_points'] = []
                 
         

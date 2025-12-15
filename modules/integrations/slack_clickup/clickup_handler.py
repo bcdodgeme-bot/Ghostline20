@@ -1,6 +1,8 @@
 """
 ClickUp API Handler - Environment-Driven Configuration
 Handles all ClickUp API interactions for task creation
+
+Updated: Session 13 - Added singleton getter pattern
 """
 import os
 import aiohttp
@@ -8,7 +10,19 @@ import json
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-#--Section 1: Class Initialization & Environment Setup 9/23/25
+#--Section 1: Singleton Pattern
+_clickup_handler_instance: Optional['ClickUpHandler'] = None
+
+
+def get_clickup_handler() -> 'ClickUpHandler':
+    """Get singleton ClickUpHandler instance"""
+    global _clickup_handler_instance
+    if _clickup_handler_instance is None:
+        _clickup_handler_instance = ClickUpHandler()
+    return _clickup_handler_instance
+
+
+#--Section 2: Class Initialization & Environment Setup
 class ClickUpHandler:
     def __init__(self):
         self.api_token = os.getenv('CLICKUP_API_TOKEN')
@@ -18,9 +32,9 @@ class ClickUpHandler:
         self.base_url = "https://api.clickup.com/api/v2"
         
         if not all([self.api_token, self.user_id]):
-            print("⚠️  ClickUp API token or user ID not configured")
+            print("⚠️ ClickUp API token or user ID not configured")
 
-#--Section 2: HTTP Headers & Authentication 9/23/25
+    #--Section 3: HTTP Headers & Authentication
     def _get_headers(self) -> Dict[str, str]:
         """Get standard headers for ClickUp API calls"""
         return {
@@ -28,11 +42,11 @@ class ClickUpHandler:
             'Content-Type': 'application/json'
         }
 
-#--Section 3: AMCF Task Creation 9/23/25
+    #--Section 4: AMCF Task Creation
     async def create_amcf_task(self, title: str, description: str) -> Optional[Dict]:
         """Create a task in AMCF workspace with 3-day due date"""
         if not self.amcf_space_id:
-            print("⚠️  AMCF space ID not configured")
+            print("⚠️ AMCF space ID not configured")
             return None
         
         # Set due date to 3 days from now
@@ -49,11 +63,11 @@ class ClickUpHandler:
         
         return await self._create_task_in_space(self.amcf_space_id, payload)
 
-#--Section 4: Personal Task Creation 9/23/25
+    #--Section 5: Personal Task Creation
     async def create_personal_task(self, title: str, description: str) -> Optional[Dict]:
         """Create a task in personal workspace with 5-day due date"""
         if not self.personal_space_id:
-            print("⚠️  Personal space ID not configured")
+            print("⚠️ Personal space ID not configured")
             return None
         
         # Set due date to 5 days from now
@@ -70,11 +84,11 @@ class ClickUpHandler:
         
         return await self._create_task_in_space(self.personal_space_id, payload)
 
-#--Section 5: Core Task Creation Logic 9/23/25
+    #--Section 6: Core Task Creation Logic
     async def _create_task_in_space(self, space_id: str, payload: Dict) -> Optional[Dict]:
         """Internal method to create task in specified space"""
         if not self.api_token:
-            print("⚠️  ClickUp API token not configured")
+            print("⚠️ ClickUp API token not configured")
             return None
         
         try:
@@ -124,7 +138,7 @@ class ClickUpHandler:
             print(f"❌ ClickUp API error: {e}")
             return None
 
-#--Section 6: Utility Methods 9/23/25
+    #--Section 7: Utility Methods
     async def test_connection(self) -> bool:
         """Test ClickUp API connection"""
         if not self.api_token:

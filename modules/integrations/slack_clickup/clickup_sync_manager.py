@@ -2,18 +2,33 @@
 """
 ClickUp Sync Manager
 Syncs tasks FROM ClickUp API into local database for notifications
+
+Updated: Session 13 - Converted to db_manager pattern, added singleton getter
 """
 
 import os
 import aiohttp
-import asyncpg
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
 from uuid import UUID
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
 
+#--Section 1: Singleton Pattern
+_sync_manager_instance: Optional['ClickUpSyncManager'] = None
+
+def get_clickup_sync_manager() -> 'ClickUpSyncManager':
+    """Get singleton ClickUpSyncManager instance"""
+    global _sync_manager_instance
+    if _sync_manager_instance is None:
+        _sync_manager_instance = ClickUpSyncManager()
+    return _sync_manager_instance
+
+
+#--Section 2: Class Definition & Initialization
 class ClickUpSyncManager:
     """Syncs ClickUp tasks to local database for notification system"""
     
@@ -23,13 +38,12 @@ class ClickUpSyncManager:
         self.amcf_space_id = os.getenv('CLICKUP_AMCF_SPACE_ID')
         self.personal_space_id = os.getenv('CLICKUP_PERSONAL_SPACE_ID')
         self.base_url = "https://api.clickup.com/api/v2"
-        self.database_url = os.getenv('DATABASE_URL')
         
         # Carl's user UUID (from database inspection)
         self.carl_user_uuid = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
         
-        if not all([self.api_token, self.database_url]):
-            logger.error("⚠️ ClickUp API token or database URL not configured")
+        if not self.api_token:
+            logger.error("⚠️ ClickUp API token not configured")
     
     def _get_headers(self) -> Dict[str, str]:
         """Get standard headers for ClickUp API calls"""
@@ -38,6 +52,7 @@ class ClickUpSyncManager:
             'Content-Type': 'application/json'
         }
     
+    #--Section 3: Main Sync Entry Point
     async def sync_all_tasks(self) -> Dict[str, Any]:
         """
         Sync tasks from both AMCF and Personal workspaces
@@ -89,6 +104,7 @@ class ClickUpSyncManager:
             stats['errors'].append(str(e))
             return stats
     
+    #--Section 4: Space-Level Sync
     async def _sync_space_tasks(self, space_id: str, workspace_name: str) -> Dict[str, int]:
         """
         Sync tasks from a specific ClickUp space
@@ -127,6 +143,7 @@ class ClickUpSyncManager:
             logger.error(f"Failed to sync {workspace_name} workspace: {e}")
             return result
     
+    #--Section 5: ClickUp API Fetch
     async def _fetch_space_tasks(self, space_id: str) -> List[Dict]:
         """
         Fetch all tasks from a ClickUp space
@@ -193,9 +210,10 @@ class ClickUpSyncManager:
             logger.error(f"❌ ClickUp API error: {e}")
             return []
     
+    #--Section 6: Database Storage (Using db_manager)
     async def _store_task(self, task_data: Dict, workspace_name: str) -> bool:
         """
-        Store or update task in database
+        Store or update task in database using db_manager
         
         Args:
             task_data: Task data from ClickUp API
@@ -204,9 +222,10 @@ class ClickUpSyncManager:
         Returns:
             True if new task was created, False if existing task was updated
         """
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             clickup_task_id = task_data['id']
             
             # Check if task already exists
@@ -309,8 +328,10 @@ class ClickUpSyncManager:
             logger.error(f"Failed to store task {task_data.get('id', 'unknown')}: {e}")
             return False
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
+    #--Section 7: Utility Methods
     async def test_connection(self) -> bool:
         """Test ClickUp API connection"""
         if not self.api_token:

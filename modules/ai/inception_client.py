@@ -2,10 +2,11 @@
 """
 Inception Labs AI Client for Syntax Prime V2
 Fallback provider when OpenRouter fails - now with real API integration
+
+Updated: 2025 - Removed unused import, added __all__ exports
 """
 
 import os
-import json
 import asyncio
 import aiohttp
 from typing import Dict, List, Any, Optional
@@ -13,6 +14,22 @@ from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Module Exports
+# =============================================================================
+
+__all__ = [
+    'InceptionLabsClient',
+    'get_inception_client',
+    'cleanup_inception_client',
+]
+
+
+# =============================================================================
+# Inception Labs Client
+# =============================================================================
 
 class InceptionLabsClient:
     """
@@ -69,8 +86,8 @@ class InceptionLabsClient:
         # Currently only Mercury is available
         return self.default_model
     
-    async def chat_completion(self, 
-                            messages: List[Dict], 
+    async def chat_completion(self,
+                            messages: List[Dict],
                             model: str = None,
                             max_tokens: int = 4000,
                             temperature: float = 0.7,
@@ -145,7 +162,7 @@ class InceptionLabsClient:
         try:
             # Test with a simple message
             test_messages = [{
-                'role': 'user', 
+                'role': 'user',
                 'content': 'Respond with exactly: "Inception Labs connection successful"'
             }]
             
@@ -180,8 +197,13 @@ class InceptionLabsClient:
                 'api_key_set': bool(self.api_key)
             }
 
-# Global client instance
-_inception_client = None
+
+# =============================================================================
+# Global Instance and Factory
+# =============================================================================
+
+_inception_client: Optional[InceptionLabsClient] = None
+
 
 async def get_inception_client() -> InceptionLabsClient:
     """Get the global Inception Labs client instance"""
@@ -190,6 +212,7 @@ async def get_inception_client() -> InceptionLabsClient:
         _inception_client = InceptionLabsClient()
     return _inception_client
 
+
 async def cleanup_inception_client():
     """Cleanup the global client"""
     global _inception_client
@@ -197,8 +220,12 @@ async def cleanup_inception_client():
         await _inception_client.close()
         _inception_client = None
 
+
+# =============================================================================
+# Test Script
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test script
     async def test():
         print("Testing Inception Labs client...")
         

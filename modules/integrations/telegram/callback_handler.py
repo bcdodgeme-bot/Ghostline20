@@ -2,6 +2,7 @@
 Telegram Callback Handler - Button Click Processing
 Processes inline keyboard button clicks and updates notification state
 UPDATED: Added Contextual Intelligence Layer handlers
+FIXED: Corrected database connection patterns (db_manager instead of asyncpg.connect)
 """
 
 import os
@@ -14,8 +15,10 @@ from uuid import UUID
 from .bot_client import TelegramBotClient
 from .database_manager import TelegramDatabaseManager
 from .notification_manager import NotificationManager
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
 
 class CallbackHandler:
     """Handles Telegram inline keyboard button callbacks"""
@@ -478,89 +481,84 @@ class CallbackHandler:
         elif action == 'draft':
             # Generate a reply to this Bluesky engagement opportunity
             opportunity_id = notification_id
+            conn = None
             
             try:
-                import asyncpg
                 from modules.integrations.bluesky.approval_system import get_approval_system
                 
-                database_url = os.getenv('DATABASE_URL')
-                conn = await asyncpg.connect(database_url)
+                conn = await db_manager.get_connection()
                 
-                try:
-                    # Fetch the engagement opportunity details
-                    opportunity = await conn.fetchrow('''
-                        SELECT
-                            id, post_uri, post_text, author_handle, author_did,
-                            detected_by_account, engagement_score, matched_keywords
-                        FROM bluesky_engagement_opportunities
-                        WHERE id = $1
-                    ''', UUID(opportunity_id))
-                    
-                    if not opportunity:
-                        await self.bot_client.edit_message(
-                            message_id,
-                            "❌ Opportunity not found",
-                            reply_markup=None
-                        )
-                        return {"success": False, "ack_text": "❌ Not found"}
-                    
-                    # Build analysis dict for approval system
-                    analysis = {
-                        'account_id': opportunity['detected_by_account'],
-                        'account_config': {'personality': 'professional'},
-                        'post_content': opportunity['post_text'],
-                        'author': {
-                            'handle': opportunity['author_handle'],
-                            'display_name': opportunity['author_handle']  # Use handle as display name
-                        },
-                        'keyword_analysis': {
-                            'matched_keywords': json.loads(opportunity['matched_keywords']) if opportunity['matched_keywords'] else []
-                        },
-                        'suggested_action': 'reply'
-                    }
-                    
-                    # Generate draft using approval system
-                    approval_system = get_approval_system()
-                    draft_result = await approval_system.generate_draft_post(analysis, post_type="reply")
-                    
-                    if not draft_result.get('success'):
-                        await self.bot_client.edit_message(
-                            message_id,
-                            "❌ Failed to generate reply draft",
-                            reply_markup=None
-                        )
-                        return {"success": False, "ack_text": "❌ Generation failed"}
-                    
-                    draft_text = draft_result['draft_text']
-                    
-                    # Build draft notification message
-                    message_text = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
-                    message_text += f"*Replying to:* @{opportunity['author_handle']}\n"
-                    message_text += f'"{opportunity["post_text"][:100]}..."\n\n'
-                    message_text += f"*Your reply:*\n{draft_text}\n\n"
-                    message_text += f"_{len(draft_text)} characters_"
-                    
-                    # Buttons for draft approval
-                    buttons = {
-                        'inline_keyboard': [
-                            [
-                                {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}"},
-                                {'text': '⏭️ Skip', 'callback_data': f"bluesky:ignore:{opportunity_id}"}
-                            ]
-                        ]
-                    }
-                    
+                # Fetch the engagement opportunity details
+                opportunity = await conn.fetchrow('''
+                    SELECT
+                        id, post_uri, post_text, author_handle, author_did,
+                        detected_by_account, engagement_score, matched_keywords
+                    FROM bluesky_engagement_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not opportunity:
                     await self.bot_client.edit_message(
                         message_id,
-                        message_text,
-                        reply_markup=buttons
+                        "❌ Opportunity not found",
+                        reply_markup=None
                     )
-                    
-                    return {"success": True, "ack_text": "✅ Draft generated!"}
-                    
-                finally:
-                    await conn.close()
-                    
+                    return {"success": False, "ack_text": "❌ Not found"}
+                
+                # Build analysis dict for approval system
+                analysis = {
+                    'account_id': opportunity['detected_by_account'],
+                    'account_config': {'personality': 'professional'},
+                    'post_content': opportunity['post_text'],
+                    'author': {
+                        'handle': opportunity['author_handle'],
+                        'display_name': opportunity['author_handle']  # Use handle as display name
+                    },
+                    'keyword_analysis': {
+                        'matched_keywords': json.loads(opportunity['matched_keywords']) if opportunity['matched_keywords'] else []
+                    },
+                    'suggested_action': 'reply'
+                }
+                
+                # Generate draft using approval system
+                approval_system = get_approval_system()
+                draft_result = await approval_system.generate_draft_post(analysis, post_type="reply")
+                
+                if not draft_result.get('success'):
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "❌ Failed to generate reply draft",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "❌ Generation failed"}
+                
+                draft_text = draft_result['draft_text']
+                
+                # Build draft notification message
+                message_text = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
+                message_text += f"*Replying to:* @{opportunity['author_handle']}\n"
+                message_text += f'"{opportunity["post_text"][:100]}..."\n\n'
+                message_text += f"*Your reply:*\n{draft_text}\n\n"
+                message_text += f"_{len(draft_text)} characters_"
+                
+                # Buttons for draft approval
+                buttons = {
+                    'inline_keyboard': [
+                        [
+                            {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}"},
+                            {'text': '⏭️ Skip', 'callback_data': f"bluesky:ignore:{opportunity_id}"}
+                        ]
+                    ]
+                }
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    message_text,
+                    reply_markup=buttons
+                )
+                
+                return {"success": True, "ack_text": "✅ Draft generated!"}
+                
             except Exception as e:
                 logger.error(f"Reply draft generation failed: {e}", exc_info=True)
                 await self.bot_client.edit_message(
@@ -569,6 +567,10 @@ class CallbackHandler:
                     reply_markup=None
                 )
                 return {"success": False, "ack_text": "❌ Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
         
         return {"success": False, "error": "Unknown Bluesky action"}
     
@@ -619,102 +621,96 @@ class CallbackHandler:
         elif action == 'draft_reply':
             # Generate a reply to this post
             opportunity_id = notification_id
+            conn = None
             
             try:
-                import asyncpg
-                database_url = os.getenv('DATABASE_URL')
-                conn = await asyncpg.connect(database_url)
+                conn = await db_manager.get_connection()
                 
-                try:
-                    # Load opportunity from database
-                    opportunity = await conn.fetchrow('''
-                        SELECT 
-                            id, detected_by_account, post_text, author_handle,
-                            matched_keywords, opportunity_type, engagement_score,
-                            post_uri
-                        FROM bluesky_engagement_opportunities
-                        WHERE id = $1
-                    ''', UUID(opportunity_id))
-                    
-                    if not opportunity:
-                        raise Exception("Opportunity not found in database")
-                    
-                    # Get matched keywords (stored as JSON array)
-                    import json
-                    matched_keywords = opportunity['matched_keywords']
-                    if isinstance(matched_keywords, str):
-                        matched_keywords = json.loads(matched_keywords)
-                    elif matched_keywords is None:
-                        matched_keywords = []
-                    
-                    # Build proper analysis context for draft generation
-                    from modules.integrations.bluesky.approval_system import get_approval_system
-                    
-                    analysis = {
-                        'account_id': opportunity['detected_by_account'],
-                        'account_config': {
-                            'personality': 'professional',
-                            'sensitive_topics': True,
-                            'pg13_mode': True
-                        },
-                        'post_content': opportunity['post_text'],
-                        'author': {
-                            'display_name': opportunity['author_handle'].replace('@', ''),
-                            'handle': opportunity['author_handle']
-                        },
-                        'keyword_analysis': {
-                            'matched_keywords': matched_keywords
-                        },
-                        'suggested_action': opportunity.get('opportunity_type', 'reply')
-                    }
-                    
-                    logger.info(f"🎨 Generating draft reply with context: {len(matched_keywords)} keywords matched")
-                    
-                    # Generate draft using approval system
-                    approval_system = get_approval_system()
-                    draft_result = await approval_system.generate_draft_post(analysis, post_type="reply")
-                    
-                    if not draft_result.get('success'):
-                        await self.bot_client.edit_message(
-                            message_id,
-                            "❌ Failed to generate reply draft",
-                            reply_markup=None
-                        )
-                        return {"success": False, "ack_text": "❌ Generation failed"}
-                    
-                    draft_text = draft_result['draft_text']
-                    
-                    # Build draft notification message
-                    message = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
-                    message += f"*Replying to:* @{opportunity['author_handle']}\n"
-                    message += f'"{opportunity["post_text"][:100]}..."\n\n'
-                    message += f"*Your reply:*\n{draft_text}\n\n"
-                    message += f"_{len(draft_text)} characters_"
-                    
-                    # Buttons for draft approval
-                    buttons = {
-                        'inline_keyboard': [
-                            [
-                                {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
-                                {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
-                            ],
-                            [
-                                {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
-                            ]
-                        ]
-                    }
-                    
+                # Load opportunity from database
+                opportunity = await conn.fetchrow('''
+                    SELECT 
+                        id, detected_by_account, post_text, author_handle,
+                        matched_keywords, opportunity_type, engagement_score,
+                        post_uri
+                    FROM bluesky_engagement_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not opportunity:
+                    raise Exception("Opportunity not found in database")
+                
+                # Get matched keywords (stored as JSON array)
+                matched_keywords = opportunity['matched_keywords']
+                if isinstance(matched_keywords, str):
+                    matched_keywords = json.loads(matched_keywords)
+                elif matched_keywords is None:
+                    matched_keywords = []
+                
+                # Build proper analysis context for draft generation
+                from modules.integrations.bluesky.approval_system import get_approval_system
+                
+                analysis = {
+                    'account_id': opportunity['detected_by_account'],
+                    'account_config': {
+                        'personality': 'professional',
+                        'sensitive_topics': True,
+                        'pg13_mode': True
+                    },
+                    'post_content': opportunity['post_text'],
+                    'author': {
+                        'display_name': opportunity['author_handle'].replace('@', ''),
+                        'handle': opportunity['author_handle']
+                    },
+                    'keyword_analysis': {
+                        'matched_keywords': matched_keywords
+                    },
+                    'suggested_action': opportunity.get('opportunity_type', 'reply')
+                }
+                
+                logger.info(f"🎨 Generating draft reply with context: {len(matched_keywords)} keywords matched")
+                
+                # Generate draft using approval system
+                approval_system = get_approval_system()
+                draft_result = await approval_system.generate_draft_post(analysis, post_type="reply")
+                
+                if not draft_result.get('success'):
                     await self.bot_client.edit_message(
                         message_id,
-                        message,
-                        reply_markup=buttons
+                        "❌ Failed to generate reply draft",
+                        reply_markup=None
                     )
-                    
-                    return {"success": True, "ack_text": "✅ Draft generated!"}
-                    
-                finally:
-                    await conn.close()
-                    
+                    return {"success": False, "ack_text": "❌ Generation failed"}
+                
+                draft_text = draft_result['draft_text']
+                
+                # Build draft notification message
+                message = f"💬 *Draft Reply* (@{opportunity['detected_by_account']})\n\n"
+                message += f"*Replying to:* @{opportunity['author_handle']}\n"
+                message += f'"{opportunity["post_text"][:100]}..."\n\n'
+                message += f"*Your reply:*\n{draft_text}\n\n"
+                message += f"_{len(draft_text)} characters_"
+                
+                # Buttons for draft approval
+                buttons = {
+                    'inline_keyboard': [
+                        [
+                            {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
+                            {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
+                        ],
+                        [
+                            {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
+                        ]
+                    ]
+                }
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    message,
+                    reply_markup=buttons
+                )
+                
+                return {"success": True, "ack_text": "✅ Draft generated!"}
+                
             except Exception as e:
                 logger.error(f"Reply draft generation failed: {e}", exc_info=True)
                 await self.bot_client.edit_message(
@@ -724,54 +720,53 @@ class CallbackHandler:
                 )
                 return {"success": False, "ack_text": "❌ Error"}
             
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'like':
             # Like the post on Bluesky
             opportunity_id = notification_id
+            conn = None
             
             try:
-                import asyncpg
-                from uuid import UUID
-                database_url = os.getenv('DATABASE_URL')
-                conn = await asyncpg.connect(database_url)
+                conn = await db_manager.get_connection()
                 
-                try:
-                    # Get the opportunity details
-                    opportunity = await conn.fetchrow('''
-                        SELECT post_uri, detected_by_account
-                        FROM bluesky_engagement_opportunities
-                        WHERE id = $1
-                    ''', UUID(opportunity_id))
-                    
-                    if not opportunity:
-                        raise Exception("Opportunity not found")
-                    
-                    # Like the post using Bluesky client
-                    from modules.integrations.bluesky.client import get_bluesky_client
-                    bluesky_client = get_bluesky_client()
-                    
-                    account_id = opportunity['detected_by_account']
-                    post_uri = opportunity['post_uri']
-                    
-                    await bluesky_client.like_post(account_id, post_uri)
-                    
-                    # Mark as liked in database
-                    await conn.execute('''
-                        UPDATE bluesky_engagement_opportunities
-                        SET user_response = 'liked', updated_at = NOW()
-                        WHERE id = $1
-                    ''', UUID(opportunity_id))
-                    
-                    await self.edit_message(
-                        message_id,
-                        "❤️ Post liked!",
-                        reply_markup=None
-                    )
-                    
-                    logger.info(f"✅ Liked post {post_uri}")
-                    return {"success": True, "ack_text": "Liked!"}
-                    
-                finally:
-                    await conn.close()
-                    
+                # Get the opportunity details
+                opportunity = await conn.fetchrow('''
+                    SELECT post_uri, detected_by_account
+                    FROM bluesky_engagement_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not opportunity:
+                    raise Exception("Opportunity not found")
+                
+                # Like the post using Bluesky client
+                from modules.integrations.bluesky.client import get_bluesky_client
+                bluesky_client = get_bluesky_client()
+                
+                account_id = opportunity['detected_by_account']
+                post_uri = opportunity['post_uri']
+                
+                await bluesky_client.like_post(account_id, post_uri)
+                
+                # Mark as liked in database
+                await conn.execute('''
+                    UPDATE bluesky_engagement_opportunities
+                    SET user_response = 'liked', updated_at = NOW()
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                await self.edit_message(
+                    message_id,
+                    "❤️ Post liked!",
+                    reply_markup=None
+                )
+                
+                logger.info(f"✅ Liked post {post_uri}")
+                return {"success": True, "ack_text": "Liked!"}
+                
             except Exception as e:
                 logger.error(f"Like failed: {e}")
                 await self.edit_message(
@@ -779,31 +774,38 @@ class CallbackHandler:
                     f"❌ Failed to like: {str(e)}"
                 )
                 return {"success": False, "ack_text": "Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
         
         elif action == 'skip':
             opportunity_id = notification_id
+            conn = None
+            
             try:
-                import asyncpg
-                database_url = os.getenv('DATABASE_URL')
-                conn = await asyncpg.connect(database_url)
-                try:
-                    await conn.execute('''
-                        UPDATE bluesky_engagement_opportunities
-                        SET user_response = 'dismissed', updated_at = NOW()
-                        WHERE id = $1
-                    ''', UUID(opportunity_id))
-                    
-                    await self.bot_client.edit_message(
-                        message_id,
-                        "⏭️ Skipped",
-                        reply_markup=None
-                    )
-                    return {"success": True, "ack_text": "Skipped"}
-                finally:
-                    await conn.close()
+                conn = await db_manager.get_connection()
+                
+                await conn.execute('''
+                    UPDATE bluesky_engagement_opportunities
+                    SET user_response = 'dismissed', updated_at = NOW()
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                await self.bot_client.edit_message(
+                    message_id,
+                    "⏭️ Skipped",
+                    reply_markup=None
+                )
+                return {"success": True, "ack_text": "Skipped"}
+                
             except Exception as e:
                 logger.error(f"Skip failed: {e}")
                 return {"success": False, "ack_text": "❌ Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
         
         return {"success": False, "error": "Unknown engagement action"}
 
@@ -822,50 +824,88 @@ class CallbackHandler:
         
         if action == 'send_to_clickup':
             meeting_id = notification_id
+            conn = None
             
             try:
-                import asyncpg
-                from uuid import UUID
-                database_url = os.getenv('DATABASE_URL')
-                conn = await asyncpg.connect(database_url)
+                conn = await db_manager.get_connection()
                 
-                try:
-                    # Mark meeting as processed
-                    await conn.execute('''
-                        UPDATE fathom_meetings
-                        SET action_items_sent = true,
-                            action_items_sent_at = NOW()
-                        WHERE id = $1
-                    ''', UUID(meeting_id))
-                    
-                    # Get count
-                    result = await conn.fetchrow('''
-                        SELECT COUNT(*) as count
-                        FROM meeting_action_items
-                        WHERE meeting_id = $1
-                    ''', UUID(meeting_id))
-                    
-                    item_count = result['count'] if result else 0
-                    
-                    await self.edit_message(
-                        message_id,
-                        f"✅ Sent {item_count} action items to ClickUp!\n\n_Meeting marked as processed._"
-                    )
-                    
-                    logger.info(f"✅ Meeting {meeting_id} marked as processed")
-                    return {"success": True, "ack_text": "Sent to ClickUp"}
-                    
-                finally:
-                    await conn.close()
-                    
+                # Mark meeting as processed
+                await conn.execute('''
+                    UPDATE fathom_meetings
+                    SET action_items_sent = true,
+                        action_items_sent_at = NOW()
+                    WHERE id = $1
+                ''', UUID(meeting_id))
+                
+                # Get count
+                result = await conn.fetchrow('''
+                    SELECT COUNT(*) as count
+                    FROM meeting_action_items
+                    WHERE meeting_id = $1
+                ''', UUID(meeting_id))
+                
+                item_count = result['count'] if result else 0
+                
+                await self.edit_message(
+                    message_id,
+                    f"✅ Sent {item_count} action items to ClickUp!\n\n_Meeting marked as processed._"
+                )
+                
+                logger.info(f"✅ Meeting {meeting_id} marked as processed")
+                return {"success": True, "ack_text": "Sent to ClickUp"}
+                
             except Exception as e:
                 logger.error(f"Failed to process meeting: {e}")
                 await self.edit_message(message_id, f"❌ Error: {str(e)}")
                 return {"success": False, "ack_text": "Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'dismiss':
+            meeting_id = notification_id
+            conn = None
+            
+            try:
+                conn = await db_manager.get_connection()
+                
+                # Mark meeting as dismissed (user_response field or similar)
+                await conn.execute('''
+                    UPDATE fathom_meetings
+                    SET processed_at = NOW()
+                    WHERE id = $1
+                ''', UUID(meeting_id))
+                
+                await self.edit_message(
+                    message_id,
+                    "⏭️ Meeting dismissed",
+                    reply_markup=None
+                )
+                
+                logger.info(f"✅ Meeting {meeting_id} dismissed")
+                return {"success": True, "ack_text": "Dismissed"}
+                
+            except Exception as e:
+                logger.error(f"Failed to dismiss meeting: {e}")
+                return {"success": False, "ack_text": "Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'snooze':
+            # Snooze meeting notification
+            await self.edit_message(
+                message_id,
+                "⏰ Snoozed - will remind later",
+                reply_markup=None
+            )
+            return {"success": True, "ack_text": "Snoozed"}
         
         return {"success": False, "error": "Unknown meeting action"}
 
-# ========================================================================
+    # ========================================================================
     # INTELLIGENCE SYSTEM: SITUATION CALLBACKS (NEW - 10/22/25)
     # ========================================================================
     
@@ -890,8 +930,6 @@ class CallbackHandler:
             from modules.intelligence.intelligence_orchestrator import IntelligenceOrchestrator
             
             user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
-            from modules.core.database import db_manager
-            from uuid import UUID
             
             orchestrator = IntelligenceOrchestrator(
                 db_manager=db_manager,
@@ -1021,6 +1059,7 @@ class CallbackHandler:
         except Exception as e:
             logger.error(f"Situation callback error: {e}")
             return {"success": False, "error": str(e)}
+
 
 # Global instance
 _callback_handler = None

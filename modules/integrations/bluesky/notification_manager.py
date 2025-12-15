@@ -5,6 +5,7 @@ Manages when to show real-time notifications vs batched digests
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 import logging
@@ -47,7 +48,7 @@ class NotificationManager:
         last_activity = self.user_activity_cache[user_id]['last_activity']
         return datetime.now() - last_activity < self.activity_timeout
     
-    async def should_send_realtime_notification(self, 
+    async def should_send_realtime_notification(self,
                                               user_id: str,
                                               opportunity: Dict[str, Any]) -> bool:
         """Determine if opportunity should trigger real-time notification"""
@@ -81,8 +82,8 @@ class NotificationManager:
         
         return False
     
-    async def add_to_digest(self, 
-                          user_id: str, 
+    async def add_to_digest(self,
+                          user_id: str,
                           opportunities: List[Dict[str, Any]]) -> None:
         """Add opportunities to user's digest"""
         
@@ -136,7 +137,7 @@ class NotificationManager:
         
         return True
     
-    async def generate_realtime_notification(self, 
+    async def generate_realtime_notification(self,
                                            opportunities: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generate a real-time notification message"""
         
@@ -145,8 +146,8 @@ class NotificationManager:
         
         # Sort by priority and engagement potential
         sorted_ops = sorted(
-            opportunities, 
-            key=lambda x: (x.get('engagement_potential', 0), x.get('priority_level') == 'high'), 
+            opportunities,
+            key=lambda x: (x.get('engagement_potential', 0), x.get('priority_level') == 'high'),
             reverse=True
         )
         
@@ -258,8 +259,8 @@ class NotificationManager:
             reverse=True
         )[:limit]
     
-    def _format_digest_message(self, 
-                             opportunities: List[Dict], 
+    def _format_digest_message(self,
+                             opportunities: List[Dict],
                              account_groups: Dict,
                              time_away: str) -> str:
         """Format digest message"""
@@ -282,26 +283,26 @@ class NotificationManager:
         """Get timestamp of last notification sent to user"""
         try:
             query = """
-            SELECT created_at FROM user_notifications 
+            SELECT sent_at FROM telegram_notifications 
             WHERE user_id = $1 AND notification_type = $2 
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY sent_at DESC LIMIT 1
             """
             
             result = await db_manager.fetch_one(query, user_id, notification_type)
-            return result['created_at'] if result else None
+            return result['sent_at'] if result else None
             
         except Exception as e:
             logger.warning(f"Failed to get last notification time: {e}")
             return None
     
-    async def record_notification(self, 
-                                user_id: str, 
+    async def record_notification(self,
+                                user_id: str,
                                 notification_type: str,
                                 content: Dict[str, Any]) -> None:
         """Record notification in database"""
         try:
             query = """
-            INSERT INTO user_notifications (user_id, notification_type, content, created_at)
+            INSERT INTO telegram_notifications (user_id, notification_type, message_data, sent_at)
             VALUES ($1, $2, $3, NOW())
             """
             

@@ -2,17 +2,136 @@
 """
 Personality Engine for Syntax Prime V2
 Integrates existing personality system with AI brain and feedback learning
+
+Updated: 2025 - Fixed critical nested method bug (_apply_realtime_adaptations),
+                removed unused imports, added bounded caches, added __all__ exports
 """
 
 import os
-import sys
 import importlib.util
-from typing import Dict, List, Any, Optional
-import json
-import logging
+from collections import OrderedDict
 from datetime import datetime, timedelta
+from threading import Lock
+from typing import Dict, List, Any, Optional
+import logging
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Module Exports
+# =============================================================================
+
+__all__ = [
+    'PersonalityEngine',
+    'get_personality_engine',
+]
+
+
+# =============================================================================
+# TTL Cache Implementation
+# =============================================================================
+
+class TTLCache:
+    """
+    Thread-safe LRU cache with TTL (time-to-live) expiration.
+    Prevents unbounded memory growth from learning_cache.
+    """
+    
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 3600):
+        self._cache: OrderedDict = OrderedDict()
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+        self._lock = Lock()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if exists and not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            
+            cached_time, value = self._cache[key]
+            elapsed = (datetime.now() - cached_time).total_seconds()
+            
+            if elapsed >= self._ttl_seconds:
+                del self._cache[key]
+                return None
+            
+            self._cache.move_to_end(key)
+            return value
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set value in cache with current timestamp."""
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+            
+            while len(self._cache) >= self._max_size:
+                self._cache.popitem(last=False)
+            
+            self._cache[key] = (datetime.now(), value)
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self._lock:
+            self._cache.clear()
+    
+    def stats(self) -> Dict[str, Any]:
+        """Return cache statistics."""
+        with self._lock:
+            return {
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "ttl_seconds": self._ttl_seconds
+            }
+
+
+# =============================================================================
+# Bounded Adaptation History
+# =============================================================================
+
+class BoundedAdaptationHistory:
+    """
+    Thread-safe bounded dictionary for adaptation history.
+    Limits entries per personality to prevent memory growth.
+    """
+    
+    def __init__(self, max_entries_per_key: int = 100):
+        self._history: Dict[str, List[Dict]] = {}
+        self._max_entries = max_entries_per_key
+        self._lock = Lock()
+    
+    def append(self, personality_id: str, entry: Dict) -> None:
+        """Append entry to personality history, enforcing max size."""
+        with self._lock:
+            if personality_id not in self._history:
+                self._history[personality_id] = []
+            
+            self._history[personality_id].append(entry)
+            
+            # Enforce max size
+            if len(self._history[personality_id]) > self._max_entries:
+                self._history[personality_id] = self._history[personality_id][-self._max_entries:]
+    
+    def get(self, personality_id: str) -> List[Dict]:
+        """Get history for a personality."""
+        with self._lock:
+            return self._history.get(personality_id, []).copy()
+    
+    def clear(self) -> None:
+        """Clear all history."""
+        with self._lock:
+            self._history.clear()
+    
+    def keys(self) -> List[str]:
+        """Get all personality IDs with history."""
+        with self._lock:
+            return list(self._history.keys())
+
+
+# =============================================================================
+# Personality Engine
+# =============================================================================
 
 class PersonalityEngine:
     """
@@ -28,9 +147,11 @@ class PersonalityEngine:
         # Load existing personality system
         self._load_personality_system()
         
-        # Personality learning cache
-        self.learning_cache = {}
-        self.adaptation_history = {}
+        # Bounded cache with 1-hour TTL and max 100 entries
+        self.learning_cache = TTLCache(max_size=100, ttl_seconds=3600)
+        
+        # Bounded adaptation history (max 100 entries per personality)
+        self.adaptation_history = BoundedAdaptationHistory(max_entries_per_key=100)
     
     def _load_personality_system(self):
         """Load the existing personalities.py module"""
@@ -112,7 +233,7 @@ class PersonalityEngine:
             'syntaxprime': {'name': 'SyntaxPrime', 'description': 'Default sarcastic assistant'}
         }
     
-    def get_personality_system_prompt(self, 
+    def get_personality_system_prompt(self,
                                     personality_id: str = None,
                                     conversation_context: List[Dict] = None,
                                     knowledge_context: List[Dict] = None) -> str:
@@ -136,7 +257,7 @@ class PersonalityEngine:
         
         # Add context enhancements
         enhanced_prompt = self._enhance_prompt_with_context(
-            base_prompt, 
+            base_prompt,
             personality_id,
             conversation_context,
             knowledge_context
@@ -144,7 +265,7 @@ class PersonalityEngine:
         
         return enhanced_prompt
     
-    def _enhance_prompt_with_context(self, 
+    def _enhance_prompt_with_context(self,
                                    base_prompt: str,
                                    personality_id: str,
                                    conversation_context: List[Dict] = None,
@@ -232,16 +353,15 @@ class PersonalityEngine:
         
         # Check if we have learning adaptations cached
         cache_key = f"adaptations_{personality_id}"
-        if cache_key in self.learning_cache:
-            cached_time, adaptations = self.learning_cache[cache_key]
-            if datetime.now() - cached_time < timedelta(hours=1):  # 1 hour cache
-                return adaptations
+        cached = self.learning_cache.get(cache_key)
+        if cached is not None:
+            return cached
         
         # Generate new adaptations based on feedback history
         adaptations = self._generate_learning_adaptations(personality_id)
         
         # Cache the result
-        self.learning_cache[cache_key] = (datetime.now(), adaptations)
+        self.learning_cache.set(cache_key, adaptations)
         
         return adaptations
     
@@ -279,8 +399,8 @@ class PersonalityEngine:
         
         return '\n'.join(adaptations) if adaptations else ""
     
-    def process_ai_response(self, 
-                          response: str, 
+    def process_ai_response(self,
+                          response: str,
                           personality_id: str,
                           conversation_context: List[Dict] = None) -> str:
         """
@@ -302,16 +422,27 @@ class PersonalityEngine:
         
         # Add any real-time adaptations
         final_response = self._apply_realtime_adaptations(
-            processed_response, 
+            processed_response,
             personality_id,
             conversation_context
         )
         
         return final_response
     
-    # ADD THIS METHOD TO PersonalityEngine CLASS IN modules/ai/personality_engine.py
-    # Insert this around line 150, after the process_ai_response method
-
+    def _apply_realtime_adaptations(self,
+                                  response: str,
+                                  personality_id: str,
+                                  conversation_context: List[Dict] = None) -> str:
+        """
+        Apply real-time personality adaptations based on context
+        
+        FIXED: This method was previously nested inside process_personality_response,
+        making it inaccessible as a class method. Now properly defined at class level.
+        """
+        # For now, just return the response as-is
+        # This could be enhanced with real-time personality tuning
+        return response
+    
     async def process_personality_response(self,
                                           raw_response: str,
                                           personality_id: str,
@@ -346,18 +477,8 @@ class PersonalityEngine:
         else:
             logger.warning("⚠️ No learning_integration available for personality processing")
             return raw_response
-        
-        def _apply_realtime_adaptations(self,
-                                      response: str,
-                                      personality_id: str,
-                                      conversation_context: List[Dict] = None) -> str:
-            """Apply real-time personality adaptations based on context"""
-            
-            # For now, just return the response as-is
-            # This could be enhanced with real-time personality tuning
-            return response
-        
-    def record_personality_feedback(self, 
+    
+    def record_personality_feedback(self,
                                   message_id: str,
                                   personality_id: str,
                                   feedback_type: str,
@@ -377,17 +498,14 @@ class PersonalityEngine:
         
         feedback_mapping = {
             'good': 'positive_response',
-            'bad': 'negative_response', 
+            'bad': 'negative_response',
             'personality': 'perfect_personality'
         }
         
         learning_type = feedback_mapping.get(feedback_type, 'unknown')
         
-        # Store in adaptation history
-        if personality_id not in self.adaptation_history:
-            self.adaptation_history[personality_id] = []
-        
-        self.adaptation_history[personality_id].append({
+        # Store in adaptation history (now bounded)
+        self.adaptation_history.append(personality_id, {
             'timestamp': datetime.now(),
             'message_id': message_id,
             'feedback_type': learning_type,
@@ -395,10 +513,6 @@ class PersonalityEngine:
             'has_sarcasm': self._detect_sarcasm(response_content),
             'has_technical_content': self._detect_technical_content(response_content)
         })
-        
-        # Keep only last 100 feedback entries per personality
-        if len(self.adaptation_history[personality_id]) > 100:
-            self.adaptation_history[personality_id] = self.adaptation_history[personality_id][-100:]
         
         # Generate insights
         insights = self._analyze_feedback_patterns(personality_id)
@@ -409,7 +523,7 @@ class PersonalityEngine:
             'personality_id': personality_id,
             'feedback_type': learning_type,
             'insights': insights,
-            'total_feedback_count': len(self.adaptation_history.get(personality_id, []))
+            'total_feedback_count': len(self.adaptation_history.get(personality_id))
         }
     
     def _detect_sarcasm(self, content: str) -> bool:
@@ -435,7 +549,7 @@ class PersonalityEngine:
     def _analyze_feedback_patterns(self, personality_id: str) -> Dict:
         """Analyze feedback patterns for learning insights"""
         
-        history = self.adaptation_history.get(personality_id, [])
+        history = self.adaptation_history.get(personality_id)
         if not history:
             return {'message': 'No feedback history available'}
         
@@ -479,11 +593,11 @@ class PersonalityEngine:
         stats = {}
         
         for pid in personalities_to_check:
-            history = self.adaptation_history.get(pid, [])
+            history = self.adaptation_history.get(pid)
             
             if history:
                 recent_30_days = [
-                    f for f in history 
+                    f for f in history
                     if datetime.now() - f['timestamp'] < timedelta(days=30)
                 ]
                 
@@ -511,19 +625,32 @@ class PersonalityEngine:
         """Clear the personality learning cache"""
         self.learning_cache.clear()
         logger.info("Personality learning cache cleared")
+    
+    def cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring"""
+        return self.learning_cache.stats()
 
-# Global personality engine
-_personality_engine = None
+
+# =============================================================================
+# Global Instance and Factory
+# =============================================================================
+
+_personality_engine: Optional[PersonalityEngine] = None
+
 
 def get_personality_engine() -> PersonalityEngine:
-    """Get the global personality engine"""
+    """Get the global personality engine singleton"""
     global _personality_engine
     if _personality_engine is None:
         _personality_engine = PersonalityEngine()
     return _personality_engine
 
+
+# =============================================================================
+# Test Script
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test script
     def test():
         print("Testing Personality Engine Integration...")
         
@@ -555,6 +682,9 @@ if __name__ == "__main__":
         # Test stats
         stats = engine.get_personality_stats()
         print(f"Personality stats: {stats}")
+        
+        # Test cache stats
+        print(f"Cache stats: {engine.cache_stats()}")
         
         print("Personality Engine test completed!")
     

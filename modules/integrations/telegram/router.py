@@ -7,7 +7,8 @@ import logging
 import uuid
 from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
-from .kill_switch import KillSwitch
+
+from .kill_switch import get_kill_switch
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ async def telegram_webhook(request: Request):
         if 'callback_query' in data:
             from .callback_handler import get_callback_handler
             callback_query = data['callback_query']
-            callback_handler = get_callback_handler()  # Use the getter function!
+            callback_handler = get_callback_handler()
             
             result = await callback_handler.process_callback(
                 callback_query_id=callback_query['id'],
@@ -77,7 +78,7 @@ async def process_telegram_command(command: str) -> str:
     command_lower = command.lower().strip()
     user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Your user ID
     
-    kill_switch = KillSwitch()
+    kill_switch = get_kill_switch()
     
     # Global kill switch
     if 'kill' in command_lower or 'stop all' in command_lower:
@@ -184,7 +185,7 @@ async def get_notification_status():
         
         user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
         
-        kill_switch = KillSwitch()
+        kill_switch = get_kill_switch()
         notification_manager = get_notification_manager()
         
         status = await kill_switch.get_status(user_id)

@@ -2,19 +2,120 @@
 """
 Knowledge Query Engine for Syntax Prime V2
 Intelligently queries 21K+ knowledge entries with context awareness
+
+Updated: 2025 - Fixed cache TTL bug (.seconds → .total_seconds()), 
+                added bounded LRU cache with automatic cleanup
 """
 
 import asyncio
-import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Any
+import re
 import json
 import logging
-import re
+from collections import Counter, OrderedDict
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
+from threading import Lock
 
 from ..core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# LRU Cache with TTL Support
+# =============================================================================
+
+class TTLCache:
+    """
+    Thread-safe LRU cache with TTL (time-to-live) expiration.
+    
+    Features:
+    - Maximum size limit with LRU eviction
+    - TTL-based expiration (correctly using total_seconds)
+    - Automatic cleanup of stale entries
+    - Thread-safe operations
+    """
+    
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 3600):
+        self._cache: OrderedDict = OrderedDict()
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+        self._lock = Lock()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if exists and not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            
+            cached_time, value = self._cache[key]
+            elapsed = (datetime.now() - cached_time).total_seconds()
+            
+            if elapsed >= self._ttl_seconds:
+                # Expired - remove and return None
+                del self._cache[key]
+                return None
+            
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            return value
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set value in cache with current timestamp."""
+        with self._lock:
+            # If key exists, remove it first (will be re-added at end)
+            if key in self._cache:
+                del self._cache[key]
+            
+            # Evict oldest entries if at capacity
+            while len(self._cache) >= self._max_size:
+                self._cache.popitem(last=False)
+            
+            # Add new entry
+            self._cache[key] = (datetime.now(), value)
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self._lock:
+            self._cache.clear()
+    
+    def cleanup_expired(self) -> int:
+        """Remove all expired entries. Returns count of removed entries."""
+        removed = 0
+        with self._lock:
+            now = datetime.now()
+            expired_keys = []
+            
+            for key, (cached_time, _) in self._cache.items():
+                if (now - cached_time).total_seconds() >= self._ttl_seconds:
+                    expired_keys.append(key)
+            
+            for key in expired_keys:
+                del self._cache[key]
+                removed += 1
+        
+        return removed
+    
+    def stats(self) -> Dict[str, Any]:
+        """Return cache statistics."""
+        with self._lock:
+            now = datetime.now()
+            expired_count = sum(
+                1 for cached_time, _ in self._cache.values()
+                if (now - cached_time).total_seconds() >= self._ttl_seconds
+            )
+            
+            return {
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "ttl_seconds": self._ttl_seconds,
+                "expired_pending_cleanup": expired_count
+            }
+
+
+# =============================================================================
+# Knowledge Query Engine
+# =============================================================================
 
 class KnowledgeQueryEngine:
     """
@@ -23,8 +124,8 @@ class KnowledgeQueryEngine:
     """
     
     def __init__(self):
-        self.cache = {}
-        self.cache_duration = 3600  # 1 hour cache
+        # Bounded cache with 1-hour TTL and max 200 entries
+        self.cache = TTLCache(max_size=200, ttl_seconds=3600)
         
         # Knowledge source priorities
         self.source_priorities = {
@@ -40,7 +141,7 @@ class KnowledgeQueryEngine:
             'Health': 0.15         # Health knowledge boost
         }
     
-    async def search_knowledge(self, 
+    async def search_knowledge(self,
                              query: str,
                              conversation_context: List[Dict] = None,
                              personality_id: str = 'syntaxprime',
@@ -59,13 +160,14 @@ class KnowledgeQueryEngine:
         Returns:
             List of relevant knowledge entries with scores
         """
-        
         # Cache key
         cache_key = f"search_{hash(query)}_{personality_id}_{limit}"
-        if cache_key in self.cache:
-            cached_time, cached_result = self.cache[cache_key]
-            if (datetime.now() - cached_time).seconds < self.cache_duration:
-                return cached_result
+        
+        # Check cache (TTLCache handles expiration correctly)
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for query: {query[:50]}")
+            return cached_result
         
         # Extract context keywords from conversation
         context_keywords = self._extract_context_keywords(conversation_context)
@@ -83,7 +185,7 @@ class KnowledgeQueryEngine:
         needs_fallback = False
         if not search_results:
             needs_fallback = True
-            logger.info(f"⚠️  Full-text search returned 0 results - using pattern matching fallback")
+            logger.info("⚠️  Full-text search returned 0 results - using pattern matching fallback")
         elif len(search_results) < 3:
             needs_fallback = True
             logger.info(f"⚠️  Full-text search returned only {len(search_results)} results - augmenting with pattern matching")
@@ -101,15 +203,15 @@ class KnowledgeQueryEngine:
         
         # Score and rank results
         scored_results = await self._score_and_rank_results(
-            search_results, 
-            query, 
-            context_keywords, 
+            search_results,
+            query,
+            context_keywords,
             personality_id
         )
         
         # Filter by minimum relevance and limit
         final_results = [
-            result for result in scored_results 
+            result for result in scored_results
             if result['final_score'] >= min_relevance
         ][:limit]
         
@@ -117,7 +219,7 @@ class KnowledgeQueryEngine:
         await self._update_access_counts([r['id'] for r in final_results])
         
         # Cache the results
-        self.cache[cache_key] = (datetime.now(), final_results)
+        self.cache.set(cache_key, final_results)
         
         logger.info(f"Knowledge search for '{query}': {len(final_results)} results (personality: {personality_id})")
         return final_results
@@ -136,7 +238,7 @@ class KnowledgeQueryEngine:
         # Extract keywords using simple techniques
         # Remove common words and focus on nouns/important terms
         stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
             'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
             'i', 'you', 'he', 'she', 'it', 'we', 'they', 'this', 'that', 'these', 'those',
             'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
@@ -146,12 +248,11 @@ class KnowledgeQueryEngine:
         # Extract words, filter stop words, and prioritize longer words
         words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
         keywords = [
-            word for word in words 
+            word for word in words
             if len(word) > 3 and word not in stop_words
         ]
         
         # Get most frequent keywords
-        from collections import Counter
         keyword_counts = Counter(keywords)
         
         # Return top keywords
@@ -162,7 +263,6 @@ class KnowledgeQueryEngine:
         Fallback pattern matching search using ILIKE
         Used when full-text search fails or returns poor results
         """
-        
         pattern_query = """
         SELECT 
             ke.id,
@@ -250,7 +350,6 @@ class KnowledgeQueryEngine:
     
     async def _execute_knowledge_search(self, query: str, limit: int) -> List[Dict]:
         """Execute the actual database search"""
-        
         search_query = """
         SELECT 
             ke.id,
@@ -315,13 +414,12 @@ class KnowledgeQueryEngine:
             logger.error(f"Knowledge search failed: {e}")
             return []
     
-    async def _score_and_rank_results(self, 
-                                    results: List[Dict], 
+    async def _score_and_rank_results(self,
+                                    results: List[Dict],
                                     original_query: str,
                                     context_keywords: List[str],
                                     personality_id: str) -> List[Dict]:
         """Apply advanced scoring and ranking to search results"""
-        
         scored_results = []
         
         for result in results:
@@ -452,8 +550,8 @@ class KnowledgeQueryEngine:
         except Exception as e:
             logger.error(f"Failed to update access counts: {e}")
     
-    async def get_related_entries(self, 
-                                entry_id: str, 
+    async def get_related_entries(self,
+                                entry_id: str,
                                 limit: int = 5) -> List[Dict]:
         """Get entries related to a specific knowledge entry"""
         
@@ -532,7 +630,7 @@ class KnowledgeQueryEngine:
             logger.error(f"Failed to get related entries: {e}")
             return []
     
-    async def suggest_knowledge_for_context(self, 
+    async def suggest_knowledge_for_context(self,
                                           conversation_context: List[Dict],
                                           personality_id: str = 'syntaxprime',
                                           limit: int = 3) -> List[Dict]:
@@ -540,17 +638,10 @@ class KnowledgeQueryEngine:
         Proactively suggest relevant knowledge based on conversation context
         This helps the AI provide context without being asked
         """
-        
         if not conversation_context:
             return []
         
         # Extract themes from recent conversation
-        recent_text = ' '.join([
-            msg.get('content', '') 
-            for msg in conversation_context[-3:]  # Last 3 messages
-        ])
-        
-        # Generate search query from conversation themes
         context_keywords = self._extract_context_keywords(conversation_context)
         
         if not context_keywords:
@@ -581,9 +672,25 @@ class KnowledgeQueryEngine:
         """Clear the knowledge query cache"""
         self.cache.clear()
         logger.info("Knowledge query cache cleared")
+    
+    def cleanup_cache(self) -> int:
+        """Remove expired cache entries. Returns count of removed entries."""
+        removed = self.cache.cleanup_expired()
+        if removed > 0:
+            logger.info(f"Cleaned up {removed} expired cache entries")
+        return removed
+    
+    def cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring."""
+        return self.cache.stats()
 
-# Global knowledge query engine
-_knowledge_engine = None
+
+# =============================================================================
+# Global Instance and Factory
+# =============================================================================
+
+_knowledge_engine: Optional[KnowledgeQueryEngine] = None
+
 
 def get_knowledge_engine() -> KnowledgeQueryEngine:
     """Get the global knowledge query engine"""
@@ -592,14 +699,35 @@ def get_knowledge_engine() -> KnowledgeQueryEngine:
         _knowledge_engine = KnowledgeQueryEngine()
     return _knowledge_engine
 
+
+async def cleanup_knowledge_engine():
+    """Cleanup the knowledge engine (call on app shutdown)"""
+    global _knowledge_engine
+    if _knowledge_engine is not None:
+        _knowledge_engine.clear_cache()
+        _knowledge_engine = None
+        logger.info("Knowledge engine cleaned up")
+
+
+# =============================================================================
+# Test Script
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test script
     async def test():
         print("Testing Knowledge Query Engine...")
         
         engine = KnowledgeQueryEngine()
         
+        # Test cache
+        print("\n📦 Testing TTL Cache:")
+        engine.cache.set("test_key", {"data": "test_value"})
+        result = engine.cache.get("test_key")
+        print(f"  Cache set/get: {'✅ PASS' if result else '❌ FAIL'}")
+        print(f"  Cache stats: {engine.cache_stats()}")
+        
         # Test search
+        print("\n🔍 Testing Knowledge Search:")
         results = await engine.search_knowledge(
             query="AMCF email campaign",
             personality_id='syntaxprime',
@@ -610,14 +738,22 @@ if __name__ == "__main__":
         for result in results:
             print(f"- {result['title']} (score: {result['final_score']:.3f})")
             print(f"  Project: {result['project_name']}, Type: {result['content_type']}")
-            print(f"  Snippet: {result['snippet'][:100]}...")
+            if result.get('snippet'):
+                print(f"  Snippet: {result['snippet'][:100]}...")
             print()
         
         # Test related entries if we found any
         if results:
+            print("\n🔗 Testing Related Entries:")
             related = await engine.get_related_entries(results[0]['id'])
             print(f"Found {len(related)} related entries to '{results[0]['title']}'")
         
-        print("Knowledge Query Engine test completed!")
+        # Test cache cleanup
+        print("\n🧹 Testing Cache Cleanup:")
+        removed = engine.cleanup_cache()
+        print(f"  Removed {removed} expired entries")
+        print(f"  Final cache stats: {engine.cache_stats()}")
+        
+        print("\n✅ Knowledge Query Engine test completed!")
     
     asyncio.run(test())

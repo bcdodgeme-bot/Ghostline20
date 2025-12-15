@@ -2,6 +2,9 @@
 """
 OpenRouter AI Client for Syntax Prime V2
 Excludes ChatGPT models and provides intelligent model selection
+
+Updated: 2025 - Fixed model strings, added complete model context mapping,
+                added __all__ exports
 """
 
 import os
@@ -14,6 +17,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Module Exports
+# =============================================================================
+
+__all__ = [
+    'OpenRouterClient',
+    'get_openrouter_client',
+    'cleanup_openrouter_client',
+    'chat_with_openrouter',
+    'test_openrouter_connection',
+]
+
+
+# =============================================================================
+# OpenRouter Client
+# =============================================================================
+
 class OpenRouterClient:
     """
     OpenRouter API client with ChatGPT model exclusion and smart fallbacks
@@ -25,23 +46,42 @@ class OpenRouterClient:
         self.app_name = "SyntaxPrime-V2"
         self.site_url = os.getenv("SITE_URL", "https://damnitcarl.dev")
         
-        # BLOCKED: All ChatGPT models - Carl doesn't want this crap
+        # BLOCKED: GPT-5 models when they exist - Carl doesn't want this crap
         self.blocked_models = [
             "openai/gpt-5o",           # Block GPT-5o variants if/when they exist
             "openai/gpt-5o-mini",
             "openai/gpt-5-turbo",
         ]
         
-        # Preferred models in order of preference
+        # Preferred models in order of preference (using valid OpenRouter model IDs)
+        # Updated 2025 with current model strings
         self.preferred_models = [
-            "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-3.5-sonnet",
-            "openai/gpt-4o",
-            "anthropic/claude-3-haiku",
+            "anthropic/claude-sonnet-4",      # Claude 4 Sonnet (latest)
+            "anthropic/claude-3.5-sonnet",    # Claude 3.5 Sonnet
+            "openai/gpt-4o",                  # GPT-4o
+            "anthropic/claude-3-haiku",       # Claude 3 Haiku (fast/cheap)
             "meta-llama/llama-3.1-70b-instruct",
             "mistralai/mixtral-8x7b-instruct",
             "google/gemini-pro-1.5"
         ]
+        
+        # Model context length mapping (approximate, used for requirement matching)
+        # Keep this in sync with preferred_models
+        self.model_contexts = {
+            "anthropic/claude-sonnet-4": 200000,
+            "anthropic/claude-3.5-sonnet": 200000,
+            "anthropic/claude-3-opus": 200000,
+            "anthropic/claude-3-haiku": 200000,
+            "openai/gpt-4o": 128000,
+            "openai/gpt-4o-mini": 128000,
+            "openai/gpt-4-turbo": 128000,
+            "meta-llama/llama-3.1-70b-instruct": 131072,
+            "meta-llama/llama-3.1-8b-instruct": 131072,
+            "mistralai/mixtral-8x7b-instruct": 32768,
+            "mistralai/mistral-large": 128000,
+            "google/gemini-pro-1.5": 1000000,
+            "google/gemini-flash-1.5": 1000000,
+        }
         
         # Session for reuse
         self.session = None
@@ -82,7 +122,7 @@ class OpenRouterClient:
                         if model.get("id") not in self.blocked_models
                     ]
                     
-                    logger.info(f"Found {len(available_models)} available models (blocked {len(self.blocked_models)} ChatGPT models)")
+                    logger.info(f"Found {len(available_models)} available models (blocked {len(self.blocked_models)} models)")
                     return available_models
                 else:
                     logger.error(f"Failed to get models: {response.status}")
@@ -125,16 +165,9 @@ class OpenRouterClient:
         # Context length requirements
         min_context = requirements.get('context_length', 100000)  # Default 100K for our use case
         
-        # Model context length mapping (approximate)
-        model_contexts = {
-            "anthropic/claude-3.5-sonnet": 200000,
-            "anthropic/claude-3-haiku": 200000,
-            "meta-llama/llama-3.1-70b-instruct": 131072,
-            "mistralai/mixtral-8x7b-instruct": 32768,
-            "google/gemini-pro-1.5": 1000000
-        }
+        # Look up model context from our mapping
+        model_context = self.model_contexts.get(model_id, 100000)  # Default 100K if unknown
         
-        model_context = model_contexts.get(model_id, 100000)
         return model_context >= min_context
     
     async def chat_completion(self,
@@ -163,7 +196,7 @@ class OpenRouterClient:
         
         # Validate model is not blocked
         if model in self.blocked_models:
-            raise ValueError(f"Model {model} is blocked. Only GPT-5o variants are blocked - the other ChatGPT models are lovely!")
+            raise ValueError(f"Model {model} is blocked. GPT-5 variants are blocked - other models are fine!")
         
         payload = {
             "model": model,
@@ -256,9 +289,37 @@ class OpenRouterClient:
                 'message': str(e),
                 'api_key_set': bool(self.api_key)
             }
+    
+    def get_model_info(self, model_id: str = None) -> Dict[str, Any]:
+        """Get information about a specific model or all preferred models"""
+        if model_id:
+            return {
+                'model_id': model_id,
+                'context_length': self.model_contexts.get(model_id, 'unknown'),
+                'is_blocked': model_id in self.blocked_models,
+                'is_preferred': model_id in self.preferred_models
+            }
+        
+        # Return info about all preferred models
+        return {
+            'preferred_models': [
+                {
+                    'model_id': mid,
+                    'context_length': self.model_contexts.get(mid, 'unknown')
+                }
+                for mid in self.preferred_models
+            ],
+            'blocked_models': self.blocked_models,
+            'total_known_models': len(self.model_contexts)
+        }
 
-# Global client instance
-_client = None
+
+# =============================================================================
+# Global Instance and Factory
+# =============================================================================
+
+_client: Optional[OpenRouterClient] = None
+
 
 async def get_openrouter_client() -> OpenRouterClient:
     """Get the global OpenRouter client instance"""
@@ -267,6 +328,7 @@ async def get_openrouter_client() -> OpenRouterClient:
         _client = OpenRouterClient()
     return _client
 
+
 async def cleanup_openrouter_client():
     """Cleanup the global client (call on app shutdown)"""
     global _client
@@ -274,7 +336,11 @@ async def cleanup_openrouter_client():
         await _client.close()
         _client = None
 
-# Convenience functions
+
+# =============================================================================
+# Convenience Functions
+# =============================================================================
+
 async def chat_with_openrouter(messages: List[Dict],
                              personality_id: str = 'syntaxprime',
                              **kwargs) -> Dict:
@@ -285,13 +351,18 @@ async def chat_with_openrouter(messages: List[Dict],
     client = await get_openrouter_client()
     return await client.chat_completion(messages, **kwargs)
 
+
 async def test_openrouter_connection() -> Dict:
     """Test OpenRouter connection"""
     client = await get_openrouter_client()
     return await client.test_connection()
 
+
+# =============================================================================
+# Test Script
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test script
     async def test():
         print("Testing OpenRouter client...")
         
@@ -311,6 +382,10 @@ if __name__ == "__main__":
             
             print("Chat test response:")
             print(response.get('choices', [{}])[0].get('message', {}).get('content'))
+            
+            # Test model info
+            print("\nModel info:")
+            print(client.get_model_info())
         
         await cleanup_openrouter_client()
     

@@ -19,16 +19,26 @@ Workflow:
 """
 
 from .scraper_client import MarketingScraperClient
-from .content_analyzer import ContentAnalyzer  
-from .database_manager import ScrapedContentDatabase
+from .content_analyzer import ContentAnalyzer, get_content_analyzer
+from .database_manager import ScrapedContentDatabase, get_scraped_content_database
 from .router import router
 
 # Public API - what other modules can import
 __all__ = [
+    # Classes (for type hints and direct instantiation if needed)
     'MarketingScraperClient',
-    'ContentAnalyzer', 
+    'ContentAnalyzer',
     'ScrapedContentDatabase',
-    'router'
+    # Singleton getters (preferred for runtime use)
+    'get_content_analyzer',
+    'get_scraped_content_database',
+    'get_scraper_client',
+    # Router
+    'router',
+    # Module utilities
+    'check_module_health',
+    'get_integration_info',
+    'get_scraper_commands'
 ]
 
 # Module metadata
@@ -39,7 +49,19 @@ __description__ = 'AI-powered marketing scraper for competitive analysis'
 # Module configuration constants
 MODULE_NAME = 'marketing_scraper'
 INTEGRATION_TYPE = 'chat_command'
-SUPPORTED_COMMANDS = ['scrape', 'scrape history', 'scrape insights']
+SUPPORTED_COMMANDS = ['scrape', 'scrape history', 'scrape insights', 'scrape compare']
+
+# Singleton for scraper client
+_scraper_client = None
+
+
+def get_scraper_client() -> MarketingScraperClient:
+    """Get singleton MarketingScraperClient instance"""
+    global _scraper_client
+    if _scraper_client is None:
+        _scraper_client = MarketingScraperClient()
+    return _scraper_client
+
 
 def check_module_health() -> dict:
     """Check if marketing scraper module is properly configured"""
@@ -56,8 +78,8 @@ def check_module_health() -> dict:
     ]
     
     status = {
-        'healthy': True, 
-        'missing_vars': [], 
+        'healthy': True,
+        'missing_vars': [],
         'configured_vars': [],
         'optional_missing': []
     }
@@ -77,11 +99,9 @@ def check_module_health() -> dict:
         else:
             status['optional_missing'].append(var)
     
-    # Test database connectivity
+    # Test database connectivity via singleton
     try:
-        from .database_manager import ScrapedContentDatabase
-        db = ScrapedContentDatabase()
-        # This will be tested in the actual implementation
+        db = get_scraped_content_database()
         status['database_accessible'] = True
     except Exception as e:
         status['database_accessible'] = False
@@ -89,6 +109,7 @@ def check_module_health() -> dict:
         status['healthy'] = False
     
     return status
+
 
 def get_integration_info() -> dict:
     """Get marketing scraper integration information"""
@@ -104,23 +125,33 @@ def get_integration_info() -> dict:
         'chat_commands': {
             'scrape [URL]': 'Analyze competitor website for marketing insights',
             'scrape history': 'Show recent scraping activity',
-            'scrape insights [topic]': 'Find stored insights on specific topic'
+            'scrape insights [topic]': 'Find stored insights on specific topic',
+            'scrape compare': 'Compare multiple competitors'
         },
         
         'features': [
             'Clean website content extraction',
-            'AI-powered competitive analysis with SyntaxPrime', 
+            'AI-powered competitive analysis with SyntaxPrime',
             'Marketing angles and positioning insights',
             'Technical analysis (CTAs, page structure)',
             'Tone and voice analysis',
             'Permanent storage for future reference',
-            'Intelligent context for content creation'
+            'Intelligent context for content creation',
+            'Multi-competitor comparison',
+            'Domain-level insight aggregation',
+            'Cross-competitor pattern analysis'
         ],
         
         'endpoints': {
             'status': '/integrations/marketing-scraper/status',
             'health': '/integrations/marketing-scraper/health',
-            'stats': '/integrations/marketing-scraper/stats'
+            'stats': '/integrations/marketing-scraper/stats',
+            'history': '/integrations/marketing-scraper/history',
+            'compare': '/integrations/marketing-scraper/compare',
+            'domain': '/integrations/marketing-scraper/domain/{domain}',
+            'competitive_summary': '/integrations/marketing-scraper/competitive-summary',
+            'search': '/integrations/marketing-scraper/search',
+            'content': '/integrations/marketing-scraper/content/{id}'
         },
         
         'analysis_components': [
@@ -146,7 +177,7 @@ def get_integration_info() -> dict:
         }
     }
 
-# Convenience function for chat integration
+
 def get_scraper_commands() -> dict:
     """Get available scraper commands for chat integration"""
     return {
@@ -157,12 +188,17 @@ def get_scraper_commands() -> dict:
         },
         'scrape_history': {
             'pattern': r'scrape\s+history',
-            'description': 'Show recent scraping activity', 
+            'description': 'Show recent scraping activity',
             'usage': 'scrape history'
         },
         'scrape_insights': {
             'pattern': r'scrape\s+insights\s+(.+)',
             'description': 'Find stored insights on topic',
             'usage': 'scrape insights [topic]'
+        },
+        'scrape_compare': {
+            'pattern': r'scrape\s+compare',
+            'description': 'Compare scraped competitors',
+            'usage': 'scrape compare'
         }
     }

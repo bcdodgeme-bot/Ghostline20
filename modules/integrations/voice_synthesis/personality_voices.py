@@ -84,7 +84,7 @@ class PersonalityVoiceManager:
         # Note: These might need to be updated based on actual ElevenLabs voice library
         self.voice_id_mappings = {
             'Adam': 'pNInz6obpgDQGcFmaJgB',
-            'Josh': 'TxGEqnHWrfWFTfGW9XjX', 
+            'Josh': 'TxGEqnHWrfWFTfGW9XjX',
             'Daniel': 'onwK4e9ZLuTAKqWW03F9',
             'Antoni': 'ErXwobaYiN019PkySvjV',
             'Sam': 'yoZ06aMxZJJ28mfd3POQ'
@@ -167,7 +167,7 @@ class PersonalityVoiceManager:
             current_time = time.time()
             
             # Check cache first
-            if (personality_id in self._mapping_cache and 
+            if (personality_id in self._mapping_cache and
                 current_time - self._cache_timestamp < self._cache_duration):
                 return self._mapping_cache[personality_id]
             
@@ -216,15 +216,15 @@ class PersonalityVoiceManager:
                     'fallback_voice': mapping['fallback_voice_id'],
                     'voice_settings': voice_settings,
                     'primary_voice_elevenlabs_id': self.voice_id_mappings.get(
-                        mapping['primary_voice_id'], 
+                        mapping['primary_voice_id'],
                         mapping['primary_voice_id']
                     ),
                     'secondary_voice_elevenlabs_id': self.voice_id_mappings.get(
-                        mapping['secondary_voice_id'], 
+                        mapping['secondary_voice_id'],
                         mapping['secondary_voice_id']
                     ) if mapping['secondary_voice_id'] else None,
                     'fallback_voice_elevenlabs_id': self.voice_id_mappings.get(
-                        mapping['fallback_voice_id'], 
+                        mapping['fallback_voice_id'],
                         mapping['fallback_voice_id']
                     )
                 }
@@ -269,8 +269,8 @@ class PersonalityVoiceManager:
             
             return result
     
-    async def update_personality_voice(self, 
-                                     personality_id: str, 
+    async def update_personality_voice(self,
+                                     personality_id: str,
                                      primary_voice: str,
                                      secondary_voice: Optional[str] = None,
                                      voice_settings: Optional[Dict] = None) -> bool:
@@ -296,10 +296,10 @@ class PersonalityVoiceManager:
             WHERE personality_id = $4
             """
             
-            result = await db_manager.execute(
-                query, 
-                primary_voice, 
-                secondary_voice, 
+            await db_manager.execute(
+                query,
+                primary_voice,
+                secondary_voice,
                 voice_settings_json,
                 personality_id
             )
@@ -357,7 +357,7 @@ class PersonalityVoiceManager:
             }
             
             validation['is_valid'] = (
-                validation['has_primary_voice'] and 
+                validation['has_primary_voice'] and
                 validation['has_fallback_voice'] and
                 validation['has_voice_settings']
             )
@@ -384,20 +384,21 @@ class PersonalityVoiceManager:
         Get statistics on voice usage across personalities
         """
         try:
-            # Query database for voice usage stats
+            # FIXED: Using PostgreSQL JSONB syntax (was SQLite json_extract)
             query = """
             SELECT 
-                json_extract(voice_synthesis_metadata, '$.personality_id') as personality_id,
-                json_extract(voice_synthesis_metadata, '$.voice_id') as voice_id,
+                voice_synthesis_metadata->>'personality_id' as personality_id,
+                voice_synthesis_metadata->>'voice_id' as voice_id,
                 COUNT(*) as usage_count,
-                AVG(audio_file_size) as avg_file_size,
+                COALESCE(AVG(audio_file_size), 0) as avg_file_size,
                 MAX(audio_generated_at) as last_used
             FROM conversation_messages 
             WHERE voice_synthesis_metadata IS NOT NULL 
-                AND voice_synthesis_metadata != '{}'
+                AND voice_synthesis_metadata != '{}'::jsonb
+                AND audio_file_path IS NOT NULL
             GROUP BY 
-                json_extract(voice_synthesis_metadata, '$.personality_id'),
-                json_extract(voice_synthesis_metadata, '$.voice_id')
+                voice_synthesis_metadata->>'personality_id',
+                voice_synthesis_metadata->>'voice_id'
             ORDER BY usage_count DESC;
             """
             
@@ -412,6 +413,10 @@ class PersonalityVoiceManager:
                 voice_id = stat['voice_id']
                 usage_count = stat['usage_count']
                 
+                # Skip if personality_id is None (shouldn't happen but be safe)
+                if personality_id is None:
+                    continue
+                
                 if personality_id not in stats_by_personality:
                     stats_by_personality[personality_id] = {
                         'total_usage': 0,
@@ -423,7 +428,7 @@ class PersonalityVoiceManager:
                 stats_by_personality[personality_id]['voices_used'][voice_id] = {
                     'usage_count': usage_count,
                     'avg_file_size': stat['avg_file_size'],
-                    'last_used': stat['last_used']
+                    'last_used': stat['last_used'].isoformat() if stat['last_used'] else None
                 }
                 
                 stats_by_personality[personality_id]['total_usage'] += usage_count
@@ -434,7 +439,7 @@ class PersonalityVoiceManager:
                 'personalities': stats_by_personality,
                 'summary': {
                     'most_used_personality': max(
-                        stats_by_personality.keys(), 
+                        stats_by_personality.keys(),
                         key=lambda k: stats_by_personality[k]['total_usage']
                     ) if stats_by_personality else None,
                     'total_personalities_used': len(stats_by_personality)
@@ -448,6 +453,7 @@ class PersonalityVoiceManager:
                 'personalities': {},
                 'error': str(e)
             }
+
 
 # Testing and utility functions
 async def test_personality_voice_manager():

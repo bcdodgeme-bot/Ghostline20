@@ -1,12 +1,26 @@
 """
 Task Mapping Business Logic
 Maps Slack events to ClickUp tasks based on context and commands
+
+Updated: Session 13 - Added singleton getter pattern
 """
 import re
 from typing import Dict, Optional, Tuple
 from datetime import datetime
 
-#--Section 1: Class Initialization & Command Patterns 9/23/25
+#--Section 1: Singleton Pattern
+_task_mapper_instance: Optional['TaskMapper'] = None
+
+
+def get_task_mapper() -> 'TaskMapper':
+    """Get singleton TaskMapper instance"""
+    global _task_mapper_instance
+    if _task_mapper_instance is None:
+        _task_mapper_instance = TaskMapper()
+    return _task_mapper_instance
+
+
+#--Section 2: Class Initialization & Command Patterns
 class TaskMapper:
     def __init__(self):
         self.command_patterns = {
@@ -16,7 +30,7 @@ class TaskMapper:
             'follow_up': r'(?:follow up|followup|check back)',
         }
 
-#--Section 2: Slack Mention Processing 9/23/25
+    #--Section 3: Slack Mention Processing
     def extract_mention_task(self, message_data: Dict) -> Optional[Dict]:
         """Extract task details from a Slack mention"""
         text = message_data.get('text', '')
@@ -45,7 +59,7 @@ class TaskMapper:
             'source_data': message_data
         }
 
-#--Section 3: AI Command Processing 9/23/25
+    #--Section 4: AI Command Processing
     def extract_command_task(self, message: str, context: str = "") -> Optional[Dict]:
         """Extract task details from an AI conversation command"""
         # Look for command patterns
@@ -71,7 +85,7 @@ class TaskMapper:
             'command_type': command_type
         }
 
-#--Section 4: Text Cleaning & Parsing Utilities 9/23/25
+    #--Section 5: Text Cleaning & Parsing Utilities
     def _clean_message_text(self, text: str) -> str:
         """Remove Slack mentions and clean up text"""
         # Remove user mentions
@@ -95,7 +109,7 @@ class TaskMapper:
         
         return title if title else "Task from Slack"
 
-#--Section 5: Command Detection & Content Extraction 9/23/25
+    #--Section 6: Command Detection & Content Extraction
     def _detect_command_type(self, message: str) -> str:
         """Detect the type of command in the message"""
         message_lower = message.lower()
@@ -121,7 +135,7 @@ class TaskMapper:
         
         return content
 
-#--Section 6: Description Builders 9/23/25
+    #--Section 7: Description Builders
     def _build_mention_description(self, original_text: str, user: str, channel: str, timestamp: str) -> str:
         """Build detailed description for mention-based tasks"""
         dt = datetime.fromtimestamp(float(timestamp))

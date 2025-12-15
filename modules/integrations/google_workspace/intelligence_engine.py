@@ -253,7 +253,7 @@ class IntelligenceEngine:
     
     # ==================== PREDICTION ENGINE ====================
     
-    async def predict_content_performance(self, user_id: str, site_name: str, 
+    async def predict_content_performance(self, user_id: str, site_name: str,
                                          topic: str, publish_time: datetime) -> Dict[str, Any]:
         """
         Predict how content will perform based on learned patterns
@@ -440,7 +440,7 @@ class IntelligenceEngine:
     
     # ==================== FEEDBACK LEARNING ====================
     
-    async def record_feedback(self, user_id: str, pattern_id: str, 
+    async def record_feedback(self, user_id: str, pattern_id: str,
                              outcome: str, actual_performance: Dict[str, Any]):
         """
         Record feedback on pattern predictions to improve learning
@@ -461,7 +461,9 @@ class IntelligenceEngine:
             
             modifier = success_modifier.get(outcome, 0.0)
             
-            async with db_manager.get_connection() as conn:
+            # FIXED: Use try/finally pattern instead of async with
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute('''
                     UPDATE google_intelligence_patterns
                     SET confidence_score = GREATEST(0.1, LEAST(0.95, confidence_score + $1)),
@@ -469,6 +471,8 @@ class IntelligenceEngine:
                         last_updated = NOW()
                     WHERE id = $2
                 ''', modifier, pattern_id)
+            finally:
+                await db_manager.release_connection(conn)
             
             logger.info(f"✅ Recorded feedback for pattern {pattern_id}: {outcome}")
             
@@ -490,25 +494,10 @@ class IntelligenceEngine:
     async def _store_pattern(self, user_id: str, pattern: Dict[str, Any]):
         """Store learned pattern in database"""
         try:
-            async with db_manager.get_connection() as conn:
-                # First, recreate the table since we dropped it earlier
-                await conn.execute('''
-                    CREATE TABLE IF NOT EXISTS google_intelligence_patterns (
-                        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        pattern_type VARCHAR(100) NOT NULL,
-                        pattern_data JSONB NOT NULL DEFAULT '{}',
-                        success_rate DECIMAL(5,4) DEFAULT 0.0,
-                        confidence_score DECIMAL(5,4) DEFAULT 0.0,
-                        sample_size INTEGER DEFAULT 0,
-                        business_area VARCHAR(50),
-                        related_systems TEXT[],
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        sync_version BIGINT DEFAULT 0
-                    )
-                ''')
-                
+            # FIXED: Use try/finally pattern instead of async with
+            # FIXED: Removed runtime CREATE TABLE - table should exist from migrations
+            conn = await db_manager.get_connection()
+            try:
                 await conn.execute('''
                     INSERT INTO google_intelligence_patterns
                     (user_id, pattern_type, pattern_data, confidence_score, business_area)
@@ -520,15 +509,19 @@ class IntelligenceEngine:
                 pattern.get('confidence_score', 0.0),
                 pattern.get('site_name', 'general')
                 )
+            finally:
+                await db_manager.release_connection(conn)
             
         except Exception as e:
             logger.error(f"❌ Failed to store pattern: {e}")
     
-    async def _get_stored_patterns(self, user_id: str, site_name: str, 
+    async def _get_stored_patterns(self, user_id: str, site_name: str,
                                    pattern_type: str) -> List[Dict[str, Any]]:
         """Retrieve stored patterns from database"""
         try:
-            async with db_manager.get_connection() as conn:
+            # FIXED: Use try/finally pattern instead of async with
+            conn = await db_manager.get_connection()
+            try:
                 rows = await conn.fetch('''
                     SELECT pattern_data, confidence_score
                     FROM google_intelligence_patterns
@@ -546,6 +539,8 @@ class IntelligenceEngine:
                     patterns.append(pattern)
                 
                 return patterns
+            finally:
+                await db_manager.release_connection(conn)
                 
         except Exception as e:
             logger.error(f"❌ Failed to get stored patterns: {e}")

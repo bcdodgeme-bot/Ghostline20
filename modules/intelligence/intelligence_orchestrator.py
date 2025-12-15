@@ -8,40 +8,93 @@ This is the main controller that:
 2. Runs situation detectors to find patterns
 3. Generates actions for situations
 4. Stores situations in database with learning
-5. Sends Telegram notifications
-6. Manages the intelligence cycle (hourly/daily)
+5. AUTO-EXECUTES actions for patterns approved 5+ times
+6. Sends Telegram notifications
+7. Manages the intelligence cycle (hourly/daily)
 
 Created: 10/22/25
+Updated: 2025-01-XX - Added singleton pattern, auto-execution logic
 """
 
 import asyncio
 import logging
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from uuid import UUID
-import json
 
-# Import all our intelligence modules
+# Import singleton getters from intelligence modules
 from modules.intelligence.context_collectors import (
-    CalendarContextCollector as CalendarCollector,
-    EmailContextCollector as EmailCollector,
-    MeetingContextCollector as MeetingCollector,
-    ConversationContextCollector as ConversationCollector,
-    TrendContextCollector as TrendCollector,
-    WeatherContextCollector as WeatherCollector,
-    KnowledgeContextCollector as KnowledgeCollector,
-    PerformanceContextCollector as ActionItemCollector,
-    BlueskyContextCollector as BlueskyCollector
+    get_calendar_collector,
+    get_email_collector,
+    get_meeting_collector,
+    get_conversation_collector,
+    get_trend_collector,
+    get_weather_collector,
+    get_knowledge_collector,
+    get_performance_collector,
+    get_bluesky_collector
 )
 
-from modules.intelligence.situation_detector import SituationDetector
-from modules.intelligence.situation_manager import SituationManager
-from modules.intelligence.action_suggester import ActionSuggester
-
-from modules.intelligence.action_executor import ActionExecutor
-import json
+from modules.intelligence.situation_detector import get_situation_detector
+from modules.intelligence.situation_manager import get_situation_manager
+from modules.intelligence.action_suggester import get_action_suggester
+from modules.intelligence.action_executor import get_action_executor
 
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_orchestrator_instance: Optional['IntelligenceOrchestrator'] = None
+
+
+def get_intelligence_orchestrator(
+    db_manager=None,
+    google_calendar_service=None,
+    gmail_service=None,
+    telegram_service=None,
+    weather_service=None,
+    user_id: Optional[UUID] = None
+) -> 'IntelligenceOrchestrator':
+    """
+    Get or create the singleton IntelligenceOrchestrator instance.
+    
+    Args:
+        db_manager: Database manager (required on first call)
+        google_calendar_service: Google Calendar API service (optional)
+        gmail_service: Gmail API service (optional)
+        telegram_service: Telegram bot service for notifications (optional)
+        weather_service: Weather API service (optional)
+        user_id: User ID for this intelligence instance (optional)
+        
+    Returns:
+        IntelligenceOrchestrator singleton instance
+    """
+    global _orchestrator_instance
+    
+    if _orchestrator_instance is None:
+        if db_manager is None:
+            raise ValueError("db_manager required for first IntelligenceOrchestrator initialization")
+        _orchestrator_instance = IntelligenceOrchestrator(
+            db_manager=db_manager,
+            google_calendar_service=google_calendar_service,
+            gmail_service=gmail_service,
+            telegram_service=telegram_service,
+            weather_service=weather_service,
+            user_id=user_id
+        )
+    
+    return _orchestrator_instance
+
 
 #===============================================================================
 # INTELLIGENCE ORCHESTRATOR - The Brain
@@ -54,6 +107,9 @@ class IntelligenceOrchestrator:
     This is the central controller that makes everything work together.
     Think of it as the conductor of an orchestra - each module is an
     instrument, and this makes them play in harmony.
+    
+    NEW: Supports auto-execution of actions for patterns that have been
+    approved 5+ times with 80%+ action rate.
     """
     
     def __init__(
@@ -77,41 +133,41 @@ class IntelligenceOrchestrator:
             user_id: User ID for this intelligence instance
         """
         self.db = db_manager
-        self.user_id = user_id
+        self.user_id = user_id or USER_ID
         
-        # Initialize all context collectors
-        self.calendar_collector = CalendarCollector(db_manager=db_manager)
-        self.email_collector = EmailCollector(db_manager=db_manager)
-        self.meeting_collector = MeetingCollector(db_manager=db_manager)
-        self.conversation_collector = ConversationCollector(db_manager=db_manager)
-        self.trend_collector = TrendCollector(db_manager=db_manager)
-        self.weather_collector = WeatherCollector(db_manager=db_manager)
-        self.knowledge_collector = KnowledgeCollector(db_manager=db_manager)
-        self.action_item_collector = ActionItemCollector(db_manager=db_manager)
-        self.bluesky_collector = BlueskyCollector(db_manager=db_manager)
+        # Initialize all context collectors using singleton getters
+        self.calendar_collector = get_calendar_collector(db_manager=db_manager)
+        self.email_collector = get_email_collector(db_manager=db_manager)
+        self.meeting_collector = get_meeting_collector(db_manager=db_manager)
+        self.conversation_collector = get_conversation_collector(db_manager=db_manager)
+        self.trend_collector = get_trend_collector(db_manager=db_manager)
+        self.weather_collector = get_weather_collector(db_manager=db_manager)
+        self.knowledge_collector = get_knowledge_collector(db_manager=db_manager)
+        self.action_item_collector = get_performance_collector(db_manager=db_manager)
+        self.bluesky_collector = get_bluesky_collector(db_manager=db_manager)
         
-        # Initialize intelligence modules
-        self.situation_detector = SituationDetector()
-        self.situation_manager = SituationManager(db_manager=db_manager)
-        self.action_suggester = ActionSuggester(db_manager=db_manager)
+        # Initialize intelligence modules using singleton getters
+        self.situation_detector = get_situation_detector()
+        self.situation_manager = get_situation_manager(db_manager=db_manager)
+        self.action_suggester = get_action_suggester(db_manager=db_manager)
         
+        # Initialize action executor with integrations
         try:
             from modules.integrations.slack_clickup.clickup_handler import ClickUpHandler
             clickup_handler = ClickUpHandler()
-        except:
+        except Exception:
             clickup_handler = None
             logger.warning("ClickUp handler not available")
             
         try:
             from modules.content.content_generator import ContentGenerator
-            import os
             database_url = os.getenv('DATABASE_URL')
             content_generator = ContentGenerator(database_url) if database_url else None
         except Exception as e:
             content_generator = None
             logger.warning(f"Content generator not available: {e}")
 
-        self.action_executor = ActionExecutor(
+        self.action_executor = get_action_executor(
             db_manager=db_manager,
             clickup_handler=clickup_handler,
             content_generator=content_generator
@@ -125,8 +181,9 @@ class IntelligenceOrchestrator:
         self.total_runs = 0
         self.total_signals_collected = 0
         self.total_situations_detected = 0
+        self.total_auto_executed = 0  # NEW: Track auto-executions
         
-        logger.info("🧠 Intelligence Orchestrator initialized")
+        logger.info("🧠 Intelligence Orchestrator initialized (with auto-execution support)")
     
     
     #===========================================================================
@@ -146,7 +203,8 @@ class IntelligenceOrchestrator:
         2. Detect situations from signals
         3. Generate actions for situations
         4. Store in database
-        5. Send notifications
+        5. AUTO-EXECUTE if pattern qualifies (5+ approvals, 80%+ action rate)
+        6. Send notifications
         
         Args:
             user_id: User ID to run cycle for (overrides init user_id)
@@ -190,24 +248,41 @@ class IntelligenceOrchestrator:
             situation_count = len(situations)
             logger.info(f"✅ Detected {situation_count} situations")
             
-            # PHASE 3: Generate actions and store situations
-            logger.info("💡 Phase 3: Generating actions and storing situations...")
-            stored_situations = await self._process_and_store_situations(
-                situations, 
+            # PHASE 3: Generate actions, store situations, and AUTO-EXECUTE if qualified
+            logger.info("💡 Phase 3: Processing situations (with auto-execution check)...")
+            process_result = await self._process_and_store_situations(
+                situations,
                 user_id
             )
             
+            stored_situations = process_result['stored_situations']
+            auto_executed_situations = process_result['auto_executed_situations']
+            
             stored_count = len(stored_situations)
-            logger.info(f"✅ Stored {stored_count} situations in database")
+            auto_executed_count = len(auto_executed_situations)
+            
+            logger.info(f"✅ Stored {stored_count} situations, auto-executed {auto_executed_count}")
             
             # PHASE 4: Send notifications
             notification_count = 0
-            if send_notifications and self.telegram and stored_situations:
+            if send_notifications and self.telegram:
                 logger.info("📱 Phase 4: Sending Telegram notifications...")
-                notification_count = await self._send_notifications(
-                    stored_situations,
-                    user_id
-                )
+                
+                # Send approval requests for non-auto-executed situations
+                if stored_situations:
+                    notification_count = await self._send_notifications(
+                        stored_situations,
+                        user_id
+                    )
+                
+                # Send confirmations for auto-executed actions
+                if auto_executed_situations:
+                    auto_notification_count = await self._send_auto_execution_notifications(
+                        auto_executed_situations,
+                        user_id
+                    )
+                    notification_count += auto_notification_count
+                
                 logger.info(f"✅ Sent {notification_count} notifications")
             
             # PHASE 5: Expire old situations
@@ -221,6 +296,7 @@ class IntelligenceOrchestrator:
             self.total_runs += 1
             self.total_signals_collected += signal_count
             self.total_situations_detected += situation_count
+            self.total_auto_executed += auto_executed_count
             
             logger.info(f"✨ Intelligence cycle complete in {cycle_duration:.2f}s")
             
@@ -231,6 +307,7 @@ class IntelligenceOrchestrator:
                 'signals_collected': signal_count,
                 'situations_detected': situation_count,
                 'situations_stored': stored_count,
+                'situations_auto_executed': auto_executed_count,
                 'notifications_sent': notification_count,
                 'situations_expired': expired_count,
                 'signal_breakdown': self._get_signal_breakdown(signals),
@@ -346,31 +423,36 @@ class IntelligenceOrchestrator:
     
     
     #===========================================================================
-    # PHASE 3: GENERATE ACTIONS & STORE
+    # PHASE 3: GENERATE ACTIONS, STORE, AND AUTO-EXECUTE
     #===========================================================================
     
     async def _process_and_store_situations(
         self,
         situations: List,
         user_id: UUID
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, List]:
         """
-        Generate actions for situations and store them in database.
+        Generate actions for situations, store them, and auto-execute if qualified.
         
         For each situation:
         1. Generate suggested actions
         2. Add actions to situation object
         3. Store in database (with duplicate checking)
-        4. Track for notification
+        4. CHECK: Does this pattern qualify for auto-execution?
+           - If YES: Execute primary action, record as 'auto_executed'
+           - If NO: Add to notification queue for user approval
         
         Args:
             situations: List of Situation objects
             user_id: User ID
             
         Returns:
-            List of stored situation dictionaries (only new situations)
+            Dict with:
+            - stored_situations: List of situations needing user approval
+            - auto_executed_situations: List of situations that were auto-executed
         """
-        stored_situations = []
+        stored_situations = []  # Need user approval
+        auto_executed_situations = []  # Already executed automatically
         
         for situation in situations:
             try:
@@ -386,23 +468,144 @@ class IntelligenceOrchestrator:
                     user_id=user_id
                 )
                 
-                if situation_id:
-                    # Successfully stored (not a duplicate)
+                if not situation_id:
+                    # Duplicate situation, skip
+                    logger.debug(f"Skipped duplicate situation: {situation.situation_type}")
+                    continue
+                
+                # Successfully stored - now check for auto-execution
+                situation.situation_id = situation_id
+                
+                # Build pattern key from context (same logic as situation_manager)
+                pattern_key = self._build_pattern_key(situation)
+                
+                # Check if this pattern qualifies for auto-execution
+                should_auto = await self.situation_manager.should_auto_execute(
+                    situation_type=situation.situation_type,
+                    pattern_key=pattern_key
+                )
+                
+                if should_auto and actions:
+                    # AUTO-EXECUTE the primary action!
+                    logger.info(f"🤖 AUTO-EXECUTING: {situation.situation_type} (pattern: {pattern_key})")
+                    
+                    primary_action = actions[0]  # Execute first/primary action
+                    
+                    try:
+                        # Execute the action
+                        result = await self.action_executor.execute_action(
+                            action=primary_action,
+                            user_id=user_id
+                        )
+                        
+                        if result.get('success'):
+                            # Record as auto-executed
+                            await self.situation_manager.record_user_response(
+                                situation_id=situation_id,
+                                response='auto_executed',
+                                response_data={
+                                    'action_type': primary_action.get('action_type'),
+                                    'action_description': primary_action.get('description'),
+                                    'execution_result': result
+                                }
+                            )
+                            
+                            auto_executed_situations.append({
+                                'situation_id': situation_id,
+                                'situation': situation,
+                                'actions': actions,
+                                'executed_action': primary_action,
+                                'execution_result': result
+                            })
+                            
+                            logger.info(f"✅ Auto-executed successfully: {primary_action.get('description')}")
+                        else:
+                            # Execution failed - fall back to manual approval
+                            logger.warning(f"Auto-execution failed: {result.get('message')}")
+                            stored_situations.append({
+                                'situation_id': situation_id,
+                                'situation': situation,
+                                'actions': actions
+                            })
+                            
+                    except Exception as exec_error:
+                        # Execution error - fall back to manual approval
+                        logger.error(f"Auto-execution error: {exec_error}", exc_info=True)
+                        stored_situations.append({
+                            'situation_id': situation_id,
+                            'situation': situation,
+                            'actions': actions
+                        })
+                else:
+                    # Not qualified for auto-execution - needs user approval
                     stored_situations.append({
                         'situation_id': situation_id,
                         'situation': situation,
                         'actions': actions
                     })
                     
-                    logger.debug(f"Stored situation: {situation.situation_type}")
-                else:
-                    logger.debug(f"Skipped duplicate situation: {situation.situation_type}")
+                    logger.debug(f"Stored situation for approval: {situation.situation_type}")
             
             except Exception as e:
                 logger.error(f"Error processing situation: {e}", exc_info=True)
                 continue
         
-        return stored_situations
+        return {
+            'stored_situations': stored_situations,
+            'auto_executed_situations': auto_executed_situations
+        }
+    
+    
+    def _build_pattern_key(self, situation) -> str:
+        """
+        Build a pattern key from situation context for learning lookup.
+        
+        This should match the logic in situation_manager._build_pattern_key()
+        
+        Args:
+            situation: Situation object
+            
+        Returns:
+            Pattern key string
+        """
+        context = situation.situation_context
+        situation_type = situation.situation_type
+        
+        # Build pattern key based on situation type
+        if situation_type == 'post_meeting_action_required':
+            # Pattern by meeting participant or recurring meeting
+            participants = context.get('participants', [])
+            if participants:
+                return f"meeting_with:{participants[0]}"
+            return f"meeting:{context.get('meeting_title', 'unknown')[:30]}"
+        
+        elif situation_type == 'trend_content_opportunity':
+            # Pattern by business area + account
+            return f"trend:{context.get('business_area', 'general')}:{context.get('suggested_account', 'default')}"
+        
+        elif situation_type == 'deadline_approaching_prep_needed':
+            # Pattern by event type
+            return f"deadline:{context.get('prep_reason', 'general')}"
+        
+        elif situation_type in ['email_priority_meeting_context', 'email_meeting_followup']:
+            # Pattern by sender domain
+            sender = context.get('sender_email', context.get('sender_name', 'unknown'))
+            if '@' in sender:
+                domain = sender.split('@')[1]
+                return f"email_from:{domain}"
+            return f"email_from:{sender[:20]}"
+        
+        elif situation_type == 'conversation_trend_alignment':
+            # Pattern by business area
+            return f"alignment:{context.get('business_area', 'general')}"
+        
+        elif situation_type in ['weather_impact_calendar', 'weather_health_impact', 'weather_emergency_alert']:
+            # Pattern by weather condition type
+            return f"weather:{context.get('weather_condition', 'unknown')}"
+        
+        else:
+            # Generic pattern
+            return f"generic:{situation_type}"
     
     
     #===========================================================================
@@ -415,7 +618,7 @@ class IntelligenceOrchestrator:
         user_id: UUID
     ) -> int:
         """
-        Send Telegram notifications for new situations.
+        Send Telegram notifications for new situations that need approval.
         
         Groups situations by priority and sends them in order.
         Only sends notifications for situations with priority >= 7.
@@ -435,7 +638,7 @@ class IntelligenceOrchestrator:
         
         # Filter to high-priority situations only (priority >= 7)
         high_priority = [
-            s for s in stored_situations 
+            s for s in stored_situations
             if s['situation'].priority_score >= 7
         ]
         
@@ -482,6 +685,90 @@ class IntelligenceOrchestrator:
             
             except Exception as e:
                 logger.error(f"Error sending notification: {e}", exc_info=True)
+                continue
+        
+        return notification_count
+    
+    
+    async def _send_auto_execution_notifications(
+        self,
+        auto_executed_situations: List[Dict[str, Any]],
+        user_id: UUID
+    ) -> int:
+        """
+        Send Telegram notifications confirming auto-executed actions.
+        
+        These are informational messages letting the user know what was
+        done automatically based on their learned preferences.
+        
+        Args:
+            auto_executed_situations: List of auto-executed situation dicts
+            user_id: User ID
+            
+        Returns:
+            Count of notifications sent
+        """
+        if not self.telegram:
+            logger.debug("No Telegram service configured, skipping auto-execution notifications")
+            return 0
+        
+        notification_count = 0
+        
+        for situation_data in auto_executed_situations:
+            try:
+                situation = situation_data['situation']
+                executed_action = situation_data['executed_action']
+                execution_result = situation_data['execution_result']
+                
+                # Build confirmation message
+                message = f"🤖 **Auto-Executed Action**\n\n"
+                message += f"Based on your pattern of approving similar situations, I automatically:\n\n"
+                message += f"✅ {executed_action.get('description', 'Completed action')}\n\n"
+                
+                # Add result details if available
+                if execution_result.get('message'):
+                    result_preview = execution_result['message'][:200]
+                    message += f"**Result:**\n{result_preview}\n\n"
+                
+                message += f"_Situation: {situation.situation_type.replace('_', ' ').title()}_\n"
+                message += f"_Confidence: {situation.confidence_score * 100:.0f}%_"
+                
+                # Simple buttons for feedback
+                buttons = [
+                    [
+                        {"text": "👍 Good", "callback_data": f"auto_feedback:good:{situation.situation_id}"},
+                        {"text": "👎 Don't do this", "callback_data": f"auto_feedback:bad:{situation.situation_id}"}
+                    ],
+                    [
+                        {"text": "ℹ️ Details", "callback_data": f"situation:details:{situation.situation_id}"}
+                    ]
+                ]
+                
+                # Send to Telegram
+                result = await self.telegram.send_notification(
+                    user_id=str(user_id),
+                    notification_type="intelligence",
+                    notification_subtype="auto_executed",
+                    message_text=message,
+                    buttons=buttons,
+                    message_data={
+                        "situation_id": str(situation.situation_id),
+                        "action_type": executed_action.get('action_type'),
+                        "auto_executed": True
+                    }
+                )
+
+                if result.get('success'):
+                    notification_count += 1
+                    logger.debug(f"Sent auto-execution confirmation for {situation.situation_type}")
+                else:
+                    logger.warning(f"Failed to send auto-execution notification")
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.5)
+            
+            except Exception as e:
+                logger.error(f"Error sending auto-execution notification: {e}", exc_info=True)
                 continue
         
         return notification_count
@@ -569,7 +856,7 @@ class IntelligenceOrchestrator:
         
         Args:
             situation_id: UUID of situation
-            response: Response type (acted/dismissed/snoozed/saved_for_later)
+            response: Response type (acted/dismissed/snoozed/saved_for_later/auto_executed)
             response_data: Optional additional data
             
         Returns:
@@ -628,6 +915,18 @@ class IntelligenceOrchestrator:
         return await self.situation_manager.get_learning_insights(user_id=user_id)
     
     
+    async def get_auto_executable_patterns(self) -> List[Dict[str, Any]]:
+        """
+        Get list of patterns that qualify for auto-execution.
+        
+        Convenience wrapper around situation_manager.get_auto_executable_patterns().
+        
+        Returns:
+            List of patterns with their stats
+        """
+        return await self.situation_manager.get_auto_executable_patterns()
+    
+    
     def get_runtime_stats(self) -> Dict[str, Any]:
         """
         Get runtime statistics for the orchestrator.
@@ -640,6 +939,7 @@ class IntelligenceOrchestrator:
             'total_runs': self.total_runs,
             'total_signals_collected': self.total_signals_collected,
             'total_situations_detected': self.total_situations_detected,
+            'total_auto_executed': self.total_auto_executed,
             'avg_signals_per_run': self.total_signals_collected / self.total_runs if self.total_runs > 0 else 0,
             'avg_situations_per_run': self.total_situations_detected / self.total_runs if self.total_runs > 0 else 0
         }
@@ -682,7 +982,8 @@ class IntelligenceOrchestrator:
                 )
                 
                 if result['success']:
-                    logger.info(f"✅ Scheduled cycle completed successfully")
+                    auto_count = result.get('situations_auto_executed', 0)
+                    logger.info(f"✅ Scheduled cycle completed (auto-executed: {auto_count})")
                 else:
                     logger.error(f"❌ Scheduled cycle failed: {result.get('error')}")
                 
@@ -932,3 +1233,73 @@ class IntelligenceOrchestrator:
         except Exception as e:
             logger.error(f"Error handling callback: {e}", exc_info=True)
             return {'success': False, 'message': f'❌ Error: {str(e)}'}
+    
+    
+    async def handle_auto_feedback(
+        self,
+        callback_data: str,
+        user_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Handle feedback on auto-executed actions.
+        
+        If user gives negative feedback, we can reduce the pattern's
+        action rate to prevent future auto-execution.
+        
+        Args:
+            callback_data: Format "auto_feedback:good/bad:situation_id"
+            user_id: User ID
+            
+        Returns:
+            Result dict with success and message
+        """
+        try:
+            parts = callback_data.split(':')
+            feedback_type = parts[1]  # 'good' or 'bad'
+            situation_id = parts[2]
+            
+            if feedback_type == 'good':
+                # Positive feedback - no action needed, the learning system
+                # already recorded this as 'auto_executed' which counts as 'acted'
+                return {
+                    'success': True,
+                    'message': '👍 Thanks for the feedback! I\'ll continue auto-executing similar actions.'
+                }
+            
+            elif feedback_type == 'bad':
+                # Negative feedback - we need to record this as 'dismissed'
+                # to reduce the action rate for this pattern
+                await self.situation_manager.record_user_response(
+                    situation_id=UUID(situation_id),
+                    response='dismissed',  # Overrides the 'auto_executed'
+                    response_data={
+                        'feedback': 'negative_auto_execution',
+                        'user_requested_stop': True
+                    }
+                )
+                
+                return {
+                    'success': True,
+                    'message': '👎 Got it! I\'ll ask for approval on similar situations in the future.'
+                }
+            
+            else:
+                return {
+                    'success': False,
+                    'message': '❌ Unknown feedback type'
+                }
+            
+        except Exception as e:
+            logger.error(f"Error handling auto feedback: {e}", exc_info=True)
+            return {'success': False, 'message': f'❌ Error: {str(e)}'}
+
+
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'IntelligenceOrchestrator',
+    'get_intelligence_orchestrator',
+    'USER_ID'
+]

@@ -47,8 +47,8 @@ class AudioCacheManager:
         self.cache_misses = 0
         self.generation_times = []
     
-    async def cache_audio(self, 
-                         message_id: str, 
+    async def cache_audio(self,
+                         message_id: str,
                          audio_data: bytes,
                          metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -252,7 +252,7 @@ class AudioCacheManager:
             SET 
                 audio_file_path = NULL,
                 audio_file_size = NULL,
-                voice_synthesis_metadata = '{}',
+                voice_synthesis_metadata = '{}'::jsonb,
                 audio_generated_at = NULL
             WHERE id = $1::uuid 
                 AND audio_file_path IS NOT NULL
@@ -303,7 +303,7 @@ class AudioCacheManager:
             SET 
                 audio_file_path = NULL,
                 audio_file_size = NULL,
-                voice_synthesis_metadata = '{}',
+                voice_synthesis_metadata = '{}'::jsonb,
                 audio_generated_at = NULL
             WHERE audio_generated_at < $1 
                 AND audio_file_path IS NOT NULL;
@@ -339,8 +339,8 @@ class AudioCacheManager:
             query_stats = """
             SELECT 
                 COUNT(*) as total_files,
-                SUM(audio_file_size) as total_size_bytes,
-                AVG(audio_file_size) as avg_file_size,
+                COALESCE(SUM(audio_file_size), 0) as total_size_bytes,
+                COALESCE(AVG(audio_file_size), 0) as avg_file_size,
                 MIN(audio_generated_at) as oldest_audio,
                 MAX(audio_generated_at) as newest_audio
             FROM conversation_messages 
@@ -350,17 +350,17 @@ class AudioCacheManager:
             
             stats = await db_manager.fetch_one(query_stats)
             
-            # Personality breakdown
+            # Personality breakdown - FIXED: Using PostgreSQL JSONB syntax
             query_personality = """
             SELECT 
-                json_extract(voice_synthesis_metadata, '$.personality_id') as personality_id,
+                voice_synthesis_metadata->>'personality_id' as personality_id,
                 COUNT(*) as audio_count,
-                SUM(audio_file_size) as total_size
+                COALESCE(SUM(audio_file_size), 0) as total_size
             FROM conversation_messages 
             WHERE voice_synthesis_metadata IS NOT NULL 
-                AND voice_synthesis_metadata != '{}'
+                AND voice_synthesis_metadata != '{}'::jsonb
                 AND audio_file_path IS NOT NULL
-            GROUP BY json_extract(voice_synthesis_metadata, '$.personality_id')
+            GROUP BY voice_synthesis_metadata->>'personality_id'
             ORDER BY audio_count DESC;
             """
             
@@ -412,12 +412,12 @@ class AudioCacheManager:
         Get daily audio generation statistics
         """
         try:
-            # Last 7 days of activity
+            # Last 7 days of activity - FIXED: Using PostgreSQL JSONB syntax
             query = """
             SELECT 
                 DATE(audio_generated_at) as generation_date,
                 COUNT(*) as daily_generations,
-                SUM(audio_file_size) as daily_size_bytes,
+                COALESCE(SUM(audio_file_size), 0) as daily_size_bytes,
                 AVG((voice_synthesis_metadata->>'generation_time_ms')::int) as avg_generation_time_ms
             FROM conversation_messages 
             WHERE audio_generated_at >= NOW() - INTERVAL '7 days'
@@ -454,22 +454,23 @@ class AudioCacheManager:
         Get detailed statistics by personality
         """
         try:
+            # FIXED: Using PostgreSQL JSONB syntax (was using SQLite json_extract)
             query = """
             SELECT 
                 voice_synthesis_metadata->>'personality_id' as personality_id,
                 voice_synthesis_metadata->>'voice_id' as voice_id,
                 COUNT(*) as usage_count,
-                SUM(audio_file_size) as total_size_bytes,
-                AVG(audio_file_size) as avg_file_size,
-                AVG((voice_synthesis_metadata->>'generation_time_ms')::int), '$.generation_time_ms')::int) as avg_generation_time_ms,
+                COALESCE(SUM(audio_file_size), 0) as total_size_bytes,
+                COALESCE(AVG(audio_file_size), 0) as avg_file_size,
+                AVG((voice_synthesis_metadata->>'generation_time_ms')::int) as avg_generation_time_ms,
                 MAX(audio_generated_at) as last_used
             FROM conversation_messages 
             WHERE voice_synthesis_metadata IS NOT NULL 
-                AND voice_synthesis_metadata != '{}'
+                AND voice_synthesis_metadata != '{}'::jsonb
                 AND audio_file_path IS NOT NULL
             GROUP BY 
-                json_extract(voice_synthesis_metadata, '$.personality_id'),
-                json_extract(voice_synthesis_metadata, '$.voice_id')
+                voice_synthesis_metadata->>'personality_id',
+                voice_synthesis_metadata->>'voice_id'
             ORDER BY usage_count DESC;
             """
             
@@ -500,9 +501,11 @@ class AudioCacheManager:
                 personality_summary[personality_id]['total_size_mb'] += round((stat['total_size_bytes'] or 0) / (1024 * 1024), 2)
                 
                 # Update last used if more recent
-                if (not personality_summary[personality_id]['last_used'] or 
-                    (stat['last_used'] and stat['last_used'] > datetime.fromisoformat(personality_summary[personality_id]['last_used']))):
-                    personality_summary[personality_id]['last_used'] = stat['last_used'].isoformat() if stat['last_used'] else None
+                if stat['last_used']:
+                    current_last = personality_summary[personality_id]['last_used']
+                    stat_last_iso = stat['last_used'].isoformat()
+                    if current_last is None or stat_last_iso > current_last:
+                        personality_summary[personality_id]['last_used'] = stat_last_iso
             
             return {
                 'personalities': personality_summary,
@@ -542,7 +545,7 @@ class AudioCacheManager:
         """
         try:
             # Test database connectivity
-            query = "SELECT COUNT(*) FROM conversation_messages WHERE audio_file_path IS NOT NULL;"
+            query = "SELECT COUNT(*) as count FROM conversation_messages WHERE audio_file_path IS NOT NULL;"
             result = await db_manager.fetch_one(query)
             
             cached_files = result['count'] if result else 0
@@ -561,6 +564,7 @@ class AudioCacheManager:
                 'connected': False,
                 'error': str(e)
             }
+
 
 # Testing function
 async def test_audio_cache_manager():

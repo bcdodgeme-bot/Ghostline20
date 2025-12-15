@@ -1,8 +1,8 @@
 //=============================================================================
-// Syntax Prime V2 - Chat Interface JavaScript (MERGED WORKING VERSION + GOOGLE TRENDS)
-// Combines fixes from both versions with proper anti-duplication + Google Trends Training
-// Date: 9/27/25 - Working sidebar + submit protection + Google Trends Integration
-// Date: 9/28/25 - Added Voice Synthesis & Image Generation Integration
+// Syntax Prime V2 - Chat Interface JavaScript
+// Session 23: Removed embedded CSS, fixed auto-resize, added random greetings
+// Original: 9/27/25 - Working sidebar + submit protection + Google Trends
+// Updated: Session 23 - CSS moved to style.css, greeting system added
 //=============================================================================
 
 class SyntaxPrimeChat {
@@ -32,7 +32,7 @@ class SyntaxPrimeChat {
         };
         this.trendsPollingInterval = null;
         
-        // Voice Synthesis System - Date: 9/28/25
+        // Voice Synthesis System
         this.voiceEnabled = false;
         this.currentAudio = null;
         this.audioCache = new Map();
@@ -43,10 +43,22 @@ class SyntaxPrimeChat {
             'ggpt': 'echo'
         };
         
-        // Image Generation System - Date: 9/28/25
+        // Image Generation System
         this.imageEnabled = false;
         this.imageGenerationQueue = [];
         this.currentImageGeneration = null;
+        
+        // Random greetings for welcome screen
+        this.greetings = [
+            { text: "Hey there", subtext: "What can I help you with?" },
+            { text: "Good to see you", subtext: "What's on your mind?" },
+            { text: "Ready when you are", subtext: "Let's get something done." },
+            { text: "What do you need?", subtext: "I'm all ears." },
+            { text: "Let's do this", subtext: "What are we working on?" },
+            { text: "At your service", subtext: "What can I do for you?" },
+            { text: "Hey", subtext: "What's up?" },
+            { text: "Alright", subtext: "What do you got for me?" }
+        ];
         
         this.init();
     }
@@ -60,13 +72,45 @@ class SyntaxPrimeChat {
         this.setupDragAndDrop();
         this.autoResizeTextarea();
         this.initializeTrendsSystem();
-        this.initializeVoiceSystem(); // Date: 9/28/25
-        this.initializeImageSystem(); // Date: 9/28/25
+        this.initializeVoiceSystem();
+        this.initializeImageSystem();
+        this.setRandomGreeting();
         
         // Focus message input
         document.getElementById('messageInput').focus();
         
         this.debugDatetimeContext();
+    }
+    
+    // === Random Greeting System ===
+    getTimeBasedGreeting() {
+        const hour = new Date().getHours();
+        if (hour < 12) return "Good morning";
+        if (hour < 18) return "Good afternoon";
+        return "Good evening";
+    }
+    
+    getRandomGreeting() {
+        // 30% chance to use time-based greeting
+        if (Math.random() < 0.3) {
+            return {
+                text: this.getTimeBasedGreeting(),
+                subtext: "What can I help you with?"
+            };
+        }
+        // 70% chance to use random greeting
+        return this.greetings[Math.floor(Math.random() * this.greetings.length)];
+    }
+    
+    setRandomGreeting() {
+        const greetingText = document.getElementById('greetingText');
+        const greetingSubtext = document.getElementById('greetingSubtext');
+        
+        if (greetingText && greetingSubtext) {
+            const greeting = this.getRandomGreeting();
+            greetingText.textContent = greeting.text;
+            greetingSubtext.textContent = greeting.subtext;
+        }
     }
     
     debugDatetimeContext() {
@@ -239,7 +283,7 @@ class SyntaxPrimeChat {
         if (cancelBookmark) cancelBookmark.addEventListener('click', () => this.hideModal(bookmarkModal));
         if (saveBookmark) saveBookmark.addEventListener('click', this.saveBookmark.bind(this));
         
-        // 💾 Drive modal handlers
+        // Drive modal handlers
         const driveModal = document.getElementById('driveModal');
         const closeDriveModal = document.getElementById('closeDriveModal');
         const cancelDrive = document.getElementById('cancelDrive');
@@ -269,7 +313,7 @@ class SyntaxPrimeChat {
         });
     }
     
-    // === Voice Synthesis Integration - Date: 9/28/25 ===
+    // === Voice Synthesis Integration ===
     async initializeVoiceSystem() {
         try {
             console.log('🎤 Initializing Voice Synthesis system...');
@@ -445,7 +489,7 @@ class SyntaxPrimeChat {
         // Could add a toast notification here
     }
     
-    // === Image Generation Integration - Date: 9/28/25 ===
+    // === Image Generation Integration ===
     async initializeImageSystem() {
         try {
             console.log('🎨 Initializing Image Generation system...');
@@ -674,8 +718,8 @@ class SyntaxPrimeChat {
             
             if (opportunities && opportunities.length > 0) {
                 const newOpportunities = opportunities.filter(opp =>
-                                                              !this.pendingOpportunities.some(pending => pending.id === opp.id)
-                                                              );
+                    !this.pendingOpportunities.some(pending => pending.id === opp.id)
+                );
                 
                 if (newOpportunities.length > 0) {
                     console.log(`📈 ${newOpportunities.length} new trend opportunities found`);
@@ -685,15 +729,15 @@ class SyntaxPrimeChat {
                     
                     // Show browser notification
                     this.showBrowserNotification(
-                                                 'New Trend Opportunities',
-                                                 `${newOpportunities.length} new training opportunities available`
-                                                 );
+                        'New Trend Opportunities',
+                        `${newOpportunities.length} new training opportunities available`
+                    );
                     
                     // Show in-app toast
                     this.showToast(
-                                   `📈 ${newOpportunities.length} new trend opportunities available`,
-                                   'info'
-                                   );
+                        `📈 ${newOpportunities.length} new trend opportunities available`,
+                        'info'
+                    );
                 }
             }
         } catch (error) {
@@ -737,9 +781,9 @@ class SyntaxPrimeChat {
             
             // Display opportunities as special chat messages
             this.addTrendsMessage(
-                                  `Found ${opportunities.length} trend opportunities for training:`,
-                                  'header'
-                                  );
+                `Found ${opportunities.length} trend opportunities for training:`,
+                'header'
+            );
             
             // Show each opportunity as a card
             opportunities.forEach(opportunity => {
@@ -900,14 +944,14 @@ class SyntaxPrimeChat {
                 
                 // Remove from pending opportunities
                 this.pendingOpportunities = this.pendingOpportunities.filter(
-                                                                             opp => opp.id !== opportunityId
-                                                                             );
+                    opp => opp.id !== opportunityId
+                );
                 
                 // Show success toast
                 this.showToast(
-                               `✅ ${feedbackType === 'good_match' ? 'Good' : 'Bad'} match feedback recorded`,
-                               'success'
-                               );
+                    `✅ ${feedbackType === 'good_match' ? 'Good' : 'Bad'} match feedback recorded`,
+                    'success'
+                );
                 
                 // Remove the opportunity card after 2 seconds
                 setTimeout(() => {
@@ -1084,7 +1128,6 @@ class SyntaxPrimeChat {
     }
     
     // ENHANCED: Send message with detailed duplication tracking and trends detection - PROTECTED
-    // ENHANCED: Send message with detailed duplication tracking and trends detection - PROTECTED 9/30/25
     async sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
@@ -1112,7 +1155,7 @@ class SyntaxPrimeChat {
             }, 1000);
         }
         
-        // Check for image generation commands - Date: 9/28/25
+        // Check for image generation commands
         const imagePrompt = this.detectImageCommands(message);
         if (imagePrompt && this.imageEnabled) {
             console.log(`🎨 Image command detected: "${imagePrompt}"`);
@@ -1135,7 +1178,7 @@ class SyntaxPrimeChat {
         // Clear input
         messageInput.value = '';
         this.updateCharCount();
-        //this.clearUploadedFiles();
+        this.autoResizeTextarea();
         
         try {
             // Show typing indicator
@@ -1198,13 +1241,7 @@ class SyntaxPrimeChat {
                 knowledgeSources: response.knowledge_sources || []
             });
             
-            // Voice synthesis for AI response - Date: 9/28/25
-            //if (this.voiceEnabled && assistantMessage) {
-            //    console.log(`🎤 Starting voice synthesis for response ${response.message_id}`);
-            //    await this.synthesizeVoice(response.response, response.message_id);
-            //}
-            
-            // Image generation if requested - Date: 9/28/25
+            // Image generation if requested
             if (imagePrompt && this.imageEnabled && assistantMessage) {
                 console.log(`🎨 Starting image generation for prompt: "${imagePrompt}"`);
                 await this.generateImage(imagePrompt, assistantMessage);
@@ -1257,7 +1294,7 @@ class SyntaxPrimeChat {
         }
     }
     
-    // ENHANCED: Message display from working version with feedback buttons + Voice & Image Integration - Date: 9/28/25
+    // ENHANCED: Message display with feedback buttons + Voice & Image Integration
     addMessage(role, content, metadata = {}) {
         const messagesContainer = document.getElementById('chatMessages');
         const welcomeMessage = messagesContainer.querySelector('.welcome-message');
@@ -1308,7 +1345,7 @@ class SyntaxPrimeChat {
         
         contentDiv.appendChild(bubble);
         
-        // Add voice controls for assistant messages - Date: 9/28/25
+        // Add voice controls for assistant messages
         if (role === 'assistant' && !metadata.error && this.voiceEnabled) {
             const voiceControls = document.createElement('div');
             voiceControls.className = 'voice-controls';
@@ -1355,11 +1392,11 @@ class SyntaxPrimeChat {
             badBtn.innerHTML = '👎';
             badBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'bad'));
             
-            // FIXED: Personality feedback button - Date: 9/28/25
+            // Personality feedback button
             const personalityBtn = document.createElement('button');
             personalityBtn.className = 'message-action feedback-personality';
             personalityBtn.title = 'Good Personality';
-            personalityBtn.innerHTML = '🖕'; // Fixed back to original
+            personalityBtn.innerHTML = '🖕';
             personalityBtn.addEventListener('click', () => this.submitFeedback(metadata.messageId, 'personality'));
             
             // Bookmark button
@@ -1369,7 +1406,7 @@ class SyntaxPrimeChat {
             bookmarkBtn.innerHTML = '📌';
             bookmarkBtn.addEventListener('click', () => this.rememberMessage(metadata.messageId));
             
-            // 💾 Drive button
+            // Drive button
             const driveBtn = document.createElement('button');
             driveBtn.className = 'message-action drive-btn';
             driveBtn.title = 'Copy to Google Drive';
@@ -1409,7 +1446,7 @@ class SyntaxPrimeChat {
         // Store message content for potential bookmarking
         messageDiv._messageContent = content;
         
-        // Return message element for voice/image integration - Date: 9/28/25
+        // Return message element for voice/image integration
         return messageDiv;
     }
     
@@ -1427,33 +1464,42 @@ class SyntaxPrimeChat {
             
             // Format the rest of the content
             const formattedContent = content
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-            .replace(/`(.*?)`/g, '<code>$1</code>')
-                     .replace(/\n/g, '<br>');
-                     
-                     // Add the image at the end with proper styling
-                     return `${formattedContent}
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+            
+            // Add the image at the end with proper styling
+            return `${formattedContent}
                 <div class="generated-image-container" style="margin-top: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                     <img src="data:image/png;base64,${base64Data}" 
                          alt="Generated Image" 
                          style="width: 100%; height: auto; display: block; max-width: 512px;" 
                          loading="lazy" />
                 </div>`;
-                     }
+        }
         
         // No image data, just format normally
         return content
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/`(.*?)`/g, '<code>$1</code>')
-                 .replace(/\n/g, '<br>');
-                 }
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/`(.*?)`/g, '<code>$1</code>')
+            .replace(/\n/g, '<br>');
+    }
     
+    // FIXED: Auto-resize textarea - now properly resizes on input
     autoResizeTextarea() {
         const textarea = document.getElementById('messageInput');
+        if (!textarea) return;
+        
+        // Reset height to auto to get accurate scrollHeight
         textarea.style.height = 'auto';
-        const newHeight = Math.min(textarea.scrollHeight, 150);
+        
+        // Calculate new height with min (48px) and max (200px) constraints
+        const minHeight = 48;
+        const maxHeight = 200;
+        const newHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
+        
         textarea.style.height = newHeight + 'px';
     }
     
@@ -1532,35 +1578,21 @@ class SyntaxPrimeChat {
         }
     }
     
+    // UPDATED: Start new chat with simplified greeting
     startNewChat() {
         this.currentThreadId = null;
         const messagesContainer = document.getElementById('chatMessages');
         
+        // Get a fresh random greeting
+        const greeting = this.getRandomGreeting();
+        
         messagesContainer.innerHTML = `
             <div class="welcome-message">
                 <div class="welcome-icon">
-                    <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 80px; height: 80px; object-fit: contain;">
+                    <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 64px; height: 64px; object-fit: contain;">
                 </div>
-                <h2>Welcome to Syntax Prime V2</h2>
-                <p>Your sarcastic AI assistant with perfect memory and 38% more attitude.</p>
-                <div class="welcome-features">
-                    <div class="feature-item">
-                        <span class="feature-icon">🧠</span>
-                        <span>250K Context Memory</span>
-                    </div>
-                    <div class="feature-item">
-                        <span class="feature-icon">📚</span>
-                        <span>21K Knowledge Base</span>
-                    </div>
-                    <div class="feature-item">
-                        <span class="feature-icon">🎭</span>
-                        <span>4 Unique Personalities</span>
-                    </div>
-                    <div class="feature-item">
-                        <span class="feature-icon">📖</span>
-                        <span>Smart Bookmarks</span>
-                    </div>
-                </div>
+                <h2 id="greetingText">${greeting.text}</h2>
+                <p id="greetingSubtext">${greeting.subtext}</p>
             </div>
         `;
         
@@ -1615,7 +1647,7 @@ class SyntaxPrimeChat {
             clearInterval(this.trendsPollingInterval);
         }
         
-        // Clean up audio - Date: 9/28/25
+        // Clean up audio
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio = null;
@@ -1699,124 +1731,170 @@ class SyntaxPrimeChat {
             // Render message history
             response.messages.forEach(msg => {
                 this.addMessage(msg.role, msg.content, {
-                    messageId: msg.id,
-                    timestamp: msg.timestamp,
-                    personality: msg.model_used
+                    messageId: msg.message_id,
+                    personality: msg.personality_id,
+                    responseTime: msg.response_time_ms
                 });
             });
             
-            // Update sidebar to show active conversation
-            const convResponse = await this.apiCall('/ai/conversations?limit=50', 'GET');
-            if (convResponse && convResponse.conversations) {
-                this.renderConversations(convResponse.conversations);
-            }
+            // Update sidebar active state
+            document.querySelectorAll('.conversation-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.threadId === threadId);
+            });
+            
+            console.log(`Loaded thread: ${threadId}`);
             
         } catch (error) {
-            console.error('Error loading thread:', error);
+            console.error('Failed to load thread:', error);
             this.showToast('❌ Failed to load conversation', 'error');
         }
     }
     
     formatDate(dateString) {
         if (!dateString) return '';
+        
         const date = new Date(dateString);
         const now = new Date();
-        const diff = now - date;
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
         
-        if (days === 0) return 'Today';
-        if (days === 1) return 'Yesterday';
-        if (days < 7) return `${days} days ago`;
-        return date.toLocaleDateString();
+        if (diffDays === 0) {
+            return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } else if (diffDays === 1) {
+            return 'Yesterday';
+        } else if (diffDays < 7) {
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+        } else {
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
     }
     
+    // === File Upload Handling ===
     setupDragAndDrop() {
+        const chatContainer = document.querySelector('.chat-container');
         const dragOverlay = document.getElementById('dragOverlay');
         
+        if (!chatContainer || !dragOverlay) return;
+        
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            document.addEventListener(eventName, preventDefaults, false);
+            chatContainer.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
         });
         
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        
-        ['dragenter', 'dragover'].forEach(eventName => {
-            document.addEventListener(eventName, () => {
-                if (dragOverlay) dragOverlay.style.display = 'flex';
-            }, false);
+        chatContainer.addEventListener('dragenter', () => {
+            dragOverlay.style.display = 'flex';
         });
         
-        ['dragleave', 'drop'].forEach(eventName => {
-            document.addEventListener(eventName, () => {
-                if (dragOverlay) dragOverlay.style.display = 'none';
-            }, false);
-        });
-        
-        document.addEventListener('drop', this.handleFileSelect.bind(this), false);
-        console.log('Drag and drop setup complete');
-    }
-    
-    handleFileSelect(e) {
-        const files = e.dataTransfer ? e.dataTransfer.files : e.target.files;
-        
-        if (!files || files.length === 0) return;
-        
-        Array.from(files).forEach(file => {
-            if (this.uploadedFiles.length < 5) {
-                this.uploadedFiles.push({
-                    name: file.name,
-                    size: file.size,
-                    type: file.type,
-                    file: file
-                });
+        dragOverlay.addEventListener('dragleave', (e) => {
+            if (e.target === dragOverlay) {
+                dragOverlay.style.display = 'none';
             }
         });
         
-        this.updateFileDisplay();
-        this.handleInputChange();
-        
-        console.log('Files uploaded:', this.uploadedFiles);
+        dragOverlay.addEventListener('drop', (e) => {
+            dragOverlay.style.display = 'none';
+            const files = e.dataTransfer.files;
+            this.handleFiles(files);
+        });
     }
     
-    updateFileDisplay() {
-        const fileUploadArea = document.getElementById('fileUploadArea');
-        const uploadedFiles = document.getElementById('uploadedFiles');
+    handleFileSelect(event) {
+        const files = event.target.files;
+        this.handleFiles(files);
+    }
+    
+    handleFiles(files) {
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        const allowedTypes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/pdf', 'text/plain', 'text/markdown', 'text/csv',
+            'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/x-python', 'application/x-python-code'
+        ];
         
-        if (this.uploadedFiles.length > 0) {
-            fileUploadArea.style.display = 'block';
-            uploadedFiles.innerHTML = this.uploadedFiles.map((file, index) => `
-                <div class="uploaded-file">
-                    <span class="file-name">${file.name}</span>
-                    <button class="remove-file" onclick="window.syntaxPrimeChat.removeFile(${index})">×</button>
-                </div>
-            `).join('');
-        } else {
-            fileUploadArea.style.display = 'none';
+        for (const file of files) {
+            // Check file size
+            if (file.size > maxSize) {
+                this.showToast(`❌ ${file.name} is too large (max 10MB)`, 'error');
+                continue;
+            }
+            
+            // Check file type
+            const isAllowed = allowedTypes.includes(file.type) ||
+                              file.name.endsWith('.py') ||
+                              file.name.endsWith('.md');
+            
+            if (!isAllowed) {
+                this.showToast(`❌ ${file.name} type not supported`, 'error');
+                continue;
+            }
+            
+            // Add to uploaded files
+            this.uploadedFiles.push({
+                file: file,
+                name: file.name,
+                type: file.type,
+                size: file.size
+            });
         }
+        
+        this.renderUploadedFiles();
+        this.handleInputChange();
+    }
+    
+    renderUploadedFiles() {
+        const fileUploadArea = document.getElementById('fileUploadArea');
+        const uploadedFilesContainer = document.getElementById('uploadedFiles');
+        
+        if (this.uploadedFiles.length === 0) {
+            fileUploadArea.style.display = 'none';
+            return;
+        }
+        
+        fileUploadArea.style.display = 'block';
+        uploadedFilesContainer.innerHTML = this.uploadedFiles.map((file, index) => `
+            <div class="uploaded-file">
+                <span>${this.getFileIcon(file.type)} ${file.name}</span>
+                <button class="file-remove" onclick="window.syntaxPrimeChat.removeFile(${index})">×</button>
+            </div>
+        `).join('');
+    }
+    
+    getFileIcon(type) {
+        if (type.startsWith('image/')) return '🖼️';
+        if (type === 'application/pdf') return '📄';
+        if (type.includes('word')) return '📝';
+        if (type.includes('excel') || type.includes('spreadsheet')) return '📊';
+        if (type.includes('python') || type === 'text/x-python') return '🐍';
+        return '📎';
     }
     
     removeFile(index) {
         this.uploadedFiles.splice(index, 1);
-        this.updateFileDisplay();
+        this.renderUploadedFiles();
         this.handleInputChange();
     }
     
     clearUploadedFiles() {
         this.uploadedFiles = [];
-        this.updateFileDisplay();
+        this.renderUploadedFiles();
     }
     
+    // === Bookmark Functions ===
     showBookmarkModal() {
         const modal = document.getElementById('bookmarkModal');
         if (modal) {
             modal.style.display = 'flex';
-            // Add active class for animation
-            setTimeout(() => {
-                modal.classList.add('active');
-            }, 10);
-            document.getElementById('bookmarkName').focus();
+            setTimeout(() => modal.classList.add('active'), 10);
+            
+            // Focus the input
+            const nameInput = document.getElementById('bookmarkName');
+            if (nameInput) {
+                nameInput.value = '';
+                nameInput.focus();
+            }
         }
     }
     
@@ -1824,77 +1902,68 @@ class SyntaxPrimeChat {
         const modal = document.getElementById('driveModal');
         if (modal) {
             modal.style.display = 'flex';
-            // Add active class for animation
-            setTimeout(() => {
-                modal.classList.add('active');
-            }, 10);
-            document.getElementById('driveDocName').focus();
+            setTimeout(() => modal.classList.add('active'), 10);
+            
+            // Focus the input
+            const nameInput = document.getElementById('driveDocName');
+            if (nameInput) {
+                nameInput.value = '';
+                nameInput.focus();
+            }
         }
     }
     
     async saveBookmark() {
-        const bookmarkName = document.getElementById('bookmarkName').value.trim();
-        if (!bookmarkName) return;
+        const nameInput = document.getElementById('bookmarkName');
+        const bookmarkName = nameInput?.value.trim();
         
-        console.log('🔖 saveBookmark called with name:', bookmarkName);
+        if (!bookmarkName) {
+            this.showToast('❌ Please enter a bookmark name', 'error');
+            return;
+        }
+        
+        if (!this.bookmarkToCreate) {
+            this.showToast('❌ No message to bookmark', 'error');
+            return;
+        }
         
         try {
-            // Need to track which message is being bookmarked
-            if (!this.bookmarkToCreate) {
-                console.log('❌ No bookmarkToCreate found');
-                this.showToast('❌ No message selected to bookmark', 'error');
-                return;
-            }
-            
-            console.log('✅ bookmarkToCreate:', this.bookmarkToCreate);
-            console.log('✅ currentThreadId:', this.currentThreadId);
-            
-            // Create FormData instead of JSON
-            const formData = new FormData();
-            formData.append('message_id', this.bookmarkToCreate.messageId);
-            formData.append('bookmark_name', bookmarkName);
-            if (this.currentThreadId) {
-                formData.append('thread_id', this.currentThreadId);
-            }
-            
-            console.log('📤 Calling API with FormData...');
-            const response = await this.apiCall('/ai/bookmarks', 'POST', formData);
-            console.log('📥 API response:', response);
+            const response = await this.apiCall('/ai/bookmarks', 'POST', {
+                message_id: this.bookmarkToCreate.messageId,
+                bookmark_name: bookmarkName
+            });
             
             if (response && response.success) {
                 this.showToast('✅ Bookmark saved!', 'success');
+                this.hideModal(document.getElementById('bookmarkModal'));
+                this.bookmarkToCreate = null;
+                
+                // Reload bookmarks
+                await this.loadBookmarks();
             }
-            
-            this.hideModal(document.getElementById('bookmarkModal'));
-            document.getElementById('bookmarkName').value = '';
-            this.bookmarkToCreate = null;
-            
         } catch (error) {
-            console.error('❌ Error saving bookmark:', error);
+            console.error('Error saving bookmark:', error);
             this.showToast('❌ Failed to save bookmark', 'error');
         }
     }
     
     async saveDriveDoc() {
-        const docName = document.getElementById('driveDocName').value.trim();
+        const nameInput = document.getElementById('driveDocName');
+        const docName = nameInput?.value.trim();
+        
         if (!docName) {
             this.showToast('❌ Please enter a document name', 'error');
             return;
         }
         
-        console.log('💾 saveDriveDoc called with name:', docName);
+        if (!this.driveDocToCreate) {
+            this.showToast('❌ No content to save', 'error');
+            return;
+        }
         
         try {
-            // Check if we have content to save
-            if (!this.driveDocToCreate) {
-                console.log('❌ No driveDocToCreate found');
-                this.showToast('❌ No message selected', 'error');
-                return;
-            }
+            console.log('💾 Creating Drive document:', docName);
             
-            console.log('✅ driveDocToCreate:', this.driveDocToCreate);
-            
-            // Use existing backend endpoint format
             const requestData = {
                 title: docName,
                 content: this.driveDocToCreate.content,
@@ -2032,13 +2101,13 @@ class SyntaxPrimeChat {
         console.log('💾 Copy to Drive:', messageId);
         
         // Get the message element and retrieve raw markdown
-            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-            const content = messageElement ? messageElement.getAttribute('data-raw-markdown') : null;
-            
-            if (!content) {
-                this.showToast('❌ Could not find message content', 'error');
-                return;
-            }
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        const content = messageElement ? messageElement.getAttribute('data-raw-markdown') : null;
+        
+        if (!content) {
+            this.showToast('❌ Could not find message content', 'error');
+            return;
+        }
         
         console.log('📝 Content type:', typeof content);
         console.log('📝 Content preview (first 200 chars):', content.substring(0, 200));
@@ -2052,6 +2121,18 @@ class SyntaxPrimeChat {
         };
         
         this.showDriveModal();
+    }
+    
+    async loadBookmarkedMessage(messageId) {
+        try {
+            // For now, just show a toast - full implementation would load the thread
+            this.showToast('📌 Loading bookmarked message...', 'info');
+            
+            // You could implement thread loading here
+            console.log('Load bookmarked message:', messageId);
+        } catch (error) {
+            console.error('Error loading bookmarked message:', error);
+        }
     }
 }
 
@@ -2081,417 +2162,3 @@ if (document.readyState === 'loading') {
     // DOM is already ready
     initializeSyntaxChat();
 }
-
-// Add notification animations and Google Trends styling + Voice & Image Integration - Date: 9/28/25
-const style = document.createElement('style');
-style.textContent = `
-@keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-@keyframes slideOutRight {
-    from { transform: translateX(0); opacity: 1; }
-    to { transform: translateX(100%); opacity: 0; }
-}
-
-/* Google Trends Training Styles */
-.trends-opportunity {
-    border-left: 4px solid #4CAF50;
-}
-
-.trends-header {
-    border-left: 4px solid #2196F3;
-}
-
-.trends-info {
-    border-left: 4px solid #FF9800;
-}
-
-.trends-error {
-    border-left: 4px solid #f44336;
-}
-
-.trends-bubble {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.opportunity-card {
-    border: 2px solid #e0e0e0;
-    border-radius: 12px;
-    padding: 16px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    color: #333;
-}
-
-.opportunity-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-}
-
-.opportunity-keyword {
-    font-size: 18px;
-    font-weight: bold;
-    color: #2c3e50;
-}
-
-.opportunity-meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.business-area {
-    background: #3498db;
-    color: white;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.urgency-level {
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: uppercase;
-}
-
-.urgency-level.critical {
-    background: #e74c3c;
-    color: white;
-}
-
-.urgency-level.high {
-    background: #f39c12;
-    color: white;
-}
-
-.urgency-level.medium {
-    background: #f1c40f;
-    color: #333;
-}
-
-.urgency-level.low {
-    background: #95a5a6;
-    color: white;
-}
-
-.opportunity-details {
-    margin-bottom: 16px;
-}
-
-.opportunity-stats {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #666;
-}
-
-.opportunity-description {
-    color: #555;
-    line-height: 1.4;
-}
-
-.opportunity-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-}
-
-.training-btn {
-    flex: 1;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 14px;
-}
-
-.training-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-
-.training-btn:disabled {
-    cursor: not-allowed;
-}
-
-.good-match {
-    background: #27ae60;
-    color: white;
-}
-
-.good-match:hover:not(:disabled) {
-    background: #219a52;
-}
-
-.bad-match {
-    background: #e74c3c;
-    color: white;
-}
-
-.bad-match:hover:not(:disabled) {
-    background: #c0392b;
-}
-
-.feedback-success {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 12px;
-    background: #d4edda;
-    border: 1px solid #c3e6cb;
-    border-radius: 8px;
-    color: #155724;
-}
-
-.success-icon {
-    font-size: 18px;
-}
-
-.success-text {
-    font-weight: 500;
-}
-
-/* Toast Notifications */
-.syntax-toast {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 10000;
-    max-width: 400px;
-    transform: translateX(100%);
-    opacity: 0;
-    transition: all 0.3s ease;
-}
-
-.syntax-toast.toast-show {
-    transform: translateX(0);
-    opacity: 1;
-}
-
-.toast-content {
-    display: flex;
-    align-items: center;
-    padding: 12px 16px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    background: white;
-    border-left: 4px solid #ccc;
-}
-
-.toast-info .toast-content {
-    border-left-color: #2196F3;
-}
-
-.toast-success .toast-content {
-    border-left-color: #4CAF50;
-}
-
-.toast-error .toast-content {
-    border-left-color: #f44336;
-}
-
-.toast-warning .toast-content {
-    border-left-color: #FF9800;
-}
-
-.toast-message {
-    flex: 1;
-    margin-right: 12px;
-    font-size: 14px;
-    line-height: 1.4;
-}
-
-.toast-close {
-    background: none;
-    border: none;
-    font-size: 18px;
-    cursor: pointer;
-    color: #666;
-    padding: 0;
-    line-height: 1;
-}
-
-.toast-close:hover {
-    color: #333;
-}
-
-/* Voice and Image Integration Styles - Date: 9/28/25 */
-.voice-controls {
-    margin-top: 8px;
-}
-
-.speaker-button {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: all 0.2s ease;
-}
-
-.speaker-button:hover {
-    background: var(--bg-secondary);
-}
-
-.speaker-button.loading {
-    animation: pulse 1.5s infinite;
-}
-
-.speaker-button.playing {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-}
-
-.waveform-animation {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: 8px;
-}
-
-.waveform-bar {
-    width: 3px;
-    height: 12px;
-    background: currentColor;
-    animation: waveform 1s infinite ease-in-out;
-}
-
-.waveform-bar:nth-child(1) { animation-delay: 0s; }
-.waveform-bar:nth-child(2) { animation-delay: 0.1s; }
-.waveform-bar:nth-child(3) { animation-delay: 0.2s; }
-.waveform-bar:nth-child(4) { animation-delay: 0.3s; }
-.waveform-bar:nth-child(5) { animation-delay: 0.4s; }
-
-@keyframes waveform {
-    0%, 40%, 100% { transform: scaleY(0.4); }
-    20% { transform: scaleY(1); }
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-.image-generation-progress {
-    margin-top: 16px;
-    padding: 16px;
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    background: var(--bg-secondary);
-}
-
-.progress-spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid var(--border);
-    border-top: 2px solid var(--primary);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 12px;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.progress-info {
-    text-align: center;
-}
-
-.progress-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.progress-subtitle {
-    color: var(--text-secondary);
-    font-size: 14px;
-    margin-bottom: 12px;
-}
-
-.progress-bar-container {
-    width: 100%;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.progress-bar {
-    height: 100%;
-    background: var(--primary);
-    transition: width 0.3s ease;
-}
-
-.generated-image-container {
-    margin-top: 16px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.generated-image {
-    width: 100%;
-    height: auto;
-    display: block;
-}
-
-.image-controls {
-    padding: 12px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.image-info {
-    flex: 1;
-}
-
-.image-prompt {
-    font-weight: 500;
-    margin-bottom: 4px;
-}
-
-.image-metadata {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.download-button {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: background 0.2s ease;
-}
-
-.download-button:hover {
-    background: var(--primary-dark);
-}
-
-.image-generation-error {
-    margin-top: 16px;
-}
-`;
-document.head.appendChild(style);

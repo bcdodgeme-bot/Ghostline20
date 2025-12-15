@@ -28,7 +28,7 @@ class BlueskyMultiClient:
         return {
             'personal': {
                 'handle': os.getenv('BLUESKY_PERSONAL_HANDLE', 'bcdodgeme.bsky.social'),
-                'password': os.getenv('BLUESKY_PERSONAL_PASSWORD', '#062308Ghada!'),
+                'password': os.getenv('BLUESKY_PERSONAL_PASSWORD'),  # No default - must be in env
                 'personality': 'syntaxprime',
                 'keywords_table': 'bcdodge_keywords',  # 884 keywords (personal blog)
                 'can_cross_to': ['rose_angel', 'binge_tv'],
@@ -39,7 +39,7 @@ class BlueskyMultiClient:
             },
             'rose_angel': {
                 'handle': os.getenv('BLUESKY_ROSE_ANGEL_HANDLE', 'roseandangel.bsky.social'),
-                'password': os.getenv('BLUESKY_ROSE_ANGEL_PASSWORD', 'RWsArrfwdkMWDb4'), 
+                'password': os.getenv('BLUESKY_ROSE_ANGEL_PASSWORD'),  # No default - must be in env
                 'personality': 'professional',
                 'keywords_table': 'roseandangel_keywords',  # 1,451 keywords (consulting agency)
                 'can_cross_to': ['personal', 'meals_feelz'],
@@ -50,7 +50,7 @@ class BlueskyMultiClient:
             },
             'binge_tv': {
                 'handle': os.getenv('BLUESKY_BINGE_TV_HANDLE', 'tvsignals.bsky.social'),
-                'password': os.getenv('BLUESKY_BINGE_TV_PASSWORD', 'wpaQ2MQdCs4RfQG'),
+                'password': os.getenv('BLUESKY_BINGE_TV_PASSWORD'),  # No default - must be in env
                 'personality': 'syntaxprime',
                 'keywords_table': 'tvsignals_keywords',  # 295 keywords (streaming content)
                 'can_cross_to': ['personal'],
@@ -61,7 +61,7 @@ class BlueskyMultiClient:
             },
             'meals_feelz': {
                 'handle': os.getenv('BLUESKY_MEALS_FEELZ_HANDLE', 'mealsnfeelz.bsky.social'),
-                'password': os.getenv('BLUESKY_MEALS_FEELZ_PASSWORD', '55X3XyFwMHGfsNG'),
+                'password': os.getenv('BLUESKY_MEALS_FEELZ_PASSWORD'),  # No default - must be in env
                 'personality': 'compassionate',
                 'keywords_table': 'mealsnfeelz_keywords',  # 312 keywords (food nonprofit startup)
                 'can_cross_to': ['personal', 'rose_angel'],
@@ -73,7 +73,7 @@ class BlueskyMultiClient:
             },
             'damn_it_carl': {
                 'handle': os.getenv('BLUESKY_DAMN_IT_CARL_HANDLE', 'syntax-ceo.bsky.social'),
-                'password': os.getenv('BLUESKY_DAMN_IT_CARL_PASSWORD', 'C9T.uhTRYqEPxH.'),
+                'password': os.getenv('BLUESKY_DAMN_IT_CARL_PASSWORD'),  # No default - must be in env
                 'personality': 'syntaxprime',
                 'keywords_table': 'damnitcarl_keywords',  # 402 keywords (creative burnout + merch)
                 'can_cross_to': [],  # ISLAND MODE

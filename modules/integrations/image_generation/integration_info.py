@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Module constants
 MODULE_NAME = 'image_generation'
-MODULE_VERSION = '1.0.0'
+MODULE_VERSION = '2.0.0'
 MODULE_DESCRIPTION = 'AI-powered image generation with inline display and download functionality'
 
 def check_module_health() -> Dict[str, Any]:
@@ -50,11 +50,10 @@ def check_module_health() -> Dict[str, Any]:
     # 1. Environment Variables Check
     required_vars = [
         'DATABASE_URL',
-        'REPLICATE_API_TOKEN'
+        'OPENROUTER_API_KEY'
     ]
     
     optional_vars = [
-        'REPLICATE_MODEL_PREFERENCE',
         'IMAGE_GENERATION_TIMEOUT',
         'IMAGE_QUALITY_DEFAULT',
         'IMAGE_STORAGE_PATH',
@@ -127,13 +126,13 @@ async def check_runtime_health() -> Dict[str, Any]:
             runtime_status['healthy'] = False
             runtime_status['errors'].append(f"Database test failed: {db_test['error']}")
         
-        # 2. Replicate API Test
-        api_test = await _test_replicate_api()
-        runtime_status['tests']['replicate_api'] = api_test
+        # 2. OpenRouter API Test
+        api_test = await _test_openrouter_api()
+        runtime_status['tests']['openrouter_api'] = api_test
         
         if not api_test['success']:
             runtime_status['healthy'] = False
-            runtime_status['errors'].append(f"Replicate API test failed: {api_test['error']}")
+            runtime_status['errors'].append(f"OpenRouter API test failed: {api_test['error']}")
         
         # 3. Image Processing Test
         processing_test = await _test_image_processing()
@@ -208,7 +207,7 @@ def get_integration_info() -> Dict[str, Any]:
         # Core features
         'features': [
             'Inline image display (base64) - no external URLs to follow',
-            'Smart model selection eliminates Replicate interface confusion',
+            'OpenRouter API with Gemini image generation',
             'Content intelligence integration (RSS/Trends/Scraper)',
             'Prompt optimization using marketing insights',
             'Multiple format downloads (PNG, JPG, WebP)',
@@ -222,15 +221,14 @@ def get_integration_info() -> Dict[str, Any]:
         # Technical capabilities
         'technical_capabilities': {
             'supported_models': [
-                'Stable Diffusion XL (high quality)',
-                'SDXL Lightning (fast generation)',
-                'Realistic Vision (artistic/illustration)',
-                'Smart model selection based on content type'
+                'Gemini (via OpenRouter)',
+                'Aspect ratio support per content type',
+                'Direct base64 response (no polling)'
             ],
             'supported_formats': ['PNG', 'JPG', 'JPEG', 'WebP'],
             'quality_presets': ['web_optimized', 'high_quality', 'print_ready', 'social_media', 'thumbnail'],
             'resolution_presets': [
-                'Original', 'HD (1920x1080)', 'Instagram (1080x1080)', 
+                'Original', 'HD (1920x1080)', 'Instagram (1080x1080)',
                 'Facebook (1200x630)', 'Twitter (1200x675)', 'Blog Header (1200x630)'
             ],
             'content_intelligence': [
@@ -314,17 +312,12 @@ def get_integration_info() -> Dict[str, Any]:
                     'example': 'postgresql://user:pass@host:port/dbname'
                 },
                 {
-                    'name': 'REPLICATE_API_TOKEN',
-                    'description': 'Replicate API authentication token',
-                    'example': 'r8_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+                    'name': 'OPENROUTER_API_KEY',
+                    'description': 'OpenRouter API authentication key',
+                    'example': 'sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
                 }
             ],
             'optional_env_vars': [
-                {
-                    'name': 'REPLICATE_MODEL_PREFERENCE',
-                    'description': 'Default model preference override',
-                    'example': 'stability-ai/stable-diffusion-xl-base-1.0'
-                },
                 {
                     'name': 'IMAGE_GENERATION_TIMEOUT',
                     'description': 'Generation timeout in seconds',
@@ -344,7 +337,7 @@ def get_integration_info() -> Dict[str, Any]:
             '1. User types image command in chat interface',
             '2. AI router detects image generation request',
             '3. Prompt optimizer enhances description using content intelligence',
-            '4. Replicate client selects optimal model and generates image',
+            '4. OpenRouter client generates image via Gemini',
             '5. Image displays inline immediately via base64 encoding',
             '6. Database manager saves image with full metadata',
             '7. Download buttons provide multiple format options',
@@ -357,14 +350,14 @@ def get_integration_info() -> Dict[str, Any]:
             'marketing_intelligence_integration': 'Images informed by current trends',
             'brand_consistency': 'Style templates ensure cohesive visual identity',
             'workflow_efficiency': 'Inline display eliminates external URL friction',
-            'cost_optimization': 'Smart model selection balances quality and speed',
+            'cost_optimization': 'OpenRouter provides competitive pricing',
             'analytics_insights': 'Track what visual content performs best'
         },
         
         # Troubleshooting
         'troubleshooting': {
             'common_issues': {
-                'generation_timeout': 'Check REPLICATE_API_TOKEN and network connectivity',
+                'generation_timeout': 'Check OPENROUTER_API_KEY and network connectivity',
                 'database_errors': 'Verify DATABASE_URL and table existence',
                 'style_template_missing': 'Run database setup script to create default templates',
                 'format_conversion_failure': 'Ensure PIL/Pillow dependencies are installed'
@@ -408,7 +401,7 @@ def _check_environment_variables(required_vars: List[str], optional_vars: List[s
 def _check_component_initialization() -> Dict[str, Any]:
     """Check if all components can be initialized"""
     components = {
-        'replicate_client': False,
+        'openrouter_client': False,
         'database_manager': False,
         'image_processor': False,
         'prompt_optimizer': False
@@ -416,11 +409,11 @@ def _check_component_initialization() -> Dict[str, Any]:
     errors = []
     
     try:
-        from .replicate_client import ReplicateImageClient
-        ReplicateImageClient()
-        components['replicate_client'] = True
+        from .openrouter_image_client import OpenRouterImageClient
+        OpenRouterImageClient()
+        components['openrouter_client'] = True
     except Exception as e:
-        errors.append(f"ReplicateImageClient: {str(e)}")
+        errors.append(f"OpenRouterImageClient: {str(e)}")
     
     try:
         from .database_manager import ImageDatabase
@@ -455,7 +448,7 @@ def _check_dependencies() -> Dict[str, Any]:
     """Check Python package dependencies"""
     critical_deps = [
         ('asyncpg', 'Database connectivity'),
-        ('aiohttp', 'HTTP requests for Replicate API'),
+        ('aiohttp', 'HTTP requests for OpenRouter API'),
         ('fastapi', 'API framework'),
         ('pydantic', 'Data validation')
     ]
@@ -498,10 +491,10 @@ def _check_configuration() -> Dict[str, Any]:
     """Check configuration values and settings"""
     issues = []
     
-    # Check Replicate API token format
-    api_token = os.getenv('REPLICATE_API_TOKEN')
-    if api_token and not api_token.startswith('r8_'):
-        issues.append("REPLICATE_API_TOKEN should start with 'r8_'")
+    # Check OpenRouter API key format (typically starts with sk-or-)
+    api_key = os.getenv('OPENROUTER_API_KEY')
+    if api_key and not (api_key.startswith('sk-or-') or api_key.startswith('sk-')):
+        issues.append("OPENROUTER_API_KEY format looks unusual (expected sk-or-* or sk-*)")
     
     # Check database URL format
     db_url = os.getenv('DATABASE_URL')
@@ -544,11 +537,11 @@ async def _test_database_connection() -> Dict[str, Any]:
             'tables_accessible': []
         }
 
-async def _test_replicate_api() -> Dict[str, Any]:
-    """Test Replicate API connectivity"""
+async def _test_openrouter_api() -> Dict[str, Any]:
+    """Test OpenRouter API connectivity"""
     try:
-        from .replicate_client import ReplicateImageClient
-        client = ReplicateImageClient()
+        from .openrouter_image_client import OpenRouterImageClient
+        client = OpenRouterImageClient()
         
         start_time = datetime.now()
         result = await client.test_api_connection()

@@ -17,12 +17,18 @@ Workflow:
 3. Generate AI summary using Claude
 4. Store in PostgreSQL
 5. Return success
+
+FIXES APPLIED (Session 6 - Fathom Review):
+- Changed from module-level instantiation to lazy initialization pattern
+- Use get_bot_client() and get_kill_switch() from Telegram module (Session 5 fixes)
+- All handler access now goes through getter functions
 """
 
 import logging
+import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-import json
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
@@ -30,20 +36,52 @@ from pydantic import BaseModel
 from .fathom_handler import FathomHandler
 from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
+
+# Import Telegram factory functions (fixed in Session 5)
+from modules.integrations.telegram.bot_client import get_bot_client
+from modules.integrations.telegram.kill_switch import get_kill_switch
 from modules.integrations.telegram.notification_manager import NotificationManager
-from modules.integrations.telegram.bot_client import TelegramBotClient
-from modules.integrations.telegram.kill_switch import KillSwitch
-import os
 
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/integrations/fathom", tags=["Fathom Meetings"])
 
-# Initialize handlers
-fathom_handler = FathomHandler()
-meeting_processor = MeetingProcessor()
-database_manager = FathomDatabaseManager()
+# ============================================================================
+# LAZY INITIALIZATION PATTERN
+# ============================================================================
+# These are initialized on first use, not at import time.
+# This prevents errors when environment variables aren't loaded yet
+# or when the database pool isn't ready.
+
+_fathom_handler: Optional[FathomHandler] = None
+_meeting_processor: Optional[MeetingProcessor] = None
+_database_manager: Optional[FathomDatabaseManager] = None
+
+
+def get_fathom_handler() -> FathomHandler:
+    """Get or create FathomHandler singleton"""
+    global _fathom_handler
+    if _fathom_handler is None:
+        _fathom_handler = FathomHandler()
+    return _fathom_handler
+
+
+def get_meeting_processor() -> MeetingProcessor:
+    """Get or create MeetingProcessor singleton"""
+    global _meeting_processor
+    if _meeting_processor is None:
+        _meeting_processor = MeetingProcessor()
+    return _meeting_processor
+
+
+def get_database_manager() -> FathomDatabaseManager:
+    """Get or create FathomDatabaseManager singleton"""
+    global _database_manager
+    if _database_manager is None:
+        _database_manager = FathomDatabaseManager()
+    return _database_manager
+
 
 # ============================================================================
 # REQUEST/RESPONSE MODELS
@@ -55,17 +93,21 @@ class WebhookResponse(BaseModel):
     message: str
     error: Optional[str] = None
 
+
 class MeetingSearchRequest(BaseModel):
     query: str
     limit: int = 10
+
 
 class MeetingListResponse(BaseModel):
     meetings: List[Dict[str, Any]]
     total: int
 
+
 class ActionItemUpdateRequest(BaseModel):
     item_id: str
     status: str  # pending/completed/cancelled
+
 
 # ============================================================================
 # WEBHOOK ENDPOINT (PRIMARY INTEGRATION POINT)
@@ -84,9 +126,6 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
     1. Verifies webhook signature
     2. Queues background processing
     3. Returns immediately (Fathom expects fast response)
-
-    Receive webhooks from Fathom when meetings end
-    ENHANCED DEBUG VERSION - Logs everything
     """
     try:
         logger.info("=" * 80)
@@ -108,8 +147,6 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         
         # Get raw body
         body = await request.body()
-        #logger.info(f"\n📦 RAW BODY ({len(body)} bytes):")
-        #logger.info(f"   First 1000 chars: {body[:1000].decode('utf-8', errors='ignore')}")
         
         # Try to parse as JSON
         try:
@@ -125,6 +162,7 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         
         # Verify webhook signature (if present)
         if timestamp and signature:
+            fathom_handler = get_fathom_handler()
             is_valid = fathom_handler.verify_webhook_signature(body, timestamp, signature)
             if not is_valid:
                 logger.error("❌ Webhook signature verification failed")
@@ -159,7 +197,6 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.info(f"   Meeting ID: {meeting_id}")
         
         # For now, let's accept ANY event and try to process it
-        # Remove the strict event type filtering temporarily for debugging
         if not meeting_id:
             logger.error("❌ No meeting/recording ID found in webhook")
             logger.error(f"   Available keys: {list(webhook_data.keys())}")
@@ -199,6 +236,7 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ============================================================================
 # BACKGROUND PROCESSING
 # ============================================================================
@@ -216,6 +254,10 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
     """
     try:
         logger.info(f"🔄 Processing meeting: {meeting_id}")
+        
+        # Get handler instances via lazy initialization
+        meeting_processor = get_meeting_processor()
+        database_manager = get_database_manager()
         
         # Step 1: Use webhook data directly (it has everything we need!)
         logger.info("   📦 Using data from webhook payload...")
@@ -266,9 +308,9 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
         try:
             logger.info("   📱 Sending Telegram notification...")
             
-            # Initialize Telegram notification manager
-            telegram_bot = TelegramBotClient(os.getenv('TELEGRAM_BOT_TOKEN'))
-            kill_switch = KillSwitch()
+            # Use factory functions from Session 5 fixes (not new instances)
+            telegram_bot = await get_bot_client()
+            kill_switch = await get_kill_switch()
             notification_manager = NotificationManager(telegram_bot, kill_switch)
             
             # Extract meeting details for notification
@@ -316,6 +358,7 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
             notification_text = "\n".join(message_parts)
             
             # Send notification
+            # NOTE: Hardcoded user_id is intentional - this is a single-user personal project
             result = await notification_manager.send_notification(
                 user_id="b7c60682-4815-4d9d-8ebe-66c6cd24eff9",
                 notification_type="fathom",
@@ -338,6 +381,7 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
         import traceback
         logger.error(traceback.format_exc())
 
+
 # ============================================================================
 # MEETING RETRIEVAL ENDPOINTS
 # ============================================================================
@@ -351,6 +395,7 @@ async def get_recent_meetings(limit: int = Query(10, ge=1, le=50)):
     - limit: Number of meetings to return (1-50, default 10)
     """
     try:
+        database_manager = get_database_manager()
         meetings = await database_manager.get_recent_meetings(limit=limit)
         
         return MeetingListResponse(
@@ -361,6 +406,7 @@ async def get_recent_meetings(limit: int = Query(10, ge=1, le=50)):
     except Exception as e:
         logger.error(f"❌ Failed to get meetings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/meetings/{meeting_id}")
 async def get_meeting_by_id(meeting_id: str):
@@ -375,6 +421,7 @@ async def get_meeting_by_id(meeting_id: str):
     - Full transcript
     """
     try:
+        database_manager = get_database_manager()
         meeting = await database_manager.get_meeting_by_id(meeting_id)
         
         if not meeting:
@@ -387,6 +434,7 @@ async def get_meeting_by_id(meeting_id: str):
     except Exception as e:
         logger.error(f"❌ Failed to get meeting: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/search")
 async def search_meetings(search_request: MeetingSearchRequest):
@@ -402,6 +450,7 @@ async def search_meetings(search_request: MeetingSearchRequest):
     Uses PostgreSQL full-text search for best results
     """
     try:
+        database_manager = get_database_manager()
         results = await database_manager.search_meetings(
             query_text=search_request.query,
             limit=search_request.limit
@@ -416,6 +465,7 @@ async def search_meetings(search_request: MeetingSearchRequest):
     except Exception as e:
         logger.error(f"❌ Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/meetings/date-range")
 async def get_meetings_by_date(
@@ -434,6 +484,7 @@ async def get_meetings_by_date(
         start = datetime.fromisoformat(start_date)
         end = datetime.fromisoformat(end_date)
         
+        database_manager = get_database_manager()
         meetings = await database_manager.get_meetings_by_date_range(start, end)
         
         return {
@@ -448,6 +499,7 @@ async def get_meetings_by_date(
     except Exception as e:
         logger.error(f"❌ Failed to get meetings by date: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================================================
 # ACTION ITEMS ENDPOINTS
@@ -466,6 +518,7 @@ async def get_pending_action_items(limit: int = Query(20, ge=1, le=100)):
     - Associated meeting info
     """
     try:
+        database_manager = get_database_manager()
         items = await database_manager.get_pending_action_items(limit=limit)
         
         return {
@@ -476,6 +529,7 @@ async def get_pending_action_items(limit: int = Query(20, ge=1, le=100)):
     except Exception as e:
         logger.error(f"❌ Failed to get action items: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/action-items/update")
 async def update_action_item(update_request: ActionItemUpdateRequest):
@@ -496,6 +550,7 @@ async def update_action_item(update_request: ActionItemUpdateRequest):
                 detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
             )
         
+        database_manager = get_database_manager()
         success = await database_manager.update_action_item_status(
             item_id=update_request.item_id,
             status=update_request.status
@@ -516,6 +571,7 @@ async def update_action_item(update_request: ActionItemUpdateRequest):
         logger.error(f"❌ Failed to update action item: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ============================================================================
 # STATUS & HEALTH CHECK
 # ============================================================================
@@ -532,6 +588,8 @@ async def get_integration_status():
     - Statistics
     """
     try:
+        database_manager = get_database_manager()
+        
         # Get database health
         db_health = await database_manager.health_check()
         
@@ -539,7 +597,6 @@ async def get_integration_status():
         stats = await database_manager.get_meeting_statistics()
         
         # Check configuration
-        import os
         config_status = {
             'api_key_configured': bool(os.getenv('FATHOM_API_KEY')),
             'webhook_secret_configured': bool(os.getenv('FATHOM_WEBHOOK_SECRET')),
@@ -569,6 +626,7 @@ async def get_integration_status():
             'error': str(e)
         }
 
+
 # ============================================================================
 # STARTUP EVENT
 # ============================================================================
@@ -579,6 +637,9 @@ async def startup_fathom_integration():
     logger.info("🎙️ Fathom meeting integration starting up...")
     
     try:
+        # Get database manager (lazy init happens here)
+        database_manager = get_database_manager()
+        
         # Test database connectivity
         health = await database_manager.health_check()
         
@@ -589,7 +650,6 @@ async def startup_fathom_integration():
             logger.error("❌ Database connection failed")
         
         # Log configuration status
-        import os
         logger.info("Configuration:")
         logger.info(f"   API Key: {'✅' if os.getenv('FATHOM_API_KEY') else '❌'}")
         logger.info(f"   Webhook Secret: {'✅' if os.getenv('FATHOM_WEBHOOK_SECRET') else '❌'}")

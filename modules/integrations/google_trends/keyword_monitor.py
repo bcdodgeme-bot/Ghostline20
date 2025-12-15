@@ -10,46 +10,40 @@ Workflow:
 5. Log comprehensive monitoring statistics
 
 Designed for 2-3 times daily execution (morning, noon, evening)
+
+FIXED: Now uses centralized db_manager instead of direct asyncpg.connect()
+FIXED: Uses singleton getters for component instances
+FIXED: Added whitelist validation for business area table names
 """
 
-import asyncio
-import asyncpg
-from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
 import logging
-import sys
-import os
+from typing import Dict, List, Any, Optional
+from datetime import datetime
 
-# Import our custom modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from ...core.database import db_manager
+from .keyword_expander import get_keyword_expander
+from .trends_client import get_google_trends_client
+from .database_manager import get_trends_database
 
-from .keyword_expander import KeywordExpander
-from .trends_client import GoogleTrendsClient
-from .database_manager import TrendsDatabase
-
-# Configure logging
-import sys
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(stream=sys.stdout),
-        logging.FileHandler('trends_monitoring.log', mode='a')
-    ]
-)
 logger = logging.getLogger(__name__)
+
+# Whitelist of valid business areas (used for table name validation)
+VALID_BUSINESS_AREAS = frozenset([
+    'amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals'
+])
+
 
 class KeywordMonitor:
     """Orchestrates complete keyword monitoring workflow"""
     
-    def __init__(self, database_url: str, mode: str = 'normal'):
-        self.database_url = database_url
-        self.mode = mode  # 'normal', 'fast', 'full'
+    def __init__(self, mode: str = 'normal'):
+        """Initialize KeywordMonitor - uses centralized db_manager and singletons"""
+        self.mode = mode
         
-        # Initialize components
-        self.expander = KeywordExpander(database_url)
-        self.trends_client = GoogleTrendsClient(database_url)
-        self.database = TrendsDatabase(database_url)
+        # Use singleton getters for components
+        self.expander = get_keyword_expander()
+        self.trends_client = get_google_trends_client()
+        self.database = get_trends_database()
         
         # Monitoring configuration based on mode
         self.config = self._get_monitoring_config(mode)
@@ -95,9 +89,10 @@ class KeywordMonitor:
     
     async def ensure_expanded_keywords_exist(self) -> bool:
         """Ensure expanded keywords table exists and has data"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Check if expanded keywords table exists and has data
             count = await conn.fetchval('''
                 SELECT COUNT(*) 
@@ -125,6 +120,10 @@ class KeywordMonitor:
                 SELECT COUNT(*) FROM expanded_keywords_for_trends
             ''')
             
+            # Release connection before potentially long expansion operation
+            await db_manager.release_connection(conn)
+            conn = None
+            
             if keyword_count == 0 and self.config['expand_keywords']:
                 logger.info("No expanded keywords found, running expansion...")
                 expanded_keywords = await self.expander.expand_all_keywords()
@@ -139,13 +138,20 @@ class KeywordMonitor:
             logger.error(f"Failed to ensure expanded keywords exist: {e}")
             return False
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_monitoring_keywords(self, business_area: str, limit: int) -> List[str]:
         """Get keywords to monitor for a business area"""
-        conn = await asyncpg.connect(self.database_url)
+        # Validate business area against whitelist
+        if business_area not in VALID_BUSINESS_AREAS:
+            logger.error(f"Invalid business area: {business_area}")
+            return []
         
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Try to get from expanded keywords first
             expanded_query = '''
                 SELECT expanded_keyword 
@@ -163,6 +169,7 @@ class KeywordMonitor:
                 return keywords
             
             # Fallback to original keywords
+            # Table name is safe because we validated against whitelist above
             original_query = f'''
                 SELECT keyword 
                 FROM {business_area}_keywords 
@@ -177,8 +184,12 @@ class KeywordMonitor:
             
             return keywords
             
+        except Exception as e:
+            logger.error(f"Failed to get monitoring keywords for {business_area}: {e}")
+            return []
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def monitor_business_area(self, business_area: str) -> Dict[str, Any]:
         """Monitor trends for a specific business area"""
@@ -251,6 +262,7 @@ class KeywordMonitor:
                                     logger.info(f"Alert created for {keyword}: {reason}")
                     
                     # Rate limiting delay
+                    import asyncio
                     await asyncio.sleep(3)
                     
                 except Exception as e:
@@ -294,7 +306,7 @@ class KeywordMonitor:
             if self.config['business_areas']:
                 business_areas = self.config['business_areas']
             else:
-                business_areas = ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals']
+                business_areas = list(VALID_BUSINESS_AREAS)
             
             # Monitor each business area
             area_results = []
@@ -361,9 +373,8 @@ class KeywordMonitor:
         
         # Get recent activity across all business areas
         business_summaries = {}
-        business_areas = ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals']
         
-        for area in business_areas:
+        for area in VALID_BUSINESS_AREAS:
             try:
                 summary = await self.database.get_business_area_summary(area)
                 business_summaries[area] = {
@@ -382,46 +393,26 @@ class KeywordMonitor:
             'last_check': datetime.now().isoformat()
         }
 
-async def main():
-    """Main entry point for keyword monitoring"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Google Trends Keyword Monitoring')
-    parser.add_argument('--mode', choices=['fast', 'normal', 'full'], default='fast',
-                       help='Monitoring mode (default: fast)')
-    parser.add_argument('--status', action='store_true',
-                       help='Show monitoring status only')
-    
-    args = parser.parse_args()
-    
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    monitor = KeywordMonitor(database_url, mode=args.mode)
-    
-    if args.status:
-        print("📊 MONITORING STATUS")
-        print("=" * 30)
-        status = await monitor.get_monitoring_status()
-        
-        health = status['system_health']
-        print(f"Database: {'✅' if health['database_connected'] else '❌'}")
-        print(f"Recent trends (24h): {health['recent_trends_24h']}")
-        print(f"Unprocessed alerts: {health['unprocessed_alerts']}")
-        
-        print(f"\n📈 Business Area Activity:")
-        for area, summary in status['business_summaries'].items():
-            if 'error' not in summary:
-                print(f"   {area}: {summary['keywords_monitored']} keywords, {summary['trending_keywords']} trending")
-            else:
-                print(f"   {area}: Error - {summary['error']}")
-    else:
-        # Run monitoring cycle
-        result = await monitor.run_monitoring_cycle()
-        
-        if result['success']:
-            print("\n✅ Monitoring cycle completed successfully!")
-        else:
-            print(f"\n❌ Monitoring cycle failed: {result['error']}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# ============================================================================
+# SINGLETON GETTER
+# ============================================================================
+
+_keyword_monitor: Optional[KeywordMonitor] = None
+
+
+def get_keyword_monitor(mode: str = 'normal') -> KeywordMonitor:
+    """Get or create the KeywordMonitor singleton instance
     
+    Note: Only caches the 'normal' mode instance. Other modes create new instances
+    since they're rarely used and have different configurations.
+    """
+    global _keyword_monitor
+    
+    if mode == 'normal':
+        if _keyword_monitor is None:
+            _keyword_monitor = KeywordMonitor(mode='normal')
+        return _keyword_monitor
+    else:
+        # Non-default modes get fresh instances
+        return KeywordMonitor(mode=mode)

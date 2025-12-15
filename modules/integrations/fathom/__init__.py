@@ -14,9 +14,18 @@ Workflow:
 3. Generate AI summary using Claude (better than Fathom's native AI)
 4. Store in PostgreSQL for Syntax's conversational memory
 5. Enable queries like "What did we discuss in Tuesday's meeting?"
+
+FIXES APPLIED (Session 6 - Fathom Review):
+- Added missing logging import (logger was undefined in register_with_app)
 """
 
-#--Section 1: Module Exports & Public API
+import os
+import logging
+
+# Initialize logger for this module
+logger = logging.getLogger(__name__)
+
+# --Section 1: Module Exports & Public API
 from .fathom_handler import FathomHandler
 from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
@@ -30,7 +39,7 @@ __all__ = [
     'router'
 ]
 
-#--Section 2: Module Metadata & Configuration
+# --Section 2: Module Metadata & Configuration
 __version__ = '1.0.0'
 __author__ = 'Syntax Prime V2'
 __description__ = 'Fathom meeting recording integration with AI summaries'
@@ -41,11 +50,10 @@ INTEGRATION_TYPE = 'webhook'
 SUPPORTED_EVENTS = ['meeting.ended']
 API_BASE_URL = 'https://api.fathom.ai/external/v1'
 
-#--Section 3: Module Initialization & Health Checks
+
+# --Section 3: Module Initialization & Health Checks
 def check_module_health() -> dict:
     """Check if all required environment variables are configured"""
-    import os
-    
     required_vars = [
         'FATHOM_API_KEY',
         'FATHOM_WEBHOOK_SECRET',
@@ -64,10 +72,9 @@ def check_module_health() -> dict:
     
     return status
 
+
 def get_integration_info() -> dict:
     """Get module information and configuration"""
-    import os
-    
     return {
         'module': MODULE_NAME,
         'version': __version__,
@@ -89,7 +96,8 @@ def get_integration_info() -> dict:
         'health': check_module_health()
     }
 
-#--Section 4: Module Initialization Functions
+
+# --Section 4: Module Initialization Functions
 async def initialize_handlers():
     """Initialize and validate all handlers"""
     try:
@@ -115,7 +123,8 @@ async def initialize_handlers():
             'message': f'Initialization failed: {str(e)}'
         }
 
-#--Section 5: Convenience Functions for External Use
+
+# --Section 5: Convenience Functions for External Use
 async def process_meeting_webhook(webhook_data: dict) -> dict:
     """Convenience function to process Fathom webhook"""
     try:
@@ -150,7 +159,8 @@ async def process_meeting_webhook(webhook_data: dict) -> dict:
             'error': str(e)
         }
 
-#--Section 6: Module Registration & Startup
+
+# --Section 6: Module Registration & Startup
 def register_with_app(app):
     """Register this integration module with the main FastAPI app"""
     # Include the router
@@ -164,7 +174,7 @@ def register_with_app(app):
             if health['healthy']:
                 logger.info(f"✅ {MODULE_NAME} integration loaded successfully")
             else:
-                logger.warning(f"⚠️  {MODULE_NAME} integration loaded with warnings")
+                logger.warning(f"⚠️ {MODULE_NAME} integration loaded with warnings")
                 logger.warning(f"   Missing vars: {health['missing_vars']}")
         except Exception as e:
             logger.error(f"❌ {MODULE_NAME} startup failed: {e}")

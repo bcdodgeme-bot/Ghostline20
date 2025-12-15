@@ -13,12 +13,12 @@ Endpoints:
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+from datetime import datetime
 import logging
 import os
 
-from .voice_client import ElevenLabsClient
-from .personality_voices import PersonalityVoiceManager
-from .audio_manager import AudioCacheManager
+# Use singleton getters instead of direct class imports
+from . import get_voice_client, get_personality_voice_manager, get_audio_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class VoiceHealthResponse(BaseModel):
     last_generation: Optional[str] = None
     errors: list = []
 
+
 @router.post("/synthesize", response_model=VoiceSynthesisResponse)
 async def synthesize_speech(request: VoiceSynthesisRequest):
     """
@@ -62,10 +63,10 @@ async def synthesize_speech(request: VoiceSynthesisRequest):
     Caches audio in database for future playback
     """
     try:
-        # Get manager instances
-        voice_client = ElevenLabsClient()
-        personality_manager = PersonalityVoiceManager()
-        audio_manager = AudioCacheManager()
+        # Get singleton instances (reuses existing connections/sessions)
+        voice_client = get_voice_client()
+        personality_manager = get_personality_voice_manager()
+        audio_manager = get_audio_cache_manager()
         
         # Check if audio already exists in cache
         cached_audio = await audio_manager.get_cached_audio(request.message_id)
@@ -87,7 +88,7 @@ async def synthesize_speech(request: VoiceSynthesisRequest):
         
         if not voice_id:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"No voice configured for personality: {request.personality_id}"
             )
         
@@ -142,6 +143,7 @@ async def synthesize_speech(request: VoiceSynthesisRequest):
             error=str(e)
         )
 
+
 @router.get("/audio/{message_id}")
 async def get_audio(message_id: str):
     """
@@ -149,7 +151,7 @@ async def get_audio(message_id: str):
     Returns MP3 audio data with proper headers
     """
     try:
-        audio_manager = AudioCacheManager()
+        audio_manager = get_audio_cache_manager()
         
         # Get audio from cache
         audio_data = await audio_manager.get_audio_data(message_id)
@@ -180,6 +182,7 @@ async def get_audio(message_id: str):
             detail=f"Failed to retrieve audio: {str(e)}"
         )
 
+
 @router.get("/personalities", response_model=PersonalityVoicesResponse)
 async def get_personality_voices():
     """
@@ -187,7 +190,7 @@ async def get_personality_voices():
     Shows primary, secondary, and fallback voices
     """
     try:
-        personality_manager = PersonalityVoiceManager()
+        personality_manager = get_personality_voice_manager()
         personalities = await personality_manager.get_all_personality_mappings()
         
         return PersonalityVoicesResponse(
@@ -201,6 +204,7 @@ async def get_personality_voices():
             status_code=500,
             detail=f"Failed to get personality voices: {str(e)}"
         )
+
 
 @router.get("/health", response_model=VoiceHealthResponse)
 async def voice_health_check():
@@ -216,7 +220,7 @@ async def voice_health_check():
             errors.append("ELEVENLABS_API_KEY not configured")
         
         # Check database connectivity
-        audio_manager = AudioCacheManager()
+        audio_manager = get_audio_cache_manager()
         db_health = await audio_manager.health_check()
         database_connected = db_health.get('connected', False)
         
@@ -227,7 +231,7 @@ async def voice_health_check():
         cache_stats = await audio_manager.get_cache_statistics()
         
         # Check ElevenLabs API connectivity
-        voice_client = ElevenLabsClient()
+        voice_client = get_voice_client()
         api_health = await voice_client.health_check()
         
         if not api_health.get('connected', False):
@@ -235,8 +239,8 @@ async def voice_health_check():
         
         # Overall health
         healthy = (
-            api_key_configured and 
-            database_connected and 
+            api_key_configured and
+            database_connected and
             api_health.get('connected', False) and
             len(errors) == 0
         )
@@ -247,7 +251,7 @@ async def voice_health_check():
             database_connected=database_connected,
             total_cached_audio=cache_stats.get('total_files', 0),
             cache_size_mb=cache_stats.get('total_size_mb', 0.0),
-            last_generation=cache_stats.get('last_generation'),
+            last_generation=cache_stats.get('newest_audio'),
             errors=errors
         )
         
@@ -262,13 +266,14 @@ async def voice_health_check():
             errors=[f"Health check failed: {str(e)}"]
         )
 
+
 @router.get("/stats")
 async def get_voice_statistics():
     """
     Get detailed voice synthesis and audio cache statistics
     """
     try:
-        audio_manager = AudioCacheManager()
+        audio_manager = get_audio_cache_manager()
         
         # Get comprehensive statistics
         daily_stats = await audio_manager.get_daily_statistics()
@@ -279,7 +284,7 @@ async def get_voice_statistics():
             "cache_statistics": cache_stats,
             "daily_statistics": daily_stats,
             "personality_breakdown": personality_stats,
-            "timestamp": "NOW()"
+            "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
@@ -289,6 +294,7 @@ async def get_voice_statistics():
             detail=f"Failed to get statistics: {str(e)}"
         )
 
+
 # Additional utility endpoints
 @router.delete("/cache/{message_id}")
 async def delete_cached_audio(message_id: str):
@@ -297,7 +303,7 @@ async def delete_cached_audio(message_id: str):
     Useful for cache management and testing
     """
     try:
-        audio_manager = AudioCacheManager()
+        audio_manager = get_audio_cache_manager()
         result = await audio_manager.delete_cached_audio(message_id)
         
         if result.get('success'):
@@ -317,6 +323,7 @@ async def delete_cached_audio(message_id: str):
             detail=f"Failed to delete audio: {str(e)}"
         )
 
+
 @router.post("/cache/cleanup")
 async def cleanup_audio_cache():
     """
@@ -324,7 +331,7 @@ async def cleanup_audio_cache():
     Removes audio older than specified days
     """
     try:
-        audio_manager = AudioCacheManager()
+        audio_manager = get_audio_cache_manager()
         
         # Clean up audio older than 30 days
         cleanup_result = await audio_manager.cleanup_old_audio(days_to_keep=30)

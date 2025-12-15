@@ -1,12 +1,14 @@
 # modules/intelligence/context_collectors.py
 """
 Context Collectors for Syntax Prime V2 Intelligence Hub
-Monitors 8 data sources and produces context signals for situation detection
+Monitors 9 data sources and produces context signals for situation detection
 
 Each collector inherits from ContextCollector and produces ContextSignal objects
 that feed into the situation detector.
 
 Created: 10/22/25
+Updated: 12/11/25 - Added singleton pattern, fixed EmailContextCollector bug,
+                    standardized USER_ID handling
 """
 
 import logging
@@ -16,7 +18,17 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import json
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+# Single user system - hardcode the user ID
+USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
+
 
 def convert_utc_to_user_timezone(dt: datetime) -> datetime:
     """Convert UTC datetime to America/New_York timezone"""
@@ -25,6 +37,7 @@ def convert_utc_to_user_timezone(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         dt = pytz.utc.localize(dt)
     return dt.astimezone(user_tz)
+
 
 #===============================================================================
 # BASE CLASSES - Foundation for all collectors
@@ -62,15 +75,15 @@ class ContextCollector:
     
     Each collector monitors ONE data source and converts its data into
     ContextSignal objects that situation detector can understand.
+    
+    Uses the centralized db_manager singleton for all database operations.
     """
     
-    def __init__(self, db_manager):
-        """
-        Args:
-            db_manager: Database manager for running queries
-        """
+    def __init__(self):
+        """Initialize collector with centralized db_manager"""
         self.db = db_manager
         self.collector_name = self.__class__.__name__
+        self.user_id = USER_ID
         
     async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
         """
@@ -128,6 +141,18 @@ class ContextCollector:
 # MEETING CONTEXT COLLECTOR - Monitors Fathom meetings & action items
 #===============================================================================
 
+# Singleton instance
+_meeting_collector: Optional['MeetingContextCollector'] = None
+
+
+def get_meeting_collector() -> 'MeetingContextCollector':
+    """Get singleton MeetingContextCollector instance"""
+    global _meeting_collector
+    if _meeting_collector is None:
+        _meeting_collector = MeetingContextCollector()
+    return _meeting_collector
+
+
 class MeetingContextCollector(ContextCollector):
     """
     Monitors Fathom meetings and their action items.
@@ -169,9 +194,6 @@ class MeetingContextCollector(ContextCollector):
             
             # Create signals for each processed meeting
             for meeting in meetings:
-                # DEBUG: Log meeting_id being used
-                logger.info(f"🔍 DEBUG: Creating meeting_processed signal with meeting_id={str(meeting['id'])}")
-                
                 # Signal 1: Meeting was processed
                 signals.append(self._create_signal(
                     signal_type='meeting_processed',
@@ -272,13 +294,12 @@ class MeetingContextCollector(ContextCollector):
                     logger.debug(f"Pending action item (due in {days_until_due} days): {item['action_text'][:50]}...")
             
             # Query 3: Check for upcoming meetings (related calendar events)
-            # This creates a signal when a follow-up meeting is scheduled
             upcoming_meetings_query = """
                 SELECT 
                     id,
-                    meeting_title,
+                    title as meeting_title,
                     meeting_date,
-                    attendees
+                    participants as attendees
                 FROM fathom_meetings
                 WHERE meeting_date BETWEEN $1 AND $2
                 ORDER BY meeting_date ASC
@@ -306,8 +327,8 @@ class MeetingContextCollector(ContextCollector):
                         'hours_until': round(hours_until, 1),
                         'attendees': meeting['attendees']
                     },
-                    priority=8 if hours_until < 24 else 7,  # Higher priority if within 24h
-                    expires_hours=int(hours_until) + 2  # Expires shortly after meeting
+                    priority=8 if hours_until < 24 else 7,
+                    expires_hours=int(hours_until) + 2
                 ))
                 
                 logger.info(f"Upcoming meeting in {hours_until:.1f}h: {meeting['meeting_title']}")
@@ -322,22 +343,18 @@ class MeetingContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of meetings data source"""
         try:
-            # Count total meetings
             total_meetings = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM fathom_meetings"
             )
             
-            # Count pending action items
             pending_actions = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM meeting_action_items WHERE status IN ('pending', 'in_progress')"
             )
             
-            # Get latest meeting date
             latest_meeting = await self.db.fetch_one(
                 "SELECT MAX(meeting_date) as latest FROM fathom_meetings"
             )
             
-            # Get overdue count
             overdue_actions = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM meeting_action_items WHERE due_date < CURRENT_DATE AND status IN ('pending', 'in_progress')"
             )
@@ -363,6 +380,18 @@ class MeetingContextCollector(ContextCollector):
 # CONVERSATION CONTEXT COLLECTOR - Monitors chat messages for topics/projects
 #===============================================================================
 
+# Singleton instance
+_conversation_collector: Optional['ConversationContextCollector'] = None
+
+
+def get_conversation_collector() -> 'ConversationContextCollector':
+    """Get singleton ConversationContextCollector instance"""
+    global _conversation_collector
+    if _conversation_collector is None:
+        _conversation_collector = ConversationContextCollector()
+    return _conversation_collector
+
+
 class ConversationContextCollector(ContextCollector):
     """
     Monitors chat conversation messages and extracts meaningful context.
@@ -371,19 +400,11 @@ class ConversationContextCollector(ContextCollector):
     - Topics being discussed frequently
     - Questions that might need follow-up
     - Projects mentioned by the user
-    
-    This is more sophisticated than keyword matching - it uses AI to understand
-    the semantic meaning of conversations.
     """
     
-    def __init__(self, db_manager, openrouter_client=None):
-        """
-        Args:
-            db_manager: Database manager
-            openrouter_client: OpenRouter client for AI analysis (optional, will import if None)
-        """
-        super().__init__(db_manager)
-        self.openrouter_client = openrouter_client
+    def __init__(self):
+        super().__init__()
+        self.openrouter_client = None
         
     async def _get_openrouter_client(self):
         """Lazy load OpenRouter client"""
@@ -396,8 +417,7 @@ class ConversationContextCollector(ContextCollector):
         """
         Collect conversation signals from recent chat messages.
         
-        Uses 24-hour lookback by default since conversations are more ephemeral
-        than meetings.
+        Uses 24-hour lookback by default since conversations are more ephemeral.
         """
         signals = []
         lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
@@ -417,9 +437,9 @@ class ConversationContextCollector(ContextCollector):
                 FROM conversation_messages cm
                 JOIN conversation_threads ct ON cm.thread_id = ct.id
                 WHERE cm.created_at >= $1
-                AND cm.role = 'user'  -- Only user messages, not AI responses
+                AND cm.role = 'user'
                 ORDER BY cm.created_at DESC
-                LIMIT 100  -- Cap at 100 messages to avoid overwhelming AI
+                LIMIT 100
             """
             
             messages = await self.db.fetch_all(messages_query, lookback_time)
@@ -475,18 +495,16 @@ Respond in JSON format:
 }}"""
 
                 try:
-                    # Call AI to analyze conversation
                     response = await client.chat_completion(
                         messages=[{"role": "user", "content": analysis_prompt}],
                         model="anthropic/claude-3.5-sonnet",
-                        temperature=0.3,  # Lower temperature for more consistent extraction
+                        temperature=0.3,
                         max_tokens=1000
                     )
                     
-                    # Parse AI response
                     ai_text = response['choices'][0]['message']['content']
                     
-                    # Extract JSON from response (AI might wrap it in markdown)
+                    # Extract JSON from response
                     import re
                     json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
                     if json_match:
@@ -497,7 +515,7 @@ Respond in JSON format:
                     
                     # Create signals for topics discussed
                     for topic in analysis.get('topics', []):
-                        if topic['relevance'] >= 6:  # Only high-relevance topics
+                        if topic['relevance'] >= 6:
                             signals.append(self._create_signal(
                                 signal_type='topic_discussed',
                                 data={
@@ -508,7 +526,7 @@ Respond in JSON format:
                                     'message_count': len(thread_messages),
                                     'latest_mention': thread_messages[0]['created_at'].isoformat()
                                 },
-                                priority=min(topic['relevance'], 7),  # Cap at 7 for topics
+                                priority=min(topic['relevance'], 7),
                                 expires_hours=48
                             ))
                             
@@ -541,7 +559,7 @@ Respond in JSON format:
                                 'mentioned_at': thread_messages[0]['created_at'].isoformat()
                             },
                             priority=7,
-                            expires_hours=168  # Projects relevant for a week
+                            expires_hours=168
                         ))
                         
                         logger.info(f"Project signal: {project['project_name']}")
@@ -549,7 +567,7 @@ Respond in JSON format:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse AI analysis JSON for thread {thread_id}: {e}")
                 except Exception as e:
-                    logger.error(f"Error analyzing thread {thread_id}: {e}", exc_info=True)
+                    logger.error(f"Error analyzing thread {thread_id}: {e}")
             
             logger.info(f"ConversationContextCollector: Collected {len(signals)} signals")
             
@@ -561,32 +579,25 @@ Respond in JSON format:
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of conversation data source"""
         try:
-            # Count total messages
             total_messages = await self.db.fetch_one(
-                "SELECT COUNT(*) as count FROM conversation_messages"
+                "SELECT COUNT(*) as count FROM conversation_messages WHERE role = 'user'"
             )
             
-            # Count total threads
-            total_threads = await self.db.fetch_one(
-                "SELECT COUNT(*) as count FROM conversation_threads"
-            )
-            
-            # Get latest message
-            latest_message = await self.db.fetch_one(
-                "SELECT MAX(created_at) as latest FROM conversation_messages"
-            )
-            
-            # Count messages from last 24h
             recent_messages = await self.db.fetch_one(
-                "SELECT COUNT(*) as count FROM conversation_messages WHERE created_at >= NOW() - INTERVAL '24 hours'"
+                """SELECT COUNT(*) as count FROM conversation_messages 
+                   WHERE role = 'user' AND created_at >= NOW() - INTERVAL '24 hours'"""
+            )
+            
+            active_threads = await self.db.fetch_one(
+                """SELECT COUNT(DISTINCT thread_id) as count FROM conversation_messages 
+                   WHERE created_at >= NOW() - INTERVAL '24 hours'"""
             )
             
             return {
                 'collector': 'ConversationContextCollector',
-                'total_messages': total_messages['count'] if total_messages else 0,
-                'total_threads': total_threads['count'] if total_threads else 0,
-                'messages_last_24h': recent_messages['count'] if recent_messages else 0,
-                'latest_message': latest_message['latest'].isoformat() if latest_message and latest_message['latest'] else None,
+                'total_user_messages': total_messages['count'] if total_messages else 0,
+                'recent_messages_24h': recent_messages['count'] if recent_messages else 0,
+                'active_threads_24h': active_threads['count'] if active_threads else 0,
                 'status': 'operational'
             }
         except Exception as e:
@@ -602,48 +613,61 @@ Respond in JSON format:
 # CALENDAR CONTEXT COLLECTOR - Monitors Google Calendar events
 #===============================================================================
 
+# Singleton instance
+_calendar_collector: Optional['CalendarContextCollector'] = None
+
+
+def get_calendar_collector() -> 'CalendarContextCollector':
+    """Get singleton CalendarContextCollector instance"""
+    global _calendar_collector
+    if _calendar_collector is None:
+        _calendar_collector = CalendarContextCollector()
+    return _calendar_collector
+
+
 class CalendarContextCollector(ContextCollector):
     """
-    Monitors Google Calendar events for upcoming commitments.
+    Monitors Google Calendar for upcoming events that need attention.
     
     Produces signals for:
-    - Events within 24 hours (high priority)
-    - Events within 48 hours (medium priority)
-    - Meeting clusters (multiple meetings same day)
-    - Events that need preparation time
+    - Events within 24 hours (urgent)
+    - Events within 48 hours (upcoming)
+    - Events needing preparation
+    - Meeting clusters (busy days)
     """
     
-    async def collect_signals(self, lookback_hours: int = 168) -> List[ContextSignal]:
+    async def collect_signals(self, lookback_hours: int = 0) -> List[ContextSignal]:
         """
-        Collect calendar signals for next 7 days.
+        Collect calendar signals for upcoming events.
         
-        Note: Unlike other collectors that look BACK, calendar looks FORWARD
-        since we care about upcoming events, not past ones.
+        Note: lookback_hours not used here - we look FORWARD at upcoming events.
         """
         signals = []
-        now = datetime.now(timezone.utc)
-        seven_days_ahead = now + timedelta(hours=lookback_hours)
         
         try:
-            # Query: Get upcoming events
+            now = datetime.now(timezone.utc)
+            
+            # Query: Get upcoming events for next 7 days
             events_query = """
                 SELECT 
                     id,
-                    event_title,
+                    event_id,
+                    summary as event_title,
+                    description,
+                    location,
                     start_time,
                     end_time,
-                    location,
-                    description,
                     attendees,
-                    is_all_day,
                     calendar_name,
-                    created_at
+                    is_all_day,
+                    is_cancelled
                 FROM google_calendar_events
                 WHERE start_time BETWEEN $1 AND $2
                 AND is_cancelled = false
                 ORDER BY start_time ASC
             """
             
+            seven_days_ahead = now + timedelta(days=7)
             events = await self.db.fetch_all(events_query, now, seven_days_ahead)
             
             if not events:
@@ -679,8 +703,8 @@ class CalendarContextCollector(ContextCollector):
                             'hours_until': round(hours_until, 1),
                             'calendar_name': event['calendar_name']
                         },
-                        priority=9,  # Very high priority - happening soon!
-                        expires_hours=int(hours_until) + 2  # Expires shortly after event
+                        priority=9,
+                        expires_hours=int(hours_until) + 2
                     ))
                     
                     logger.info(f"Urgent: Event in {hours_until:.1f}h - {event['event_title'] or 'Untitled Event'}")
@@ -699,17 +723,16 @@ class CalendarContextCollector(ContextCollector):
                             'hours_until': round(hours_until, 1),
                             'calendar_name': event['calendar_name']
                         },
-                        priority=7,  # Medium priority - some time to prepare
+                        priority=7,
                         expires_hours=int(hours_until) + 2
                     ))
                     
                     logger.debug(f"Upcoming: Event in {hours_until:.1f}h - {event['event_title'] or 'Untitled Event'}")
                 
                 # Signal 3: Check if event needs preparation
-                # Look for keywords suggesting preparation is needed
                 needs_prep = self._check_if_needs_preparation(event)
                 
-                if needs_prep and hours_until > 2:  # Only if we have time to prep
+                if needs_prep and hours_until > 2:
                     signals.append(self._create_signal(
                         signal_type='prep_time_needed',
                         data={
@@ -721,15 +744,14 @@ class CalendarContextCollector(ContextCollector):
                             'suggested_prep_hours': needs_prep['hours']
                         },
                         priority=8,
-                        expires_hours=int(hours_until) - 2  # Expires before event with buffer
+                        expires_hours=int(hours_until) - 2
                     ))
                     
                     logger.info(f"Prep needed: {event['event_title'] or 'Untitled Event'} - {needs_prep['reason']}")
             
             # Signal 4: Detect meeting clusters (multiple meetings same day)
             for event_date, day_events in events_by_date.items():
-                if len(day_events) >= 3:  # 3+ meetings = cluster
-                    # Calculate total meeting time
+                if len(day_events) >= 3:
                     total_minutes = sum([
                         (e['end_time'] - e['start_time']).total_seconds() / 60
                         for e in day_events
@@ -777,7 +799,6 @@ class CalendarContextCollector(ContextCollector):
         title_lower = (event['event_title'] or '').lower()
         description_lower = (event['description'] or '').lower()
         
-        # Keywords that suggest preparation needed
         prep_keywords = {
             'presentation': {'hours': 2, 'reason': 'Presentation requires prep'},
             'demo': {'hours': 1, 'reason': 'Demo needs setup'},
@@ -794,7 +815,7 @@ class CalendarContextCollector(ContextCollector):
             if keyword in title_lower or keyword in description_lower:
                 return prep_info
         
-        # Check attendee count - large meetings often need prep
+        # Large meetings often need prep
         if event['attendees'] and len(event['attendees']) >= 5:
             return {'hours': 1, 'reason': 'Large meeting with 5+ attendees'}
         
@@ -805,12 +826,10 @@ class CalendarContextCollector(ContextCollector):
         try:
             now = datetime.now(timezone.utc)
             
-            # Count total events
             total_events = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM google_calendar_events"
             )
             
-            # Count upcoming events (next 7 days)
             upcoming_events = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM google_calendar_events 
                    WHERE start_time BETWEEN $1 AND $2 
@@ -818,7 +837,6 @@ class CalendarContextCollector(ContextCollector):
                 now, now + timedelta(days=7)
             )
             
-            # Count events in next 24h
             urgent_events = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM google_calendar_events 
                    WHERE start_time BETWEEN $1 AND $2 
@@ -826,9 +844,8 @@ class CalendarContextCollector(ContextCollector):
                 now, now + timedelta(hours=24)
             )
             
-            # Get next event
             next_event = await self.db.fetch_one(
-                """SELECT event_title, start_time FROM google_calendar_events 
+                """SELECT summary as event_title, start_time FROM google_calendar_events 
                    WHERE start_time > $1 AND is_cancelled = false 
                    ORDER BY start_time ASC LIMIT 1""",
                 now
@@ -856,6 +873,18 @@ class CalendarContextCollector(ContextCollector):
 # EMAIL CONTEXT COLLECTOR - Monitors Gmail priority messages
 #===============================================================================
 
+# Singleton instance
+_email_collector: Optional['EmailContextCollector'] = None
+
+
+def get_email_collector() -> 'EmailContextCollector':
+    """Get singleton EmailContextCollector instance"""
+    global _email_collector
+    if _email_collector is None:
+        _email_collector = EmailContextCollector()
+    return _email_collector
+
+
 class EmailContextCollector(ContextCollector):
     """
     Monitors Gmail for high-priority messages that need attention.
@@ -878,16 +907,22 @@ class EmailContextCollector(ContextCollector):
         
         try:
             # Query: Get high-priority emails from gmail analysis
+            # FIXED: Include all columns we reference later
             emails_query = """
                 SELECT
                     id,
                     message_id,
                     thread_id,
                     sender_email,
+                    sender_name,
                     subject_line as subject,
+                    snippet,
                     priority_level,
+                    priority_score,
                     category,
+                    categories,
                     requires_response,
+                    urgency_indicators,
                     email_date as received_at
                 FROM google_gmail_analysis
                 WHERE user_id = $1
@@ -903,7 +938,7 @@ class EmailContextCollector(ContextCollector):
                 LIMIT 20
             """
             
-            user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
+            # FIXED: Use self.user_id (inherited from base class, set to USER_ID constant)
             emails = await self.db.fetch_all(emails_query, self.user_id, lookback_time)
             
             if not emails:
@@ -913,16 +948,17 @@ class EmailContextCollector(ContextCollector):
             logger.info(f"EmailContextCollector: Processing {len(emails)} high-priority emails")
             
             for email in emails:
-                from datetime import timezone
                 hours_old = (datetime.utcnow() - email['received_at']).total_seconds() / 3600
                 
                 # Determine base priority from email priority level
                 if email['priority_level'] == 'urgent':
                     base_priority = 9
-                else:  # high
+                elif email['priority_level'] == 'high':
                     base_priority = 8
+                else:
+                    base_priority = 7
                 
-                # Adjust priority based on age - older emails get slightly lower priority
+                # Adjust priority based on age
                 if hours_old > 24:
                     priority = max(base_priority - 1, 6)
                 else:
@@ -934,10 +970,13 @@ class EmailContextCollector(ContextCollector):
                     'message_id': email['message_id'],
                     'thread_id': email['thread_id'],
                     'sender_email': email['sender_email'],
+                    'sender_name': email['sender_name'],
                     'subject': email['subject'],
+                    'snippet': email['snippet'],
                     'received_at': email['received_at'].isoformat(),
                     'hours_old': round(hours_old, 1),
                     'priority_level': email['priority_level'],
+                    'priority_score': float(email['priority_score']) if email['priority_score'] else None,
                     'category': email['category']
                 }
                 
@@ -948,26 +987,28 @@ class EmailContextCollector(ContextCollector):
                     expires_hours=48
                 ))
                 
-                logger.debug(f"High-priority email from {email['sender_email']}: {email['subject'][:50]}...")
+                logger.debug(f"High-priority email from {email['sender_email']}: {email['subject'][:50] if email['subject'] else 'No subject'}...")
                 
                 # Signal 2: Email requires response
-                signals.append(self._create_signal(
-                    signal_type='email_requires_response',
-                    data={
-                        'email_id': str(email['id']),
-                        'message_id': email['message_id'],
-                        'thread_id': email['thread_id'],
-                        'sender_email': email['sender_email'],
-                        'subject': email['subject'],
-                        'received_at': email['received_at'].isoformat(),
-                        'hours_old': round(hours_old, 1),
-                        'priority_level': email['priority_level']
-                    },
-                    priority=8,
-                    expires_hours=72
-                ))
-                
-                logger.info(f"Response needed from {email['sender_name']}: {email['subject'][:50]}...")
+                if email['requires_response']:
+                    signals.append(self._create_signal(
+                        signal_type='email_requires_response',
+                        data={
+                            'email_id': str(email['id']),
+                            'message_id': email['message_id'],
+                            'thread_id': email['thread_id'],
+                            'sender_email': email['sender_email'],
+                            'sender_name': email['sender_name'],
+                            'subject': email['subject'],
+                            'received_at': email['received_at'].isoformat(),
+                            'hours_old': round(hours_old, 1),
+                            'priority_level': email['priority_level']
+                        },
+                        priority=8,
+                        expires_hours=72
+                    ))
+                    
+                    logger.info(f"Response needed from {email['sender_name'] or email['sender_email']}: {email['subject'][:50] if email['subject'] else 'No subject'}...")
                 
                 # Signal 3: Follow-up needed based on sender/context
                 follow_up_needed = self._check_follow_up_needed(email)
@@ -981,7 +1022,7 @@ class EmailContextCollector(ContextCollector):
                             'suggested_action': follow_up_needed['action']
                         },
                         priority=7,
-                        expires_hours=72  # More time for follow-ups
+                        expires_hours=72
                     ))
                     
                     logger.debug(f"Follow-up needed: {follow_up_needed['reason']}")
@@ -999,8 +1040,8 @@ class EmailContextCollector(ContextCollector):
         
         Returns dict with 'reason' and 'action' if follow-up needed, None otherwise.
         """
-        subject_lower = email['subject'].lower()
-        snippet_lower = email['snippet'].lower() if email['snippet'] else ''
+        subject_lower = (email['subject'] or '').lower()
+        snippet_lower = (email['snippet'] or '').lower()
         urgency_indicators = email['urgency_indicators'] or []
         
         # Check for meeting-related emails
@@ -1032,8 +1073,8 @@ class EmailContextCollector(ContextCollector):
                     'action': 'Make decision and communicate'
                 }
         
-        # Check for question marks - might need response
-        if '?' in email['snippet'] or '?' in email['subject']:
+        # Check for question marks
+        if '?' in (email['snippet'] or '') or '?' in (email['subject'] or ''):
             return {
                 'reason': 'Question asked in email',
                 'action': 'Provide answer or clarification'
@@ -1052,30 +1093,26 @@ class EmailContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of email data source"""
         try:
-            # Count total analyzed emails
             total_emails = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM google_gmail_analysis"
             )
             
-            # Count high-priority emails from last 48h
             high_priority = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM google_gmail_analysis 
-                   WHERE received_at >= NOW() - INTERVAL '48 hours'
+                   WHERE email_date >= NOW() - INTERVAL '48 hours'
                    AND priority_level IN ('high', 'urgent')"""
             )
             
-            # Count emails requiring response
             needs_response = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM google_gmail_analysis 
-                   WHERE received_at >= NOW() - INTERVAL '48 hours'
+                   WHERE email_date >= NOW() - INTERVAL '48 hours'
                    AND requires_response = true"""
             )
             
-            # Get latest email
             latest_email = await self.db.fetch_one(
-                """SELECT sender_name, subject, received_at 
+                """SELECT sender_name, subject_line as subject, email_date as received_at 
                    FROM google_gmail_analysis 
-                   ORDER BY received_at DESC LIMIT 1"""
+                   ORDER BY email_date DESC LIMIT 1"""
             )
             
             return {
@@ -1101,6 +1138,18 @@ class EmailContextCollector(ContextCollector):
 # TREND CONTEXT COLLECTOR - Monitors trend_monitoring for opportunities
 #===============================================================================
 
+# Singleton instance
+_trend_collector: Optional['TrendContextCollector'] = None
+
+
+def get_trend_collector() -> 'TrendContextCollector':
+    """Get singleton TrendContextCollector instance"""
+    global _trend_collector
+    if _trend_collector is None:
+        _trend_collector = TrendContextCollector()
+    return _trend_collector
+
+
 class TrendContextCollector(ContextCollector):
     """
     Monitors trend_monitoring table for trending topics and opportunities.
@@ -1113,207 +1162,196 @@ class TrendContextCollector(ContextCollector):
     """
     
     async def collect_signals(self, lookback_hours: int = 72) -> List[ContextSignal]:
-            """
-            Collect trend signals from last 72 hours (3 days).
+        """
+        Collect trend signals from last 72 hours (3 days).
+        
+        Trends change relatively slowly, so 3-day lookback captures
+        meaningful changes without missing spikes.
+        """
+        signals = []
+        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        
+        try:
+            # First check if trend_monitoring has any data
+            count_check = await self.db.fetch_one(
+                "SELECT COUNT(*) as count FROM trend_monitoring"
+            )
             
-            Trends change relatively slowly, so 3-day lookback captures
-            meaningful changes without missing spikes.
-            """
-            signals = []
-            lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+            if not count_check or count_check['count'] == 0:
+                logger.info("TrendContextCollector: No trends in monitoring table")
+                return signals
             
-            try:
-                # Query 1: Get recent high-scoring or rising trends
-                trends_query = """
-                    SELECT
-                        keyword,
-                        business_area,
-                        trend_score,
-                        trend_momentum,
-                        regional_score,
-                        trend_date,
-                        created_at,
-                        updated_at
-                    FROM trend_monitoring
-                    WHERE trend_date >= $1
-                    AND trend_score >= 60
-                    ORDER BY trend_score DESC
-                    LIMIT 50
-                """
+            # Query 1: Get recent high-scoring or rising trends
+            trends_query = """
+                SELECT
+                    id,
+                    keyword,
+                    business_area,
+                    trend_score,
+                    previous_score,
+                    trend_momentum,
+                    regional_score,
+                    trend_date,
+                    created_at,
+                    updated_at
+                FROM trend_monitoring
+                WHERE trend_date >= $1
+                AND trend_score >= 60
+                ORDER BY trend_score DESC
+                LIMIT 50
+            """
+            
+            trends = await self.db.fetch_all(trends_query, lookback_time.date())
+            
+            if not trends:
+                logger.info("TrendContextCollector: No significant trends found")
+                return signals
+            
+            logger.info(f"TrendContextCollector: Processing {len(trends)} trends")
+            
+            for trend in trends:
+                trend_score = trend['trend_score'] or 0
+                previous_score = trend['previous_score'] or 0
+                momentum = trend['trend_momentum'] or 'stable'
                 
-                trends = await self.db.fetch_all(trends_query, lookback_time)
+                # Calculate score change
+                score_change = trend_score - previous_score if previous_score else 0
                 
-                if not trends:
-                    logger.info("TrendContextCollector: No significant trends found")
-                    return signals
-                
-                logger.info(f"TrendContextCollector: Processing {len(trends)} trends")
-                
-                for trend in trends:
-                    keyword = trend['keyword']
-                    current_score = trend['trend_score']
-                    momentum = trend['trend_momentum']
-                    
-                    # Signal 1: Trend spike (score jumped 15+ points)
-                    if score_change >= 15:
-                        signals.append(self._create_signal(
-                            signal_type='trend_spike',
-                            data={
-                                'keyword': trend['keyword'],
-                                'business_area': trend['business_area'],
-                                'current_score': current_score,
-                                'previous_score': previous_score,
-                                'score_change': score_change,
-                                'search_volume': trend['search_volume'],
-                                'related_topics': trend['related_topics'],
-                                'last_checked': trend['last_checked'].isoformat()
-                            },
-                            priority=10 if score_change >= 25 else 9,
-                            expires_hours=48
-                        ))
-                        
-                        logger.warning(f"🔥 Trend SPIKE: {trend['keyword']} jumped {score_change} points to {current_score}")
-                    
-                    # Signal 2: Trend is rising (momentum indicator)
-                    elif trend['trend_momentum'] == 'rising':
-                        signals.append(self._create_signal(
-                            signal_type='trend_rising',
-                            data={
-                                'keyword': trend['keyword'],
-                                'business_area': trend['business_area'],
-                                'current_score': current_score,
-                                'momentum': trend['trend_momentum'],
-                                'search_volume': trend['search_volume'],
-                                'related_topics': trend['related_topics']
-                            },
-                            priority=8,
-                            expires_hours=72
-                        ))
-                        
-                        logger.info(f"📈 Rising trend: {trend['keyword']} (score: {current_score})")
-                    
-                    # Signal 3: Stable high trend (score >= 70 for multiple checks)
-                    if current_score >= 80:
-                        signal_type = 'trend_spike'
-                        priority = 9
-                    elif momentum == 'rising' and current_score >= 70:
-                        signal_type = 'trend_rising'
-                        priority = 8
-                    elif current_score >= 70:
-                        signal_type = 'trend_stable_high'
-                        priority = 7
-                    else:
-                        signal_type = 'trend_opportunity'
-                        priority = 6
-                    
+                # Signal 1: Trend SPIKE (big jump in score)
+                if score_change >= 20:
                     signals.append(self._create_signal(
-                        signal_type=signal_type,
+                        signal_type='trend_spike',
                         data={
-                            'keyword': keyword,
+                            'trend_id': str(trend['id']),
+                            'keyword': trend['keyword'],
                             'business_area': trend['business_area'],
-                            'current_score': current_score,
+                            'trend_score': trend_score,
+                            'previous_score': previous_score,
+                            'score_change': score_change,
                             'momentum': momentum,
-                            'regional_score': trend.get('regional_score'),
-                            'trend_date': trend['trend_date'].isoformat() if trend.get('trend_date') else None
+                            'trend_date': trend['trend_date'].isoformat()
                         },
-                        priority=priority,
+                        priority=9,
+                        expires_hours=24
+                    ))
+                    
+                    logger.info(f"🔥 Trend SPIKE: {trend['keyword']} jumped {score_change} points to {trend_score}")
+                
+                # Signal 2: Rising trend (momentum indicator)
+                elif momentum == 'rising' and trend_score >= 70:
+                    signals.append(self._create_signal(
+                        signal_type='trend_rising',
+                        data={
+                            'trend_id': str(trend['id']),
+                            'keyword': trend['keyword'],
+                            'business_area': trend['business_area'],
+                            'trend_score': trend_score,
+                            'momentum': momentum,
+                            'trend_date': trend['trend_date'].isoformat()
+                        },
+                        priority=7,
+                        expires_hours=48
+                    ))
+                    
+                    logger.debug(f"📈 Rising trend: {trend['keyword']} at {trend_score}")
+                
+                # Signal 3: Stable high trend (consistently high)
+                elif trend_score >= 80:
+                    signals.append(self._create_signal(
+                        signal_type='trend_high',
+                        data={
+                            'trend_id': str(trend['id']),
+                            'keyword': trend['keyword'],
+                            'business_area': trend['business_area'],
+                            'trend_score': trend_score,
+                            'momentum': momentum,
+                            'trend_date': trend['trend_date'].isoformat()
+                        },
+                        priority=6,
                         expires_hours=72
                     ))
-                        
-                    logger.debug(f"🎯 Stable high trend: {trend['keyword']} (score: {current_score})")
-                
-                # Query 2: Get new trend opportunities created
-                opportunities_query = """
-                    SELECT 
-                        id,
-                        keyword,
-                        business_area,
-                        opportunity_type,
-                        opportunity_score,
-                        content_angle,
-                        target_audience,
-                        suggested_action,
-                        created_at
-                    FROM trend_opportunities
-                    WHERE created_at >= $1
-                    ORDER BY opportunity_score DESC
-                """
-                
-                opportunities = await self.db.fetch_all(opportunities_query, lookback_time)
-                
-                if opportunities:
-                    logger.info(f"TrendContextCollector: Found {len(opportunities)} new opportunities")
                     
-                    for opp in opportunities:
-                        signals.append(self._create_signal(
-                            signal_type='trend_opportunity_created',
-                            data={
-                                'opportunity_id': str(opp['id']),
-                                'keyword': opp['keyword'],
-                                'business_area': opp['business_area'],
-                                'opportunity_type': opp['opportunity_type'],
-                                'opportunity_score': opp['opportunity_score'],
-                                'content_angle': opp['content_angle'],
-                                'target_audience': opp['target_audience'],
-                                'suggested_action': opp['suggested_action'],
-                                'created_at': opp['created_at'].isoformat()
-                            },
-                            priority=8,
-                            expires_hours=96
-                        ))
-                        
-                        logger.info(f"💡 New opportunity: {opp['keyword']} - {opp['opportunity_type']}")
-                
-                logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
-                
-            except Exception as e:
-                logger.error(f"Error collecting trend signals: {e}", exc_info=True)
+                    logger.debug(f"📊 High trend: {trend['keyword']} stable at {trend_score}")
             
-            return signals
-    
-    def _calculate_stability_days(self, trend: Dict) -> int:
-        """
-        Calculate how many days a trend has been stable at high levels.
+            # Query 2: Get recent trend opportunities
+            opportunities_query = """
+                SELECT
+                    id,
+                    keyword,
+                    business_area,
+                    opportunity_type,
+                    urgency_level,
+                    trend_momentum,
+                    opportunity_score,
+                    content_angle,
+                    target_audience,
+                    suggested_action,
+                    created_at
+                FROM trend_opportunities
+                WHERE created_at >= $1
+                AND processed = false
+                AND user_feedback IS NULL
+                ORDER BY opportunity_score DESC
+                LIMIT 20
+            """
+            
+            opportunities = await self.db.fetch_all(opportunities_query, lookback_time)
+            
+            for opp in opportunities:
+                priority = 8 if opp['urgency_level'] == 'high' else 7
+                
+                signals.append(self._create_signal(
+                    signal_type='trend_opportunity',
+                    data={
+                        'opportunity_id': str(opp['id']),
+                        'keyword': opp['keyword'],
+                        'business_area': opp['business_area'],
+                        'opportunity_type': opp['opportunity_type'],
+                        'urgency_level': opp['urgency_level'],
+                        'opportunity_score': float(opp['opportunity_score']) if opp['opportunity_score'] else 0,
+                        'content_angle': opp['content_angle'],
+                        'target_audience': opp['target_audience'],
+                        'suggested_action': opp['suggested_action'],
+                        'created_at': opp['created_at'].isoformat()
+                    },
+                    priority=priority,
+                    expires_hours=48
+                ))
+                
+                logger.info(f"💡 Trend opportunity: {opp['keyword']} ({opp['opportunity_type']})")
+            
+            logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+            
+        except Exception as e:
+            logger.error(f"Error collecting trend signals: {e}", exc_info=True)
         
-        This is a simplified calculation - in reality you'd check trend history.
-        For now, estimate based on created_at.
-        """
-        if trend['created_at']:
-            days_tracked = (datetime.utcnow() - trend['created_at']).days
-            return min(days_tracked, 30)  # Cap at 30 days
-        return 0
+        return signals
     
     async def get_current_state(self) -> Dict[str, Any]:
-        """Get current state of trend monitoring"""
+        """Get current state of trends data source"""
         try:
-            # Count total trends being monitored
             total_trends = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM trend_monitoring"
             )
             
-            # Count high-scoring trends
             high_trends = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM trend_monitoring WHERE trend_score >= 70"
             )
             
-            # Count rising trends
             rising_trends = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM trend_monitoring WHERE trend_momentum = 'rising'"
             )
             
-            # Count opportunities
             total_opportunities = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM trend_opportunities"
             )
             
-            # Get top trend
             top_trend = await self.db.fetch_one(
                 """SELECT keyword, trend_score, business_area 
                    FROM trend_monitoring 
                    ORDER BY trend_score DESC LIMIT 1"""
             )
             
-            # Get latest trend check
             latest_check = await self.db.fetch_one(
                 "SELECT MAX(last_checked) as latest FROM trend_monitoring"
             )
@@ -1338,9 +1376,22 @@ class TrendContextCollector(ContextCollector):
                 'error': str(e)
             }
 
+
 #===============================================================================
 # BLUESKY CONTEXT COLLECTOR - Monitors Bluesky engagement opportunities
 #===============================================================================
+
+# Singleton instance
+_bluesky_collector: Optional['BlueskyContextCollector'] = None
+
+
+def get_bluesky_collector() -> 'BlueskyContextCollector':
+    """Get singleton BlueskyContextCollector instance"""
+    global _bluesky_collector
+    if _bluesky_collector is None:
+        _bluesky_collector = BlueskyContextCollector()
+    return _bluesky_collector
+
 
 class BlueskyContextCollector(ContextCollector):
     """
@@ -1461,20 +1512,17 @@ class BlueskyContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of Bluesky data"""
         try:
-            # Count pending opportunities
             pending = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM bluesky_engagement_opportunities 
                    WHERE user_response IS NULL 
                    AND already_engaged = false"""
             )
             
-            # Count recent posts
             recent_posts = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM bluesky_posts 
                    WHERE posted_at >= NOW() - INTERVAL '7 days'"""
             )
             
-            # Count total engagement opportunities ever detected
             total_opportunities = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM bluesky_engagement_opportunities"""
             )
@@ -1499,6 +1547,18 @@ class BlueskyContextCollector(ContextCollector):
 # KNOWLEDGE CONTEXT COLLECTOR - Matches knowledge base to current topics
 #===============================================================================
 
+# Singleton instance
+_knowledge_collector: Optional['KnowledgeContextCollector'] = None
+
+
+def get_knowledge_collector() -> 'KnowledgeContextCollector':
+    """Get singleton KnowledgeContextCollector instance"""
+    global _knowledge_collector
+    if _knowledge_collector is None:
+        _knowledge_collector = KnowledgeContextCollector()
+    return _knowledge_collector
+
+
 class KnowledgeContextCollector(ContextCollector):
     """
     Matches knowledge base entries against topics from other signals.
@@ -1510,175 +1570,165 @@ class KnowledgeContextCollector(ContextCollector):
     Produces signals for:
     - Relevant knowledge exists for a topic
     - Knowledge gap detected (topic discussed but no entry exists)
+    - Recently accessed knowledge entries
     """
     
-    def __init__(self, db_manager, context_topics: Optional[List[str]] = None):
-        """
-        Args:
-            db_manager: Database manager
-            context_topics: List of topics to search for (from other collectors)
-        """
-        super().__init__(db_manager)
-        self.context_topics = context_topics or []
+    def __init__(self):
+        super().__init__()
+        self.context_topics: List[str] = []
+    
+    def set_context_topics(self, topics: List[str]):
+        """Set topics to search for in knowledge base"""
+        self.context_topics = topics
     
     async def collect_signals(self, lookback_hours: int = 72) -> List[ContextSignal]:
         """
-        Collect trend signals from last 72 hours (3 days).
+        Collect knowledge-related signals.
         
-        Trends change relatively slowly, so 3-day lookback captures
-        meaningful changes without missing spikes.
+        Searches for recently accessed or highly relevant knowledge entries
+        that might be useful for current context.
         """
         signals = []
         lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
         
         try:
-            # First check if trend_monitoring has any data
-            count_check = await self.db.fetch_one(
-                "SELECT COUNT(*) as count FROM trend_monitoring"
-            )
-            
-            if not count_check or count_check['count'] == 0:
-                logger.info("TrendContextCollector: No trends in monitoring table")
-                return signals
-            
-            # Query: Get trends that spiked, are rising, or are stable high
-            # Changed: removed momentum filter, just look at high scores
-            trends_query = """
+            # Query 1: Recently accessed knowledge entries
+            recent_query = """
                 SELECT 
                     id,
-                    keyword,
-                    trend_score,
-                    previous_score,
-                    trend_momentum,
-                    business_area,
-                    search_volume,
-                    related_topics,
-                    last_checked,
+                    title,
+                    content_type,
+                    summary,
+                    key_topics,
+                    relevance_score,
+                    access_count,
+                    last_accessed,
                     created_at
-                FROM trend_monitoring
-                WHERE last_checked >= $1
-                AND (
-                    trend_score >= 60
-                    OR (trend_score > previous_score AND (trend_score - previous_score) >= 10)
-                )
-                ORDER BY trend_score DESC
-                LIMIT 50
+                FROM knowledge_entries
+                WHERE last_accessed >= $1
+                ORDER BY last_accessed DESC
+                LIMIT 20
             """
             
-            trends = await self.db.fetch_all(trends_query, lookback_time)
+            recent_entries = await self.db.fetch_all(recent_query, lookback_time)
             
-            if not trends:
-                logger.info("TrendContextCollector: No high-scoring trends found")
-                return signals
+            for entry in recent_entries:
+                if entry['access_count'] and entry['access_count'] >= 3:
+                    signals.append(self._create_signal(
+                        signal_type='knowledge_frequently_accessed',
+                        data={
+                            'entry_id': str(entry['id']),
+                            'title': entry['title'],
+                            'content_type': entry['content_type'],
+                            'summary': entry['summary'][:200] if entry['summary'] else None,
+                            'topics': entry['key_topics'],
+                            'access_count': entry['access_count'],
+                            'last_accessed': entry['last_accessed'].isoformat() if entry['last_accessed'] else None
+                        },
+                        priority=5,
+                        expires_hours=168
+                    ))
             
-            logger.info(f"TrendContextCollector: Processing {len(trends)} trending keywords")
+            # Query 2: High-relevance knowledge entries
+            relevant_query = """
+                SELECT 
+                    id,
+                    title,
+                    content_type,
+                    summary,
+                    key_topics,
+                    relevance_score
+                FROM knowledge_entries
+                WHERE relevance_score >= 8
+                ORDER BY relevance_score DESC
+                LIMIT 10
+            """
             
-            for trend in trends:
-                keyword = trend['keyword']
-                current_score = trend['trend_score']
-                previous_score = trend['previous_score'] or 0
-                score_change = current_score - previous_score
-                momentum = trend['trend_momentum']
-                
-                # Determine signal type based on score and change
-                if score_change >= 20:
-                    signal_type = 'trend_spike'
-                    priority = 9
-                elif score_change >= 10:
-                    signal_type = 'trend_rising'
-                    priority = 8
-                elif current_score >= 70:
-                    signal_type = 'trend_stable_high'
-                    priority = 7
-                else:
-                    signal_type = 'trend_opportunity_created'
-                    priority = 6
-                
-                signal_data = {
-                    'keyword': keyword,
-                    'current_score': current_score,
-                    'previous_score': previous_score,
-                    'score_change': score_change,
-                    'momentum': momentum,
-                    'business_area': trend['business_area'],
-                    'search_volume': trend['search_volume'],
-                    'related_topics': trend['related_topics'],
-                    'last_checked': trend['last_checked'].isoformat() if trend['last_checked'] else None
-                }
-                
+            high_relevance = await self.db.fetch_all(relevant_query)
+            
+            for entry in high_relevance:
                 signals.append(self._create_signal(
-                    signal_type=signal_type,
-                    data=signal_data,
-                    priority=priority,
-                    expires_hours=72
+                    signal_type='knowledge_high_relevance',
+                    data={
+                        'entry_id': str(entry['id']),
+                        'title': entry['title'],
+                        'content_type': entry['content_type'],
+                        'summary': entry['summary'][:200] if entry['summary'] else None,
+                        'topics': entry['key_topics'],
+                        'relevance_score': float(entry['relevance_score']) if entry['relevance_score'] else None
+                    },
+                    priority=4,
+                    expires_hours=336
                 ))
-                
-                logger.debug(f"📈 Trend signal: {keyword} ({signal_type}, score: {current_score})")
             
-            logger.info(f"TrendContextCollector: Collected {len(signals)} signals")
+            # Query 3: If context topics provided, search for matches
+            if self.context_topics:
+                for topic in self.context_topics[:5]:  # Limit to 5 topics
+                    topic_query = """
+                        SELECT 
+                            id,
+                            title,
+                            content_type,
+                            summary,
+                            key_topics,
+                            relevance_score
+                        FROM knowledge_entries
+                        WHERE search_vector @@ plainto_tsquery('english', $1)
+                        ORDER BY relevance_score DESC
+                        LIMIT 3
+                    """
+                    
+                    matches = await self.db.fetch_all(topic_query, topic)
+                    
+                    for match in matches:
+                        signals.append(self._create_signal(
+                            signal_type='knowledge_topic_match',
+                            data={
+                                'entry_id': str(match['id']),
+                                'title': match['title'],
+                                'matched_topic': topic,
+                                'content_type': match['content_type'],
+                                'summary': match['summary'][:200] if match['summary'] else None,
+                                'relevance_score': float(match['relevance_score']) if match['relevance_score'] else None
+                            },
+                            priority=6,
+                            expires_hours=72
+                        ))
+            
+            logger.info(f"KnowledgeContextCollector: Collected {len(signals)} signals")
             
         except Exception as e:
-            logger.error(f"Error collecting trend signals: {e}", exc_info=True)
+            logger.error(f"Error collecting knowledge signals: {e}", exc_info=True)
         
         return signals
-        
-    def set_context_topics(self, topics: List[str]):
-        """
-        Set context topics to search for.
-        
-        This should be called by the orchestrator after other collectors
-        have identified interesting topics.
-        """
-        self.context_topics = topics
-        logger.debug(f"KnowledgeContextCollector: Set {len(topics)} context topics")
     
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of knowledge base"""
         try:
-            # Count total knowledge entries
             total_entries = await self.db.fetch_one(
+                "SELECT COUNT(*) as count FROM knowledge_entries"
+            )
+            
+            processed_entries = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM knowledge_entries WHERE processed = true"
             )
             
-            # Count by content type
-            type_counts = await self.db.fetch_all(
-                """SELECT content_type, COUNT(*) as count 
-                   FROM knowledge_entries 
-                   WHERE processed = true 
-                   GROUP BY content_type"""
+            recent_access = await self.db.fetch_one(
+                """SELECT COUNT(*) as count FROM knowledge_entries 
+                   WHERE last_accessed >= NOW() - INTERVAL '7 days'"""
             )
             
-            # Count high-relevance entries
-            high_relevance = await self.db.fetch_one(
-                "SELECT COUNT(*) as count FROM knowledge_entries WHERE relevance_score >= 8.0"
-            )
-            
-            # Get most accessed entry
-            most_accessed = await self.db.fetch_one(
-                """SELECT title, access_count, last_accessed 
-                   FROM knowledge_entries 
-                   WHERE processed = true 
-                   ORDER BY access_count DESC LIMIT 1"""
-            )
-            
-            # Get latest entry
-            latest_entry = await self.db.fetch_one(
-                """SELECT title, created_at 
-                   FROM knowledge_entries 
-                   WHERE processed = true 
-                   ORDER BY created_at DESC LIMIT 1"""
+            avg_relevance = await self.db.fetch_one(
+                "SELECT AVG(relevance_score) as avg FROM knowledge_entries"
             )
             
             return {
                 'collector': 'KnowledgeContextCollector',
                 'total_entries': total_entries['count'] if total_entries else 0,
-                'high_relevance_entries': high_relevance['count'] if high_relevance else 0,
-                'content_types': {row['content_type']: row['count'] for row in type_counts},
-                'context_topics_loaded': len(self.context_topics),
-                'most_accessed_entry': most_accessed['title'] if most_accessed else None,
-                'most_accessed_count': most_accessed['access_count'] if most_accessed else None,
-                'latest_entry': latest_entry['title'] if latest_entry else None,
-                'latest_entry_date': latest_entry['created_at'].isoformat() if latest_entry else None,
+                'processed_entries': processed_entries['count'] if processed_entries else 0,
+                'recently_accessed_7d': recent_access['count'] if recent_access else 0,
+                'avg_relevance_score': round(avg_relevance['avg'], 2) if avg_relevance and avg_relevance['avg'] else 0,
+                'context_topics_set': len(self.context_topics),
                 'status': 'operational'
             }
         except Exception as e:
@@ -1691,87 +1741,83 @@ class KnowledgeContextCollector(ContextCollector):
 
 
 #===============================================================================
-# WEATHER CONTEXT COLLECTOR - Monitors weather, headache risk & UV alerts
+# WEATHER CONTEXT COLLECTOR - Monitors weather for health/calendar impacts
 #===============================================================================
+
+# Singleton instance
+_weather_collector: Optional['WeatherContextCollector'] = None
+
+
+def get_weather_collector() -> 'WeatherContextCollector':
+    """Get singleton WeatherContextCollector instance"""
+    global _weather_collector
+    if _weather_collector is None:
+        _weather_collector = WeatherContextCollector()
+    return _weather_collector
+
 
 class WeatherContextCollector(ContextCollector):
     """
-    Monitors weather data and health-related alerts.
+    Monitors weather data for health impacts and calendar correlations.
     
     Produces signals for:
-    - High UV index (>4 triggers sun allergy warning)
-    - High headache risk (pressure changes)
-    - Significant pressure drops
+    - High UV index (sun allergy warning)
+    - High headache risk (pressure/humidity)
     - Severe weather alerts
+    - Pressure changes (headache trigger)
+    - Weather forecast alerts
     """
     
-    async def collect_signals(self, lookback_hours: int = 24) -> List[ContextSignal]:
+    async def collect_signals(self, lookback_hours: int = 6) -> List[ContextSignal]:
         """
         Collect weather signals from recent readings.
         
-        Uses 24-hour lookback since weather changes daily.
+        6-hour lookback since weather changes frequently.
         """
         signals = []
-        lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
         
         try:
-            # Query 1: Get latest weather reading with all health metrics
-            latest_weather_query = """
+            # Query 1: Get latest weather reading
+            latest_query = """
                 SELECT 
                     id,
                     location,
+                    timestamp,
                     temperature,
-                    feels_like,
+                    temperature_apparent as feels_like,
                     humidity,
-                    pressure,
-                    weather_description,
                     wind_speed,
+                    pressure_surface_level as pressure,
                     uv_index,
+                    weather_description,
                     headache_risk_level,
                     headache_risk_score,
                     headache_risk_factors,
                     severe_weather_alert,
-                    alert_description,
-                    timestamp,
-                    created_at
+                    alert_description
                 FROM weather_readings
-                WHERE created_at >= $1
                 ORDER BY created_at DESC
                 LIMIT 1
             """
             
-            latest = await self.db.fetch_one(latest_weather_query, lookback_time)
+            latest = await self.db.fetch_one(latest_query)
             
             if not latest:
-                logger.info("WeatherContextCollector: No recent weather data found")
+                logger.info("WeatherContextCollector: No weather data available")
                 return signals
             
             logger.info(f"WeatherContextCollector: Processing weather data for {latest['location']}")
             
-            logger.info(f"WeatherContextCollector: Processing weather data for {latest['location']}")
-            
-            # 🔍 DEBUG: Log all weather data fields
-            logger.info(f"🔍 DEBUG - Weather data fields:")
-            logger.info(f"   uv_index: {latest.get('uv_index')} (type: {type(latest.get('uv_index'))})")
-            logger.info(f"   headache_risk_level: {latest.get('headache_risk_level')}")
-            logger.info(f"   headache_risk_score: {latest.get('headache_risk_score')}")
-            logger.info(f"   headache_risk_factors: {latest.get('headache_risk_factors')}")
-            logger.info(f"   severe_weather_alert: {latest.get('severe_weather_alert')}")
-            logger.info(f"   alert_description: {latest.get('alert_description')}")
-            
             # Signal 1: UV INDEX HIGH (>4 triggers sun allergy warning)
-            logger.info(f"🔍 DEBUG - Checking UV index signal...")
-                        
             uv_index = latest.get('uv_index')
             if uv_index is not None and uv_index > 4:
-                # Determine severity
                 if uv_index >= 8:
                     uv_level = 'very_high'
-                    priority = 10  # Maximum priority - dangerous for sun allergy
+                    priority = 10
                 elif uv_index >= 6:
                     uv_level = 'high'
                     priority = 9
-                else:  # 4-6
+                else:
                     uv_level = 'moderate_high'
                     priority = 8
                 
@@ -1787,14 +1833,12 @@ class WeatherContextCollector(ContextCollector):
                         'timestamp': latest['timestamp'].isoformat()
                     },
                     priority=priority,
-                    expires_hours=6  # UV changes throughout the day
+                    expires_hours=6
                 ))
                 
                 logger.warning(f"☀️ UV ALERT: Index {uv_index} ({uv_level}) - SUN PROTECTION REQUIRED!")
             
             # Signal 2: High headache risk
-            logger.info(f"🔍 DEBUG - Checking headache risk signal...")
-            
             if latest['headache_risk_level'] in ['high', 'severe']:
                 priority = 8 if latest['headache_risk_level'] == 'high' else 9
                 
@@ -1812,14 +1856,12 @@ class WeatherContextCollector(ContextCollector):
                         'timestamp': latest['timestamp'].isoformat()
                     },
                     priority=priority,
-                    expires_hours=12  # Headache risk changes relatively quickly
+                    expires_hours=12
                 ))
                 
                 logger.warning(f"⚠️ {latest['headache_risk_level'].upper()} headache risk detected - Score: {latest['headache_risk_score']}")
             
             # Signal 3: Severe weather alert
-            logger.info(f"🔍 DEBUG - Checking severe weather alert signal...")
-            
             if latest['severe_weather_alert']:
                 signals.append(self._create_signal(
                     signal_type='weather_alert',
@@ -1831,8 +1873,8 @@ class WeatherContextCollector(ContextCollector):
                         'wind_speed': latest['wind_speed'],
                         'timestamp': latest['timestamp'].isoformat()
                     },
-                    priority=10,  # Severe weather = max priority
-                    expires_hours=6  # Short expiry - weather moves fast
+                    priority=10,
+                    expires_hours=6
                 ))
                 
                 logger.error(f"🚨 SEVERE WEATHER ALERT: {latest['alert_description']}")
@@ -1851,41 +1893,35 @@ class WeatherContextCollector(ContextCollector):
             
             pressure_readings = await self.db.fetch_all(
                 pressure_change_query,
-                datetime.utcnow() - timedelta(hours=12)  # Last 12 hours
+                datetime.utcnow() - timedelta(hours=12)
             )
             
             if len(pressure_readings) >= 2:
-                # Calculate pressure change - with None check
                 current_pressure = pressure_readings[0]['pressure_surface_level']
                 oldest_pressure = pressure_readings[-1]['pressure_surface_level']
                 
-                # Only calculate if both values exist
                 if current_pressure is not None and oldest_pressure is not None:
                     pressure_change = current_pressure - oldest_pressure
-                else:
-                    logger.warning("Pressure readings contain None values, skipping pressure change calculation")
-                    pressure_change = None
-                
-                # Signal 4: Significant pressure drop (headache trigger)
-                # Pressure drop > 0.1 inHg (or 3.4 mb) is significant
-                if pressure_change is not None and pressure_change < -0.1:
-                    signals.append(self._create_signal(
-                        signal_type='pressure_dropping',
-                        data={
-                            'current_pressure': current_pressure,
-                            'previous_pressure': oldest_pressure,
-                            'pressure_change': round(pressure_change, 2),
-                            'hours_tracked': round(
-                                (pressure_readings[0]['created_at'] - pressure_readings[-1]['created_at']).total_seconds() / 3600,
-                                1
-                            ),
-                            'location': latest['location']
-                        },
-                        priority=7,
-                        expires_hours=8
-                    ))
                     
-                    logger.info(f"📉 Pressure dropping: {pressure_change:.2f} inHg over last few hours")
+                    # Signal 4: Significant pressure drop (headache trigger)
+                    if pressure_change < -0.1:
+                        signals.append(self._create_signal(
+                            signal_type='pressure_dropping',
+                            data={
+                                'current_pressure': current_pressure,
+                                'previous_pressure': oldest_pressure,
+                                'pressure_change': round(pressure_change, 2),
+                                'hours_tracked': round(
+                                    (pressure_readings[0]['created_at'] - pressure_readings[-1]['created_at']).total_seconds() / 3600,
+                                    1
+                                ),
+                                'location': latest['location']
+                            },
+                            priority=7,
+                            expires_hours=8
+                        ))
+                        
+                        logger.info(f"📉 Pressure dropping: {pressure_change:.2f} inHg over last few hours")
             
             # Query 3: Check forecast for UV and weather changes
             forecast_query = """
@@ -1909,7 +1945,6 @@ class WeatherContextCollector(ContextCollector):
                 forecast = await self.db.fetch_all(forecast_query, now, next_24h)
                 
                 if forecast:
-                    # Check for UV alerts in forecast
                     uv_alert_sent = False
                     precip_alert_sent = False
                     
@@ -1950,19 +1985,17 @@ class WeatherContextCollector(ContextCollector):
                                         'weather': period['weather_description'],
                                         'temperature': period['temperature']
                                     },
-                                    priority=5,  # Informational
+                                    priority=5,
                                     expires_hours=int(hours_until) + 2
                                 ))
                                 
                                 logger.debug(f"🌧️ High precipitation chance in {hours_until:.1f}h: {period['precipitation_chance']}%")
                                 precip_alert_sent = True
                         
-                        # Stop after finding both types
                         if uv_alert_sent and precip_alert_sent:
                             break
                 
             except Exception as e:
-                # Forecast table might not exist yet - skip silently
                 logger.debug(f"No forecast data available: {e}")
             
             logger.info(f"WeatherContextCollector: Collected {len(signals)} signals")
@@ -1975,7 +2008,6 @@ class WeatherContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of weather monitoring"""
         try:
-            # Get latest weather reading
             latest = await self.db.fetch_one(
                 """SELECT 
                     location,
@@ -1991,63 +2023,26 @@ class WeatherContextCollector(ContextCollector):
                 ORDER BY created_at DESC LIMIT 1"""
             )
             
-            # Count total readings
             total_readings = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM weather_readings"
             )
             
-            # Count high UV days in last week (>4)
             high_uv_count = await self.db.fetch_one(
                 """SELECT COUNT(*) as count FROM weather_readings 
-                   WHERE created_at >= NOW() - INTERVAL '7 days'
-                   AND uv_index > 4"""
+                   WHERE uv_index > 4 
+                   AND created_at >= NOW() - INTERVAL '7 days'"""
             )
-            
-            # Count high headache risk days in last week
-            high_risk_count = await self.db.fetch_one(
-                """SELECT COUNT(*) as count FROM weather_readings 
-                   WHERE created_at >= NOW() - INTERVAL '7 days'
-                   AND headache_risk_level IN ('high', 'severe')"""
-            )
-            
-            # Count severe weather alerts in last week
-            alert_count = await self.db.fetch_one(
-                """SELECT COUNT(*) as count FROM weather_readings 
-                   WHERE created_at >= NOW() - INTERVAL '7 days'
-                   AND severe_weather_alert = true"""
-            )
-            
-            # Determine current UV status
-            current_uv = latest.get('uv_index') if latest else None
-            if current_uv is not None:
-                if current_uv >= 8:
-                    uv_status = 'VERY HIGH - DANGER'
-                elif current_uv >= 6:
-                    uv_status = 'HIGH - CAUTION'
-                elif current_uv > 4:
-                    uv_status = 'MODERATE HIGH - PROTECT'
-                elif current_uv > 2:
-                    uv_status = 'MODERATE - SAFE'
-                else:
-                    uv_status = 'LOW - SAFE'
-            else:
-                uv_status = 'UNKNOWN'
             
             return {
                 'collector': 'WeatherContextCollector',
                 'total_readings': total_readings['count'] if total_readings else 0,
+                'high_uv_days_7d': high_uv_count['count'] if high_uv_count else 0,
                 'current_location': latest['location'] if latest else None,
                 'current_temperature': latest['temperature'] if latest else None,
                 'current_weather': latest['weather_description'] if latest else None,
-                'current_uv_index': current_uv,
-                'current_uv_status': uv_status,
+                'current_uv': latest['uv_index'] if latest else None,
                 'current_headache_risk': latest['headache_risk_level'] if latest else None,
-                'current_risk_score': latest['headache_risk_score'] if latest else None,
-                'high_uv_days_last_week': high_uv_count['count'] if high_uv_count else 0,
-                'high_risk_days_last_week': high_risk_count['count'] if high_risk_count else 0,
-                'severe_alerts_last_week': alert_count['count'] if alert_count else 0,
-                'last_updated': latest['timestamp'].isoformat() if latest else None,
-                'sun_allergy_protection_active': current_uv is not None and current_uv > 4,
+                'last_reading': latest['created_at'].isoformat() if latest else None,
                 'status': 'operational'
             }
         except Exception as e:
@@ -2060,8 +2055,20 @@ class WeatherContextCollector(ContextCollector):
 
 
 #===============================================================================
-# PERFORMANCE CONTEXT COLLECTOR - Monitors Bluesky post analytics
+# PERFORMANCE CONTEXT COLLECTOR - Monitors content performance for learning
 #===============================================================================
+
+# Singleton instance
+_performance_collector: Optional['PerformanceContextCollector'] = None
+
+
+def get_performance_collector() -> 'PerformanceContextCollector':
+    """Get singleton PerformanceContextCollector instance"""
+    global _performance_collector
+    if _performance_collector is None:
+        _performance_collector = PerformanceContextCollector()
+    return _performance_collector
+
 
 class PerformanceContextCollector(ContextCollector):
     """
@@ -2069,41 +2076,41 @@ class PerformanceContextCollector(ContextCollector):
     
     Produces signals for:
     - Posts performing exceptionally well (learn from success)
-    - Posts performing poorly (learn from failure)
-    - Patterns worth learning from
+    - Learning opportunities (patterns detected)
+    - Timing insights (best posting times)
     
-    This is a "learning" collector - lower priority but builds intelligence
-    about what content works.
+    This is a LEARNING collector - it doesn't generate urgent signals,
+    but helps the system learn from content performance patterns.
     """
     
     async def collect_signals(self, lookback_hours: int = 168) -> List[ContextSignal]:
         """
         Collect performance signals from last 7 days (168 hours).
         
-        7-day lookback gives posts time to accumulate engagement
-        and provides meaningful performance data.
+        7-day lookback to capture enough data for pattern detection.
         """
         signals = []
         lookback_time = datetime.utcnow() - timedelta(hours=lookback_hours)
         
         try:
-            # Query 1: Get recent posts with analytics
+            # Query 1: Get recent post analytics
             posts_query = """
                 SELECT 
                     id,
+                    post_uri,
                     account_handle,
                     post_text,
-                    post_uri,
-                    created_at,
                     likes_count,
                     reposts_count,
                     replies_count,
+                    quotes_count,
                     total_engagement,
                     engagement_rate,
                     reach,
                     impressions,
                     topics,
-                    sentiment
+                    sentiment,
+                    created_at
                 FROM bluesky_post_analytics
                 WHERE created_at >= $1
                 ORDER BY created_at DESC
@@ -2118,9 +2125,11 @@ class PerformanceContextCollector(ContextCollector):
             logger.info(f"PerformanceContextCollector: Processing {len(posts)} posts")
             
             # Calculate average performance metrics for baseline
-            if posts:
-                avg_engagement = sum(p['total_engagement'] for p in posts) / len(posts)
-                avg_engagement_rate = sum(p['engagement_rate'] for p in posts if p['engagement_rate']) / len([p for p in posts if p['engagement_rate']])
+            valid_posts = [p for p in posts if p['total_engagement'] is not None]
+            if valid_posts:
+                avg_engagement = sum(p['total_engagement'] for p in valid_posts) / len(valid_posts)
+                rate_posts = [p for p in valid_posts if p['engagement_rate']]
+                avg_engagement_rate = sum(p['engagement_rate'] for p in rate_posts) / len(rate_posts) if rate_posts else 0
                 
                 logger.debug(f"Average engagement: {avg_engagement:.1f}, Average rate: {avg_engagement_rate:.2%}")
             else:
@@ -2132,15 +2141,14 @@ class PerformanceContextCollector(ContextCollector):
                 engagement_rate = post['engagement_rate'] or 0
                 
                 # Signal 1: Post performing exceptionally well (learn from success)
-                # REALISTIC thresholds: 3x average OR 10+ engagement (since 2 likes is "trending" for you)
-                # We want to catch genuine wins, not inflate expectations
+                # REALISTIC thresholds: 3x average OR 10+ engagement
                 if engagement >= max(avg_engagement * 3, 10):
                     signals.append(self._create_signal(
                         signal_type='post_performing_well',
                         data={
                             'post_id': str(post['id']),
                             'account_handle': post['account_handle'],
-                            'post_text': post['post_text'][:200],  # First 200 chars
+                            'post_text': post['post_text'][:200] if post['post_text'] else None,
                             'post_uri': post['post_uri'],
                             'likes': post['likes_count'],
                             'reposts': post['reposts_count'],
@@ -2154,24 +2162,13 @@ class PerformanceContextCollector(ContextCollector):
                             'performance_vs_average': round(engagement / avg_engagement, 2) if avg_engagement > 0 else 0,
                             'created_at': post['created_at'].isoformat()
                         },
-                        priority=5,  # Learning priority - not urgent
-                        expires_hours=336  # Keep for 2 weeks to learn from
+                        priority=5,
+                        expires_hours=336
                     ))
                     
-                    logger.info(f"✅ High-performing post: {engagement} engagement ({engagement / avg_engagement:.1f}x avg)")
-                
-                # Signal 2: Post performing poorly - REMOVED
-                # We're NOT flagging low-performing posts because:
-                # 1. Bluesky engagement is naturally low
-                # 2. You're "fighting uphill" with niche content
-                # 3. Zero engagement doesn't mean bad content - just different audience/timing
-                # 4. Creates negative signal noise that isn't actionable
-                #
-                # Instead, we only focus on POSITIVE learning from what works
+                    logger.info(f"✅ High-performing post: {engagement} engagement ({engagement / avg_engagement:.1f}x avg)" if avg_engagement > 0 else f"✅ High-performing post: {engagement} engagement")
             
             # Query 2: Look for patterns across high-performing posts
-            # REALISTIC: Only look for patterns where posts actually got engagement
-            # Require at least 5+ engagement per post in the pattern (not asking for miracles)
             pattern_query = """
                 SELECT 
                     topics,
@@ -2193,8 +2190,6 @@ class PerformanceContextCollector(ContextCollector):
                 patterns = await self.db.fetch_all(pattern_query, lookback_time)
                 
                 for pattern in patterns:
-                    # Signal 3: Learning opportunity - consistent pattern detected
-                    # REALISTIC: Pattern just needs to be better than average, not 1.5x
                     if pattern['avg_engagement'] > avg_engagement and pattern['avg_engagement'] >= 5:
                         signals.append(self._create_signal(
                             signal_type='learning_opportunity',
@@ -2219,7 +2214,6 @@ class PerformanceContextCollector(ContextCollector):
                 logger.debug(f"Could not analyze patterns: {e}")
             
             # Query 3: Check for timing patterns (best posting times)
-            # REALISTIC: Only analyze times where you got some engagement
             timing_query = """
                 SELECT 
                     EXTRACT(DOW FROM created_at) as day_of_week,
@@ -2238,11 +2232,9 @@ class PerformanceContextCollector(ContextCollector):
             try:
                 timing_patterns = await self.db.fetch_all(timing_query, lookback_time)
                 
-                # REALISTIC: Only flag timing if it's noticeably better (not requiring 1.3x)
                 if timing_patterns and timing_patterns[0]['avg_engagement'] > avg_engagement and timing_patterns[0]['avg_engagement'] >= 5:
                     best_timing = timing_patterns[0]
                     
-                    # Convert day_of_week to name
                     days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
                     day_name = days[int(best_timing['day_of_week'])]
                     hour = int(best_timing['hour_of_day'])
@@ -2278,12 +2270,10 @@ class PerformanceContextCollector(ContextCollector):
     async def get_current_state(self) -> Dict[str, Any]:
         """Get current state of content performance"""
         try:
-            # Count total posts analyzed
             total_posts = await self.db.fetch_one(
                 "SELECT COUNT(*) as count FROM bluesky_post_analytics"
             )
             
-            # Get average engagement metrics
             avg_metrics = await self.db.fetch_one(
                 """SELECT 
                     AVG(total_engagement) as avg_engagement,
@@ -2294,7 +2284,6 @@ class PerformanceContextCollector(ContextCollector):
                 WHERE created_at >= NOW() - INTERVAL '7 days'"""
             )
             
-            # Get best performing post in last 7 days
             best_post = await self.db.fetch_one(
                 """SELECT 
                     account_handle,
@@ -2306,19 +2295,6 @@ class PerformanceContextCollector(ContextCollector):
                 ORDER BY total_engagement DESC LIMIT 1"""
             )
             
-            # Get worst performing post in last 7 days
-            worst_post = await self.db.fetch_one(
-                """SELECT 
-                    account_handle,
-                    post_text,
-                    total_engagement,
-                    created_at
-                FROM bluesky_post_analytics
-                WHERE created_at >= NOW() - INTERVAL '7 days'
-                ORDER BY total_engagement ASC LIMIT 1"""
-            )
-            
-            # Count posts by account
             account_counts = await self.db.fetch_all(
                 """SELECT account_handle, COUNT(*) as count 
                 FROM bluesky_post_analytics 
@@ -2333,11 +2309,9 @@ class PerformanceContextCollector(ContextCollector):
                 'avg_engagement_rate_7d': round(avg_metrics['avg_rate'], 4) if avg_metrics and avg_metrics['avg_rate'] else 0,
                 'avg_likes_7d': round(avg_metrics['avg_likes'], 1) if avg_metrics and avg_metrics['avg_likes'] else 0,
                 'avg_reposts_7d': round(avg_metrics['avg_reposts'], 1) if avg_metrics and avg_metrics['avg_reposts'] else 0,
-                'best_post_text': best_post['post_text'][:100] if best_post else None,
+                'best_post_text': best_post['post_text'][:100] if best_post and best_post['post_text'] else None,
                 'best_post_engagement': best_post['total_engagement'] if best_post else None,
-                'worst_post_text': worst_post['post_text'][:100] if worst_post else None,
-                'worst_post_engagement': worst_post['total_engagement'] if worst_post else None,
-                'posts_by_account': {row['account_handle']: row['count'] for row in account_counts},
+                'posts_by_account': {row['account_handle']: row['count'] for row in account_counts} if account_counts else {},
                 'status': 'operational'
             }
         except Exception as e:
@@ -2347,3 +2321,39 @@ class PerformanceContextCollector(ContextCollector):
                 'status': 'error',
                 'error': str(e)
             }
+
+
+#===============================================================================
+# MODULE EXPORTS - Singleton getters for all collectors
+#===============================================================================
+
+__all__ = [
+    # Base classes
+    'ContextSignal',
+    'ContextCollector',
+    
+    # User ID constant
+    'USER_ID',
+    
+    # Collector classes
+    'MeetingContextCollector',
+    'ConversationContextCollector',
+    'CalendarContextCollector',
+    'EmailContextCollector',
+    'TrendContextCollector',
+    'BlueskyContextCollector',
+    'KnowledgeContextCollector',
+    'WeatherContextCollector',
+    'PerformanceContextCollector',
+    
+    # Singleton getters
+    'get_meeting_collector',
+    'get_conversation_collector',
+    'get_calendar_collector',
+    'get_email_collector',
+    'get_trend_collector',
+    'get_bluesky_collector',
+    'get_knowledge_collector',
+    'get_weather_collector',
+    'get_performance_collector',
+]

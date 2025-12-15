@@ -6,9 +6,9 @@ This module transforms Syntax Prime V2 from a reactive chat assistant
 into a proactive personal operating system with Telegram notifications.
 """
 
-from .bot_client import TelegramBotClient
-from .database_manager import TelegramDatabaseManager
-from .kill_switch import KillSwitch
+from .bot_client import TelegramBotClient, get_bot_client
+from .database_manager import TelegramDatabaseManager, get_telegram_db_manager
+from .kill_switch import KillSwitch, get_kill_switch
 from .notification_manager import NotificationManager
 from .message_formatter import MessageFormatter
 from .callback_handler import CallbackHandler
@@ -24,11 +24,16 @@ __all__ = [
     # Core classes
     'TelegramBotClient',
     'TelegramDatabaseManager',
-    'TelegramKillSwitch',
+    'KillSwitch',
     'NotificationManager',
     'MessageFormatter',
     'CallbackHandler',
-        
+    
+    # Factory functions (singletons)
+    'get_bot_client',
+    'get_telegram_db_manager',
+    'get_kill_switch',
+    
     # Router
     'router',
     
@@ -48,7 +53,7 @@ MODULE_NAME = 'telegram_notifications'
 INTEGRATION_TYPE = 'notification_system'
 NOTIFICATION_TYPES = [
     'prayer',
-    'weather', 
+    'weather',
     'reminders',
     'calendar',
     'email',

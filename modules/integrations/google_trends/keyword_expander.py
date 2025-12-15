@@ -11,22 +11,30 @@ Real Business Focus Areas:
 - MealsNFeelz: Food donation, pantries, ramadan, fidya
 - RoseAndAngel: Marketing consulting, small business help
 - TVSignals: Streaming, TV shows, binge watching, netflix
+
+FIXED: Now uses centralized db_manager instead of direct asyncpg.connect()
+FIXED: Added whitelist validation for business area table names
 """
 
-import asyncio
-import asyncpg
-from typing import List, Dict, Set, Any
-import re
-from datetime import datetime
+from typing import List, Dict, Set, Any, Optional
 import logging
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
+# Whitelist of valid business areas (used for table name validation)
+VALID_BUSINESS_AREAS = frozenset([
+    'amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals'
+])
+
 
 class KeywordExpander:
     """Intelligent keyword expansion based on real business contexts"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self):
+        """Initialize KeywordExpander - uses centralized db_manager"""
+        # No database_url needed - we use the centralized db_manager
         
         # REAL semantic maps based on actual CSV keyword analysis
         self.semantic_maps = {
@@ -37,7 +45,7 @@ class KeywordExpander:
             'zakat': ['islamic charity', 'muslim donation', 'islamic giving'],
             'fundraising': ['fundraiser', 'fundraise', 'raise funds'],
             
-            # BCDodge - Marketing/Digital strategy  
+            # BCDodge - Marketing/Digital strategy
             'marketing': ['advertising', 'promotion', 'branding', 'outreach'],
             'digital': ['online', 'internet', 'web', 'social media'],
             'strategy': ['strategic', 'planning', 'approach', 'tactics'],
@@ -183,7 +191,7 @@ class KeywordExpander:
         
         # Filter out very long phrases (>6 words) and very short ones (<2 chars)
         filtered_variations = [
-            var for var in all_variations 
+            var for var in all_variations
             if 2 <= len(var) <= 100 and len(var.split()) <= 6
         ]
         
@@ -192,13 +200,15 @@ class KeywordExpander:
     
     async def get_base_keywords_from_database(self) -> Dict[str, List[str]]:
         """Fetch all active keywords from database by business area"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
-            business_areas = ['amcf', 'bcdodge', 'damnitcarl', 'mealsnfeelz', 'roseandangel', 'tvsignals']
+            conn = await db_manager.get_connection()
+            
             all_keywords = {}
             
-            for area in business_areas:
+            for area in VALID_BUSINESS_AREAS:
+                # Use parameterized approach - table name is from whitelist so safe
+                # We can't parameterize table names, but we've validated against whitelist
                 query = f'SELECT keyword FROM {area}_keywords WHERE is_active = true'
                 rows = await conn.fetch(query)
                 keywords = [row['keyword'] for row in rows]
@@ -208,8 +218,12 @@ class KeywordExpander:
             
             return all_keywords
             
+        except Exception as e:
+            logger.error(f"Failed to get base keywords: {e}")
+            return {}
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def expand_all_keywords(self) -> Dict[str, List[str]]:
         """Expand all 4,586 base keywords into monitoring set"""
@@ -218,6 +232,10 @@ class KeywordExpander:
         
         # Get base keywords from database
         base_keywords = await self.get_base_keywords_from_database()
+        
+        if not base_keywords:
+            logger.error("No base keywords found in database")
+            return {}
         
         expanded_keywords = {}
         total_base = 0
@@ -259,9 +277,10 @@ class KeywordExpander:
     
     async def save_expanded_keywords_to_database(self, expanded_keywords: Dict[str, List[str]]):
         """Save expanded keywords to database for trend monitoring"""
-        conn = await asyncpg.connect(self.database_url)
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Create expanded keywords table if not exists
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS expanded_keywords_for_trends (
@@ -269,7 +288,7 @@ class KeywordExpander:
                     original_keyword VARCHAR(500) NOT NULL,
                     expanded_keyword VARCHAR(500) NOT NULL,
                     business_area VARCHAR(100) NOT NULL,
-                    expansion_type VARCHAR(50), -- 'semantic', 'format', 'trending', 'original'
+                    expansion_type VARCHAR(50),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     
                     UNIQUE(expanded_keyword, business_area)
@@ -280,8 +299,10 @@ class KeywordExpander:
             
             total_saved = 0
             for business_area, keywords in expanded_keywords.items():
-                # For now, save all as 'mixed' expansion type
-                # Could enhance later to track specific expansion types
+                # Validate business area against whitelist
+                if business_area not in VALID_BUSINESS_AREAS:
+                    logger.warning(f"Skipping invalid business area: {business_area}")
+                    continue
                 
                 for keyword in keywords:
                     try:
@@ -297,37 +318,23 @@ class KeywordExpander:
             
             print(f"   ✅ Saved {total_saved:,} expanded keywords to database")
             
+        except Exception as e:
+            logger.error(f"Failed to save expanded keywords: {e}")
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
 
-async def main():
-    """Test the keyword expansion system"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    expander = KeywordExpander(database_url)
-    
-    # Test single keyword expansion
-    print("🧪 TESTING KEYWORD EXPANSION")
-    print("=" * 40)
-    
-    test_cases = [
-        ('tv show', 'tvsignals'),
-        ('emotional support cat', 'damnitcarl'),
-        ('food pantry', 'mealsnfeelz'),
-        ('marketing consultant', 'roseandangel'),
-        ('charity donation', 'amcf')
-    ]
-    
-    for keyword, business in test_cases:
-        expanded = await expander.expand_keyword(keyword, business)
-        print(f"\n📈 '{keyword}' ({business}):")
-        for i, expansion in enumerate(expanded[:10], 1):
-            print(f"   {i:2}. {expansion}")
-    
-    # Uncomment to run full expansion
-    # expanded_all = await expander.expand_all_keywords()
-    # await expander.save_expanded_keywords_to_database(expanded_all)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# ============================================================================
+# SINGLETON GETTER
+# ============================================================================
+
+_keyword_expander: Optional[KeywordExpander] = None
+
+
+def get_keyword_expander() -> KeywordExpander:
+    """Get or create the KeywordExpander singleton instance"""
+    global _keyword_expander
+    if _keyword_expander is None:
+        _keyword_expander = KeywordExpander()
+    return _keyword_expander

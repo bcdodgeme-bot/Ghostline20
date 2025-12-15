@@ -12,14 +12,47 @@ Each action includes:
 - Optional: Parameters for automated execution
 
 Created: 10/22/25
+Updated: 2025-01-XX - Added singleton pattern
 """
 
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
+from uuid import UUID
 import json
 
 logger = logging.getLogger(__name__)
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_suggester_instance: Optional['ActionSuggester'] = None
+
+
+def get_action_suggester(db_manager=None) -> 'ActionSuggester':
+    """
+    Get or create the singleton ActionSuggester instance.
+    
+    Args:
+        db_manager: Database manager (optional, for future enhancements)
+        
+    Returns:
+        ActionSuggester singleton instance
+    """
+    global _suggester_instance
+    
+    if _suggester_instance is None:
+        _suggester_instance = ActionSuggester(db_manager=db_manager)
+    
+    return _suggester_instance
+
 
 #===============================================================================
 # ACTION SUGGESTER - Generate actionable recommendations
@@ -332,7 +365,7 @@ class ActionSuggester:
     
     
     def _suggest_email_actions(
-        self, 
+        self,
         context: Dict[str, Any],
         situation_type: str
     ) -> List[Dict[str, Any]]:
@@ -849,3 +882,14 @@ class ActionSuggester:
         
         else:
             return "Review situation details"
+
+
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'ActionSuggester',
+    'get_action_suggester',
+    'USER_ID'
+]

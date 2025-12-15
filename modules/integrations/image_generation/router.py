@@ -4,27 +4,23 @@ Image Generation FastAPI Router for Syntax Prime V2
 Provides endpoints for chat interface integration and image management
 
 Key Features:
-- Generate images from chat commands
+- Generate images from chat commands via OpenRouter/Gemini 3 Pro
 - Retrieve image history and downloads
 - Style template management
 - Health checks and system status
 - Integration with chat interface
 """
 
-import asyncio
 import logging
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-import json
 import base64
 import io
+from typing import Dict, List, Any, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Import our image generation components
-from .replicate_client import ReplicateImageClient
+from .openrouter_image_client import OpenRouterImageClient
 from .database_manager import ImageDatabase
 
 logger = logging.getLogger(__name__)
@@ -32,9 +28,26 @@ logger = logging.getLogger(__name__)
 # Create router instance
 router = APIRouter(prefix="/integrations/image-generation", tags=["Image Generation"])
 
-# Initialize components
-replicate_client = ReplicateImageClient()
-image_db = ImageDatabase()
+# Lazy initialization - singletons created on first use
+_image_client: Optional[OpenRouterImageClient] = None
+_image_db: Optional[ImageDatabase] = None
+
+
+def get_image_client() -> OpenRouterImageClient:
+    """Get or create OpenRouterImageClient singleton"""
+    global _image_client
+    if _image_client is None:
+        _image_client = OpenRouterImageClient()
+    return _image_client
+
+
+def get_image_db() -> ImageDatabase:
+    """Get or create ImageDatabase singleton"""
+    global _image_db
+    if _image_db is None:
+        _image_db = ImageDatabase()
+    return _image_db
+
 
 # ============================================================================
 # REQUEST/RESPONSE MODELS
@@ -48,6 +61,7 @@ class ImageGenerationRequest(BaseModel):
     style_template: Optional[str] = None
     speed_priority: Optional[bool] = False
 
+
 class ImageGenerationResponse(BaseModel):
     success: bool
     image_id: Optional[str] = None
@@ -60,15 +74,18 @@ class ImageGenerationResponse(BaseModel):
     resolution: Optional[str] = None
     error: Optional[str] = None
 
+
 class ImageHistoryResponse(BaseModel):
     images: List[Dict[str, Any]]
     total_count: int
     page: int
     limit: int
 
+
 class StyleTemplateResponse(BaseModel):
     templates: List[Dict[str, Any]]
     total_count: int
+
 
 class HealthResponse(BaseModel):
     healthy: bool
@@ -78,6 +95,7 @@ class HealthResponse(BaseModel):
     recent_generations: int
     available_models: int
 
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -85,13 +103,17 @@ class HealthResponse(BaseModel):
 async def get_current_user_id() -> str:
     """Get current user ID - integrates with your auth system"""
     try:
-        user_id = await image_db.get_user_id()
+        db = get_image_db()
+        user_id = await db.get_user_id()
         if not user_id:
             raise HTTPException(status_code=401, detail="No user found")
         return user_id
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get user ID: {e}")
         raise HTTPException(status_code=500, detail="Failed to authenticate user")
+
 
 # ============================================================================
 # IMAGE GENERATION ENDPOINTS
@@ -108,12 +130,15 @@ async def generate_image(
     This is the main endpoint called by chat commands
     """
     try:
+        client = get_image_client()
+        db = get_image_db()
+        
         logger.info(f"Generating image: '{request.prompt[:50]}...' for user {user_id}")
         
         # Get style template if specified
         style_template = None
         if request.style_template:
-            style_template_obj = await image_db.get_style_template(name=request.style_template)
+            style_template_obj = await db.get_style_template(name=request.style_template)
             if style_template_obj:
                 style_template = {
                     'style_prompt': style_template_obj.style_prompt,
@@ -121,13 +146,13 @@ async def generate_image(
                 }
                 # Update usage stats in background
                 background_tasks.add_task(
-                    image_db.update_style_usage, 
-                    request.style_template, 
+                    db.update_style_usage,
+                    request.style_template,
                     True
                 )
         
-        # Generate the image using Replicate
-        generation_result = await replicate_client.generate_image(
+        # Generate the image using OpenRouter/Gemini 3 Pro
+        generation_result = await client.generate_image(
             prompt=request.prompt,
             content_type=request.content_type,
             width=request.width,
@@ -145,11 +170,11 @@ async def generate_image(
                 error=generation_result.get('error', 'Unknown generation error')
             )
         
-        # Save to database in background
+        # Save to database
         image_id = None
         try:
             generation_result['style_applied'] = request.style_template or ''
-            image_id = await image_db.save_generated_image(generation_result, user_id)
+            image_id = await db.save_generated_image(generation_result, user_id)
         except Exception as e:
             logger.error(f"Failed to save image to database: {e}")
             # Don't fail the request if save fails - user still gets the image
@@ -158,7 +183,7 @@ async def generate_image(
             success=True,
             image_id=image_id,
             image_base64=generation_result['image_base64'],
-            image_url=generation_result['image_url'],
+            image_url=generation_result.get('image_url', ''),
             original_prompt=generation_result['original_prompt'],
             enhanced_prompt=generation_result['enhanced_prompt'],
             model_used=generation_result['model_used'],
@@ -169,6 +194,7 @@ async def generate_image(
     except Exception as e:
         logger.error(f"Image generation endpoint failed: {e}")
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
 
 @router.get("/quick-generate/{prompt}")
 async def quick_generate(
@@ -183,12 +209,13 @@ async def quick_generate(
     request = ImageGenerationRequest(
         prompt=prompt,
         content_type=content_type,
-        speed_priority=True,  # Use fast generation for quick requests
-        width=512,  # Smaller size for speed
-        height=512
+        speed_priority=True,  # Use fast model for quick requests
+        width=1024,
+        height=1024
     )
     
     return await generate_image(request, BackgroundTasks(), user_id)
+
 
 # ============================================================================
 # IMAGE RETRIEVAL ENDPOINTS
@@ -203,8 +230,10 @@ async def get_image_history(
 ):
     """Get user's image generation history"""
     try:
+        db = get_image_db()
+        
         # Get recent images
-        images = await image_db.get_recent_images(user_id, limit)
+        images = await db.get_recent_images(user_id, limit)
         
         # Filter by content type if specified
         if content_type:
@@ -215,7 +244,8 @@ async def get_image_history(
         for img in images:
             formatted_img = dict(img)
             formatted_img['id'] = str(formatted_img['id'])
-            formatted_img['created_at'] = formatted_img['created_at'].isoformat()
+            if formatted_img.get('created_at'):
+                formatted_img['created_at'] = formatted_img['created_at'].isoformat()
             # Don't include base64 in list view for performance
             formatted_img.pop('image_data_base64', None)
             formatted_images.append(formatted_img)
@@ -231,6 +261,7 @@ async def get_image_history(
         logger.error(f"Failed to get image history: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve image history")
 
+
 @router.get("/image/{image_id}")
 async def get_image_details(
     image_id: str,
@@ -239,7 +270,8 @@ async def get_image_details(
 ):
     """Get detailed information about a specific image"""
     try:
-        image = await image_db.get_image_by_id(image_id)
+        db = get_image_db()
+        image = await db.get_image_by_id(image_id)
         
         if not image:
             raise HTTPException(status_code=404, detail="Image not found")
@@ -258,7 +290,7 @@ async def get_image_details(
             'resolution': image.resolution,
             'file_format': image.file_format,
             'download_count': image.download_count,
-            'created_at': image.created_at.isoformat(),
+            'created_at': image.created_at.isoformat() if image.created_at else None,
             'image_url': image.image_url
         }
         
@@ -273,6 +305,7 @@ async def get_image_details(
         logger.error(f"Failed to get image details: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve image details")
 
+
 @router.get("/search")
 async def search_images(
     keywords: str,
@@ -281,19 +314,21 @@ async def search_images(
 ):
     """Search images by keywords in prompts"""
     try:
+        db = get_image_db()
         keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
         
         if not keyword_list:
             raise HTTPException(status_code=400, detail="No keywords provided")
         
-        images = await image_db.search_images_by_keyword(keyword_list, user_id, limit)
+        images = await db.search_images_by_keyword(keyword_list, user_id, limit)
         
         # Format response
         formatted_images = []
         for img in images:
             formatted_img = dict(img)
             formatted_img['id'] = str(formatted_img['id'])
-            formatted_img['created_at'] = formatted_img['created_at'].isoformat()
+            if formatted_img.get('created_at'):
+                formatted_img['created_at'] = formatted_img['created_at'].isoformat()
             formatted_images.append(formatted_img)
         
         return {
@@ -308,6 +343,7 @@ async def search_images(
         logger.error(f"Image search failed: {e}")
         raise HTTPException(status_code=500, detail="Image search failed")
 
+
 # ============================================================================
 # DOWNLOAD ENDPOINTS
 # ============================================================================
@@ -320,7 +356,8 @@ async def download_image(
 ):
     """Download an image in specified format"""
     try:
-        image = await image_db.get_image_by_id(image_id)
+        db = get_image_db()
+        image = await db.get_image_by_id(image_id)
         
         if not image:
             raise HTTPException(status_code=404, detail="Image not found")
@@ -334,14 +371,17 @@ async def download_image(
         
         try:
             image_bytes = base64.b64decode(image.image_base64)
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Invalid image data")
         
-        # Update download count in background
-        await image_db.increment_download_count(image_id)
+        # Update download count
+        await db.increment_download_count(image_id)
         
         # Generate filename
-        safe_prompt = "".join(c for c in image.original_prompt[:30] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_prompt = "".join(
+            c for c in image.original_prompt[:30]
+            if c.isalnum() or c in (' ', '-', '_')
+        ).rstrip()
         filename = f"{safe_prompt}_{image_id[:8]}.{format}"
         
         # Return file download
@@ -357,6 +397,7 @@ async def download_image(
         logger.error(f"Download failed: {e}")
         raise HTTPException(status_code=500, detail="Download failed")
 
+
 # ============================================================================
 # STYLE TEMPLATE ENDPOINTS
 # ============================================================================
@@ -365,7 +406,8 @@ async def download_image(
 async def get_available_styles():
     """Get all available style templates"""
     try:
-        styles = await image_db.get_available_styles()
+        db = get_image_db()
+        styles = await db.get_available_styles()
         
         return StyleTemplateResponse(
             templates=styles,
@@ -376,11 +418,13 @@ async def get_available_styles():
         logger.error(f"Failed to get styles: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve styles")
 
+
 @router.get("/styles/{style_name}")
 async def get_style_template(style_name: str):
     """Get details about a specific style template"""
     try:
-        template = await image_db.get_style_template(name=style_name)
+        db = get_image_db()
+        template = await db.get_style_template(name=style_name)
         
         if not template:
             raise HTTPException(status_code=404, detail="Style template not found")
@@ -402,6 +446,7 @@ async def get_style_template(style_name: str):
         logger.error(f"Failed to get style template: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve style template")
 
+
 # ============================================================================
 # ANALYTICS AND ADMIN ENDPOINTS
 # ============================================================================
@@ -413,25 +458,30 @@ async def get_generation_stats(
 ):
     """Get image generation statistics"""
     try:
-        stats = await image_db.get_generation_stats(user_id, days)
+        db = get_image_db()
+        stats = await db.get_generation_stats(user_id, days)
         return stats
         
     except Exception as e:
         logger.error(f"Failed to get stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve statistics")
 
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint for image generation system"""
     try:
+        client = get_image_client()
+        db = get_image_db()
+        
         # Check database health
-        db_health = await image_db.health_check()
+        db_health = await db.health_check()
         
         # Check API connection
-        api_health = await replicate_client.test_api_connection()
+        api_health = await client.test_api_connection()
         
         # Get available models
-        models = replicate_client.get_available_models()
+        models = client.get_available_models()
         
         return HealthResponse(
             healthy=db_health['healthy'] and api_health['success'],
@@ -452,6 +502,7 @@ async def health_check():
             recent_generations=0,
             available_models=0
         )
+
 
 # ============================================================================
 # CHAT INTEGRATION ENDPOINTS (for AI router)
@@ -497,6 +548,7 @@ async def chat_generate_image(
             'prompt': prompt
         }
 
+
 # ============================================================================
 # STARTUP/SHUTDOWN HANDLERS
 # ============================================================================
@@ -506,13 +558,15 @@ async def startup_image_generation():
     """Initialize image generation system"""
     logger.info("🎨 Image generation system starting up...")
     
-    # Test connections
     try:
-        db_health = await image_db.health_check()
+        client = get_image_client()
+        db = get_image_db()
+        
+        db_health = await db.health_check()
         logger.info(f"Database: {'✅' if db_health['healthy'] else '❌'}")
         
-        api_health = await replicate_client.test_api_connection()
-        logger.info(f"Replicate API: {'✅' if api_health['success'] else '❌'}")
+        api_health = await client.test_api_connection()
+        logger.info(f"OpenRouter API: {'✅' if api_health['success'] else '❌'}")
         
         if db_health['healthy'] and api_health['success']:
             logger.info("🎉 Image generation system ready!")
@@ -522,13 +576,15 @@ async def startup_image_generation():
     except Exception as e:
         logger.error(f"Image generation startup failed: {e}")
 
+
 @router.on_event("shutdown")
 async def shutdown_image_generation():
     """Clean up image generation system"""
     logger.info("🎨 Image generation system shutting down...")
     
-    try:
-        await replicate_client.close_session()
-        logger.info("✅ Replicate client session closed")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+    if _image_client is not None:
+        try:
+            await _image_client.close_session()
+            logger.info("✅ OpenRouter client session closed")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")

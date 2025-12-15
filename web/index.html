@@ -74,6 +74,20 @@
         <div class="main-content">
             <!-- Sidebar -->
             <aside class="sidebar" id="sidebar">
+                <!-- Proactive Insights Section -->
+                <div class="sidebar-section proactive-section">
+                    <div class="proactive-header">
+                        <h3>⚡ Insights</h3>
+                        <span class="proactive-count" id="proactiveCount">0</span>
+                    </div>
+                    <div class="proactive-list" id="proactiveList">
+                        <div class="no-proactive">
+                            <p>No pending insights</p>
+                            <small>I'll notify you when something needs attention</small>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="sidebar-section">
                     <div class="sidebar-header">
                         <h3>Bookmarks</h3>
@@ -100,35 +114,17 @@
             <!-- Chat Area -->
             <main class="chat-container">
                 <div class="chat-messages" id="chatMessages">
+                    <!-- Simplified Welcome Message -->
                     <div class="welcome-message">
                         <div class="welcome-icon">
-                            <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 80px; height: 80px; object-fit: contain;">
+                            <img src="static/syntax-buffering.png" alt="Syntax Prime" style="width: 64px; height: 64px; object-fit: contain;">
                         </div>
-                        <h2>Welcome to Syntax Prime V2</h2>
-                        <p>Your sarcastic AI assistant with perfect memory and 38% more attitude.</p>
-                        <div class="welcome-features">
-                            <div class="feature-item">
-                                <span class="feature-icon">🧠</span>
-                                <span>250K Context Memory</span>
-                            </div>
-                            <div class="feature-item">
-                                <span class="feature-icon">📚</span>
-                                <span>21K Knowledge Base</span>
-                            </div>
-                            <div class="feature-item">
-                                <span class="feature-icon">🎭</span>
-                                <span>4 Unique Personalities</span>
-                            </div>
-                            <div class="feature-item">
-                                <span class="feature-icon">🔖</span>
-                                <span>Smart Bookmarks</span>
-                            </div>
-                        </div>
+                        <h2 id="greetingText">Hey there</h2>
+                        <p id="greetingSubtext">What can I help you with?</p>
                     </div>
                 </div>
 
                 <!-- Chat Input -->
-                <!-- Updated Chat Input Container - Replace the existing chat-input-container section -->
                 <div class="chat-input-container">
                     <div class="file-upload-area" id="fileUploadArea" style="display: none;">
                         <div class="uploaded-files" id="uploadedFiles"></div>
@@ -170,6 +166,9 @@
                         </button>
                     </div>
                 </div>
+            </main>
+        </div>
+    </div>
 
     <!-- Modals -->
     <div class="modal" id="bookmarkModal" style="display: none;">
@@ -190,7 +189,7 @@
         </div>
     </div>
 
-    <!-- 💾 Drive Modal -->
+    <!-- Drive Modal -->
     <div class="modal" id="driveModal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">

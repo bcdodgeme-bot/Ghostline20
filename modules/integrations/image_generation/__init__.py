@@ -4,7 +4,7 @@ Image Generation Integration Module for Syntax Prime V2
 AI-powered image generation with inline display and download functionality
 
 Module Structure:
-- replicate_client.py: Replicate API integration with smart model selection
+- openrouter_image_client.py: OpenRouter API integration with Gemini image generation
 - database_manager.py: Image storage, retrieval, and analytics
 - router.py: FastAPI endpoints for chat integration
 - prompt_optimizer.py: Content intelligence-enhanced prompt optimization (future)
@@ -12,7 +12,7 @@ Module Structure:
 
 Key Features:
 - Inline image display (base64) - no external URLs to follow
-- Smart model selection eliminates confusing Replicate interface
+- Smart model selection via OpenRouter
 - Download functionality with multiple formats
 - Style templates for consistent branding
 - Content intelligence integration (RSS/Trends/Scraper context)
@@ -21,7 +21,7 @@ Key Features:
 Workflow:
 1. User types "image create [description]" in chat
 2. System enhances prompt using content intelligence
-3. Replicate API generates high-quality image
+3. OpenRouter API generates high-quality image via Gemini
 4. Image displays inline immediately (base64)
 5. Download buttons provide format options
 6. Analytics track usage and optimize performance
@@ -29,13 +29,12 @@ Workflow:
 
 import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Import core components
-from .replicate_client import ReplicateImageClient
+from .openrouter_image_client import OpenRouterImageClient
 from .database_manager import ImageDatabase
 from .router import router
-from typing import List, Dict, Any
 
 # Import health check functions
 try:
@@ -46,7 +45,7 @@ except ImportError:
     check_module_health = None
 
 # Module metadata
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 __author__ = 'Syntax Prime V2'
 __description__ = 'AI-powered image generation with inline display and download functionality'
 
@@ -54,14 +53,14 @@ __description__ = 'AI-powered image generation with inline display and download 
 MODULE_NAME = 'image_generation'
 INTEGRATION_TYPE = 'chat_command'
 SUPPORTED_COMMANDS = [
-    'image create', 'image generate', 'image blog', 'image social', 
+    'image create', 'image generate', 'image blog', 'image social',
     'image marketing', 'image style', 'image history', 'image download'
 ]
 
 # Public API - what other modules can import
 __all__ = [
-    'ReplicateImageClient',
-    'ImageDatabase', 
+    'OpenRouterImageClient',
+    'ImageDatabase',
     'router',
     'get_integration_info',
     'check_module_health',
@@ -73,7 +72,7 @@ __all__ = [
 # CHAT INTEGRATION HELPERS
 # ============================================================================
 
-async def generate_image_for_chat(prompt: str, content_type: str = "general", 
+async def generate_image_for_chat(prompt: str, content_type: str = "general",
                                 user_id: str = None, style: str = None) -> Dict[str, Any]:
     """
     Helper function for chat integration
@@ -90,7 +89,7 @@ async def generate_image_for_chat(prompt: str, content_type: str = "general",
     """
     try:
         # Initialize components
-        client = ReplicateImageClient()
+        client = OpenRouterImageClient()
         db = ImageDatabase()
         
         # Get user ID if not provided
@@ -182,11 +181,10 @@ def check_module_health() -> Dict[str, Any]:
     """Check if image generation module is properly configured"""
     required_vars = [
         'DATABASE_URL',
-        'REPLICATE_API_TOKEN'
+        'OPENROUTER_API_KEY'
     ]
     
     optional_vars = [
-        'REPLICATE_MODEL_PREFERENCE',
         'IMAGE_GENERATION_TIMEOUT'
     ]
     
@@ -214,10 +212,10 @@ def check_module_health() -> Dict[str, Any]:
     
     # Test component initialization
     try:
-        client = ReplicateImageClient()
-        status['replicate_client'] = 'initialized'
+        client = OpenRouterImageClient()
+        status['openrouter_client'] = 'initialized'
     except Exception as e:
-        status['replicate_client'] = f'failed: {str(e)}'
+        status['openrouter_client'] = f'failed: {str(e)}'
         status['healthy'] = False
     
     try:
@@ -252,7 +250,7 @@ def get_integration_info() -> Dict[str, Any]:
         
         'features': [
             'Inline image display (base64) - no external URLs',
-            'Smart model selection eliminates confusion',
+            'OpenRouter API with Gemini image generation',
             'Prompt enhancement with content intelligence',
             'Multiple format downloads (PNG, JPG, WebP)',
             'Style templates for consistent branding',
@@ -262,10 +260,9 @@ def get_integration_info() -> Dict[str, Any]:
         ],
         
         'models_supported': [
-            'Stable Diffusion XL (high quality)',
-            'SDXL Lightning (fast generation)',
-            'Realistic Vision (artistic/illustration)',
-            'Smart fallbacks and selection'
+            'Gemini (via OpenRouter)',
+            'Aspect ratio support per content type',
+            'Direct base64 response'
         ],
         
         'endpoints': {
@@ -288,10 +285,9 @@ def get_integration_info() -> Dict[str, Any]:
         'configuration': {
             'required_env_vars': [
                 'DATABASE_URL (PostgreSQL connection)',
-                'REPLICATE_API_TOKEN (Replicate API access)'
+                'OPENROUTER_API_KEY (OpenRouter API access)'
             ],
             'optional_env_vars': [
-                'REPLICATE_MODEL_PREFERENCE (default model override)',
                 'IMAGE_GENERATION_TIMEOUT (generation timeout seconds)'
             ],
             'database_requirements': [
@@ -305,7 +301,7 @@ def get_integration_info() -> Dict[str, Any]:
             '1. User types image command in chat',
             '2. AI router detects image generation request',
             '3. Prompt enhanced with content intelligence',
-            '4. Replicate API generates high-quality image',
+            '4. OpenRouter API generates image via Gemini',
             '5. Image displays inline immediately (base64)',
             '6. Download buttons provide format options',
             '7. Analytics track usage and optimize performance'

@@ -2,6 +2,8 @@
 """
 Content Analyzer - AI-powered analysis of RSS content
 Extracts marketing insights, trends, and actionable tips from RSS feed items
+
+UPDATED: Session 15 - Added singleton pattern
 """
 
 import os
@@ -19,6 +21,18 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Singleton instance
+_content_analyzer_instance: Optional['ContentAnalyzer'] = None
+
+
+def get_content_analyzer() -> 'ContentAnalyzer':
+    """Get singleton ContentAnalyzer instance"""
+    global _content_analyzer_instance
+    if _content_analyzer_instance is None:
+        _content_analyzer_instance = ContentAnalyzer()
+    return _content_analyzer_instance
+
 
 class ContentAnalyzer:
     """Analyzes RSS content for marketing insights and trends"""
@@ -179,34 +193,34 @@ class ContentAnalyzer:
         }
     
     def _extract_keywords(self, title: str, content: str) -> List[str]:
-        """Extract relevant marketing keywords from content"""
+        """Extract relevant keywords from content"""
         text = f"{title} {content}".lower()
-        keywords = []
         
-        # Extract from all category patterns
-        for category, patterns in self.category_patterns.items():
-            for pattern in patterns:
-                if pattern.lower() in text:
-                    keywords.append(pattern)
-        
-        # Extract common marketing terms
-        marketing_terms = [
-            'conversion rate', 'ROI', 'CTR', 'engagement', 'brand awareness',
-            'lead generation', 'customer acquisition', 'retention', 'personalization',
-            'automation', 'segmentation', 'optimization', 'A/B testing'
+        # Common marketing keywords to look for
+        marketing_keywords = [
+            'seo', 'content', 'marketing', 'strategy', 'campaign', 'conversion',
+            'engagement', 'analytics', 'social media', 'email', 'optimization',
+            'traffic', 'audience', 'brand', 'digital', 'advertising', 'roi',
+            'keyword', 'backlink', 'ranking', 'google', 'search', 'organic'
         ]
         
-        for term in marketing_terms:
-            if term in text:
-                keywords.append(term)
+        found_keywords = []
+        for keyword in marketing_keywords:
+            if keyword in text:
+                found_keywords.append(keyword)
         
-        # Remove duplicates and return top 10
-        return list(set(keywords))[:10]
+        # Also extract from category patterns
+        for category, patterns in self.category_patterns.items():
+            for pattern in patterns:
+                if pattern.lower() in text and pattern not in found_keywords:
+                    found_keywords.append(pattern)
+        
+        return found_keywords[:10]  # Limit to 10 keywords
     
     def _determine_content_type(self, title: str, content: str) -> str:
         """Determine the type of content"""
         title_lower = title.lower()
-        content_lower = content.lower()
+        content_lower = content.lower()[:500]
         
         for content_type, patterns in self.content_type_patterns.items():
             for pattern in patterns:
@@ -356,7 +370,7 @@ class ContentAnalyzer:
         tech_trends = ['ai', 'artificial intelligence', 'automation', 'machine learning', 'chatgpt']
         trending.extend([trend for trend in tech_trends if trend in text])
         
-        # Marketing trends  
+        # Marketing trends
         marketing_trends = ['personalization', 'video marketing', 'voice search', 'zero-click', 'first-party data']
         trending.extend([trend for trend in marketing_trends if trend in text])
         

@@ -2,18 +2,96 @@
 """
 Feedback Learning Processor for Syntax Prime V2
 Handles 👍👎🖕 feedback system and gradual personality adaptation
+
+Updated: 2025 - Fixed SQL injection vulnerabilities (INTERVAL string formatting),
+                added bounded TTL cache, moved imports to top, fixed test script
 """
 
 import asyncio
+import re
 import uuid
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-import json
+from threading import Lock
+from typing import Dict, List, Optional, Any
 import logging
 
 from ..core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Module Exports
+# =============================================================================
+
+__all__ = [
+    'FeedbackProcessor',
+    'get_feedback_processor',
+]
+
+
+# =============================================================================
+# TTL Cache Implementation
+# =============================================================================
+
+class TTLCache:
+    """
+    Thread-safe LRU cache with TTL (time-to-live) expiration.
+    Prevents unbounded memory growth from pattern_cache.
+    """
+    
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 3600):
+        self._cache: OrderedDict = OrderedDict()
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+        self._lock = Lock()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if exists and not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            
+            cached_time, value = self._cache[key]
+            elapsed = (datetime.now() - cached_time).total_seconds()
+            
+            if elapsed >= self._ttl_seconds:
+                del self._cache[key]
+                return None
+            
+            self._cache.move_to_end(key)
+            return value
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set value in cache with current timestamp."""
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+            
+            while len(self._cache) >= self._max_size:
+                self._cache.popitem(last=False)
+            
+            self._cache[key] = (datetime.now(), value)
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self._lock:
+            self._cache.clear()
+    
+    def stats(self) -> Dict[str, Any]:
+        """Return cache statistics."""
+        with self._lock:
+            return {
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "ttl_seconds": self._ttl_seconds
+            }
+
+
+# =============================================================================
+# Feedback Processor
+# =============================================================================
 
 class FeedbackProcessor:
     """
@@ -37,11 +115,10 @@ class FeedbackProcessor:
         self.learning_window_days = 14  # Consider feedback from last 14 days
         self.max_adaptations_per_day = 3  # Limit learning speed
         
-        # Cache for performance
-        self.pattern_cache = {}
-        self.cache_duration = timedelta(hours=1)
+        # Bounded cache with 1-hour TTL and max 100 entries
+        self.pattern_cache = TTLCache(max_size=100, ttl_seconds=3600)
     
-    async def record_feedback(self, 
+    async def record_feedback(self,
                             user_id: str,
                             message_id: str,
                             thread_id: str,
@@ -81,12 +158,12 @@ class FeedbackProcessor:
         """
         
         try:
-            result = await db_manager.fetch_one(insert_query, 
-                                               feedback_id, 
-                                               user_id, 
-                                               message_id, 
-                                               thread_id, 
-                                               internal_feedback_type, 
+            result = await db_manager.fetch_one(insert_query,
+                                               feedback_id,
+                                               user_id,
+                                               message_id,
+                                               thread_id,
+                                               internal_feedback_type,
                                                feedback_text)
             
             # Process the feedback for learning
@@ -118,7 +195,7 @@ class FeedbackProcessor:
         """Get the emoji for a feedback type"""
         emoji_map = {
             'good': '👍',
-            'bad': '👎', 
+            'bad': '👎',
             'personality': '🖕'
         }
         return emoji_map.get(feedback_type, '❓')
@@ -153,8 +230,8 @@ class FeedbackProcessor:
         
         # Determine if this feedback should trigger learning
         should_learn = await self._should_trigger_learning(
-            user_id, 
-            personality_id, 
+            user_id,
+            personality_id,
             feedback_type
         )
         
@@ -189,8 +266,8 @@ class FeedbackProcessor:
         
         return learning_result
     
-    def _analyze_response_patterns(self, 
-                                 response_content: str, 
+    def _analyze_response_patterns(self,
+                                 response_content: str,
                                  personality_id: str,
                                  metadata: Dict = None) -> Dict:
         """Analyze response patterns for learning purposes"""
@@ -226,9 +303,7 @@ class FeedbackProcessor:
             r'\bwhat a (surprise|shock)\b'
         ]
         
-        import re
         content_lower = content.lower()
-        
         return any(re.search(pattern, content_lower) for pattern in sarcasm_patterns)
     
     def _detect_humor(self, content: str) -> bool:
@@ -264,7 +339,7 @@ class FeedbackProcessor:
         if any(word in content_lower for word in ['obviously', 'clearly', 'definitely', 'absolutely']):
             indicators.append('assertive')
         
-        # Helpful/supportive  
+        # Helpful/supportive
         if any(word in content_lower for word in ['help', 'support', 'assist', 'guide', 'show']):
             indicators.append('helpful')
         
@@ -315,24 +390,30 @@ class FeedbackProcessor:
         
         return markers
     
-    async def _should_trigger_learning(self, 
-                                     user_id: str, 
-                                     personality_id: str, 
+    async def _should_trigger_learning(self,
+                                     user_id: str,
+                                     personality_id: str,
                                      feedback_type: str) -> bool:
         """Determine if feedback should trigger learning adaptation"""
         
         # Get recent feedback count for this personality
+        # FIXED: Use parameterized INTERVAL instead of string formatting
         recent_feedback_query = """
         SELECT COUNT(*) as feedback_count
         FROM user_feedback uf
         JOIN conversation_messages cm ON uf.message_id = cm.id
         WHERE uf.user_id = $1
         AND uf.feedback_type = $2
-        AND uf.created_at > NOW() - INTERVAL '%s days'
+        AND uf.created_at > NOW() - INTERVAL '1 day' * $3
         AND uf.processed_for_learning = false;
-        """ % self.learning_window_days
+        """
         
-        feedback_result = await db_manager.fetch_one(recent_feedback_query, user_id, feedback_type)
+        feedback_result = await db_manager.fetch_one(
+            recent_feedback_query,
+            user_id,
+            feedback_type,
+            self.learning_window_days
+        )
         feedback_count = feedback_result['feedback_count'] if feedback_result else 0
         
         # Check daily learning limit
@@ -359,25 +440,30 @@ class FeedbackProcessor:
         
         return should_learn
     
-    async def _learn_from_perfect_personality(self, 
-                                            user_id: str, 
-                                            personality_id: str, 
+    async def _learn_from_perfect_personality(self,
+                                            user_id: str,
+                                            personality_id: str,
                                             response_analysis: Dict) -> Dict:
         """Learn from 🖕 feedback - perfect personality responses"""
         
         # Get recent perfect personality feedback
+        # FIXED: Use parameterized INTERVAL instead of string formatting
         perfect_responses_query = """
         SELECT cm.content, cm.extracted_preferences, uf.created_at
         FROM user_feedback uf
         JOIN conversation_messages cm ON uf.message_id = cm.id
         WHERE uf.user_id = $1
         AND uf.feedback_type = 'perfect_personality'
-        AND uf.created_at > NOW() - INTERVAL '%s days'
+        AND uf.created_at > NOW() - INTERVAL '1 day' * $2
         ORDER BY uf.created_at DESC
         LIMIT 10;
-        """ % self.learning_window_days
+        """
         
-        perfect_responses = await db_manager.fetch_all(perfect_responses_query, user_id)
+        perfect_responses = await db_manager.fetch_all(
+            perfect_responses_query,
+            user_id,
+            self.learning_window_days
+        )
         
         # Analyze patterns in perfect responses
         patterns = {
@@ -400,7 +486,6 @@ class FeedbackProcessor:
                 markers = self._detect_personality_markers(response['content'], personality_id)
                 all_markers.extend(markers)
             
-            from collections import Counter
             marker_counts = Counter(all_markers)
             patterns['common_markers'] = [marker for marker, count in marker_counts.most_common(5)]
         
@@ -415,9 +500,9 @@ class FeedbackProcessor:
         logger.info(f"Learning from perfect personality feedback: {learning_insights}")
         return learning_insights
     
-    async def _learn_from_positive_feedback(self, 
-                                          user_id: str, 
-                                          personality_id: str, 
+    async def _learn_from_positive_feedback(self,
+                                          user_id: str,
+                                          personality_id: str,
                                           response_analysis: Dict) -> Dict:
         """Learn from 👍 feedback - good technical responses"""
         
@@ -434,9 +519,9 @@ class FeedbackProcessor:
         
         return learning_insights
     
-    async def _learn_from_negative_feedback(self, 
-                                          user_id: str, 
-                                          personality_id: str, 
+    async def _learn_from_negative_feedback(self,
+                                          user_id: str,
+                                          personality_id: str,
                                           response_analysis: Dict) -> Dict:
         """Learn from 👎 feedback - avoid these patterns"""
         
@@ -508,12 +593,13 @@ class FeedbackProcessor:
         except Exception as e:
             logger.error(f"Failed to mark feedback as processed: {e}")
     
-    async def get_feedback_summary(self, 
-                                 user_id: str, 
+    async def get_feedback_summary(self,
+                                 user_id: str,
                                  personality_id: str = None,
                                  days: int = 30) -> Dict:
         """Get summary of feedback for a user/personality"""
         
+        # FIXED: Use parameterized INTERVAL instead of string formatting
         base_query = """
         SELECT 
             uf.feedback_type,
@@ -521,20 +607,13 @@ class FeedbackProcessor:
             AVG(CASE WHEN uf.processed_for_learning THEN 1 ELSE 0 END) as processed_rate
         FROM user_feedback uf
         WHERE uf.user_id = $1
-        AND uf.created_at > NOW() - INTERVAL '%s days'
-        """ % days
-        
-        params = [user_id]
-        
-        if personality_id:
-            # We need to join with messages to get personality context
-            # For now, just get all feedback
-            pass
-        
-        base_query += " GROUP BY uf.feedback_type ORDER BY count DESC;"
+        AND uf.created_at > NOW() - INTERVAL '1 day' * $2
+        GROUP BY uf.feedback_type 
+        ORDER BY count DESC;
+        """
         
         try:
-            results = await db_manager.fetch_all(base_query, *params)
+            results = await db_manager.fetch_all(base_query, user_id, days)
             
             summary = {
                 'user_id': user_id,
@@ -565,13 +644,14 @@ class FeedbackProcessor:
             logger.error(f"Failed to get feedback summary: {e}")
             return {'error': str(e)}
     
-    async def get_learning_insights(self, 
-                                  user_id: str, 
+    async def get_learning_insights(self,
+                                  user_id: str,
                                   personality_id: str,
                                   limit: int = 10) -> Dict:
         """Get recent learning insights for a personality"""
         
         # Get recent processed feedback with learning insights
+        # FIXED: Use parameterized INTERVAL instead of string formatting
         insights_query = """
         SELECT 
             uf.feedback_type,
@@ -582,13 +662,18 @@ class FeedbackProcessor:
         JOIN conversation_messages cm ON uf.message_id = cm.id
         WHERE uf.user_id = $1
         AND uf.processed_for_learning = true
-        AND uf.created_at > NOW() - INTERVAL '%s days'
+        AND uf.created_at > NOW() - INTERVAL '1 day' * $2
         ORDER BY uf.processed_at DESC
-        LIMIT $2;
-        """ % self.learning_window_days
+        LIMIT $3;
+        """
         
         try:
-            results = await db_manager.fetch_all(insights_query, user_id, limit)
+            results = await db_manager.fetch_all(
+                insights_query,
+                user_id,
+                self.learning_window_days,
+                limit
+            )
             
             insights = {
                 'personality_id': personality_id,
@@ -600,7 +685,7 @@ class FeedbackProcessor:
             for result in results:
                 # Analyze each learned response
                 response_analysis = self._analyze_response_patterns(
-                    result['response_content'], 
+                    result['response_content'],
                     personality_id
                 )
                 
@@ -689,14 +774,15 @@ class FeedbackProcessor:
     async def cleanup_old_feedback(self, days_to_keep: int = 90):
         """Clean up old feedback data"""
         
+        # FIXED: Use parameterized INTERVAL instead of string formatting
         cleanup_query = """
         DELETE FROM user_feedback
-        WHERE created_at < NOW() - INTERVAL '%s days'
+        WHERE created_at < NOW() - INTERVAL '1 day' * $1
         AND processed_for_learning = true;
-        """ % days_to_keep
+        """
         
         try:
-            result = await db_manager.execute(cleanup_query)
+            result = await db_manager.execute(cleanup_query, days_to_keep)
             logger.info(f"Cleaned up old feedback data: {result}")
         except Exception as e:
             logger.error(f"Failed to cleanup old feedback: {e}")
@@ -705,67 +791,50 @@ class FeedbackProcessor:
         """Clear the feedback processor cache"""
         self.pattern_cache.clear()
         logger.info("Feedback processor cache cleared")
+    
+    def cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring"""
+        return self.pattern_cache.stats()
 
-# Global feedback processor
-_feedback_processor = None
+
+# =============================================================================
+# Global Instance and Factory
+# =============================================================================
+
+_feedback_processor: Optional[FeedbackProcessor] = None
+
 
 def get_feedback_processor() -> FeedbackProcessor:
-    """Get the global feedback processor"""
+    """Get the global feedback processor singleton"""
     global _feedback_processor
     if _feedback_processor is None:
         _feedback_processor = FeedbackProcessor()
     return _feedback_processor
 
+
+# =============================================================================
+# Test Script
+# =============================================================================
+
 if __name__ == "__main__":
-    # Test script
     async def test():
         print("Testing Feedback Learning Processor...")
         
         processor = FeedbackProcessor()
         
-        # Test feedback recording (mock data)
-        test_user_id = str(uuid.uuid4())
-        test_message_id = str(uuid.uuid4())
-        test_thread_id = str(uuid.uuid4())
-        
-        # This would fail in testing without proper database setup
-        try:
-            from ..core.database import db_manager
-    
-            thread_lookup_query = """
-            SELECT thread_id FROM conversation_messages 
-            WHERE id = $1 AND user_id = $2
-            """
-            
-            message_result = await db_manager.fetch_one(thread_lookup_query,
-                                                       feedback_request.message_id,
-                                                       user_id)
-            
-            if not message_result:
-                raise HTTPException(status_code=404, detail="Message not found")
-            
-            thread_id = message_result['thread_id']
-            
-            feedback_result = await processor.record_feedback(
-                user_id=test_user_id,
-                message_id=test_message_id,
-                thread_id=test_thread_id,
-                feedback_type='personality',  # 🖕
-                personality_id='syntaxprime',
-                response_metadata={'model_used': 'claude-3.5-sonnet'}
-            )
-            print(f"Recorded feedback: {feedback_result}")
-        except Exception as e:
-            print(f"Feedback recording test failed (expected without DB): {e}")
-        
-        # Test pattern analysis
+        # Test pattern analysis (works without database)
         test_response = "Well, that's an absolutely brilliant question. Let me roll my eyes and give you a sarcastic but helpful answer about your coding adventure."
         
         patterns = processor._analyze_response_patterns(
-            test_response, 
+            test_response,
             'syntaxprime'
         )
         print(f"Pattern analysis: {patterns}")
+        
+        # Test sarcasm detection
+        print(f"Sarcasm detected: {processor._detect_sarcasm(test_response)}")
+        print(f"Humor detected: {processor._detect_humor(test_response)}")
+        print(f"Technical content detected: {processor._detect_technical_content(test_response)}")
         
         # Test emoji mapping
         emojis = {
@@ -774,6 +843,9 @@ if __name__ == "__main__":
             'personality': processor._get_feedback_emoji('personality')
         }
         print(f"Feedback emojis: {emojis}")
+        
+        # Test cache
+        print(f"Cache stats: {processor.cache_stats()}")
         
         print("Feedback Processor test completed!")
     

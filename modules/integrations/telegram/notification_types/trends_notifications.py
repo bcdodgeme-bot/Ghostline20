@@ -12,6 +12,7 @@ from ....core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+
 class TrendsNotificationHandler:
     """
     Handles Google Trends notifications
@@ -28,7 +29,6 @@ class TrendsNotificationHandler:
         self._db_manager = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
-# 2. ADD THIS PROPERTY RIGHT AFTER __init__:
     @property
     def db_manager(self):
         """Lazy-load TelegramDatabaseManager"""
@@ -144,14 +144,6 @@ class TrendsNotificationHandler:
             "DECLINING": "📉"
         }.get(momentum, "📊")
         
-        # Escape markdown special characters for Telegram
-        def escape_markdown(text: str) -> str:
-            """Escape special characters for Telegram markdown"""
-            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-            for char in special_chars:
-                text = text.replace(char, f'\\{char}')
-            return text
-        
         # Build message
         message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
         message += f"*Business:* {business_area}\n"
@@ -208,6 +200,8 @@ class TrendsNotificationHandler:
         """
         try:
             # Get today's trend stats
+            # Note: This query doesn't filter by user since trend_opportunities
+            # is a global table (not user-specific)
             query = """
             SELECT 
                 COUNT(*) as total_opportunities,
@@ -221,31 +215,31 @@ class TrendsNotificationHandler:
             WHERE DATE(created_at) = CURRENT_DATE
             """
             
-            result = await self.db.fetch_one(query, self.user_id)
+            result = await self.db.fetch_one(query)
             
-            if not result or result['total_trends'] == 0:
-                message = f"📈 *Daily Trends Summary*\n\n"
+            if not result or result['total_opportunities'] == 0:
+                message = "📈 *Daily Trends Summary*\n\n"
                 message += "No new trends detected today.\n"
                 message += "Keep monitoring for opportunities!"
             else:
-                total = result['total_trends']
-                high_opp = result['high_opportunity']
+                total = result['total_opportunities']
+                high_urgency = result['high_urgency']
                 rising = result['rising_trends']
                 top_score = result['top_score']
-                top_trend = result['top_trend']
+                top_keyword = result['top_keyword']
                 
-                message = f"📈 *Daily Trends Summary*\n\n"
+                message = "📈 *Daily Trends Summary*\n\n"
                 message += f"*Trends Detected:* {total}\n"
                 
                 if rising > 0:
                     message += f"*Rising:* {rising} 🚀\n"
                 
-                if high_opp > 0:
-                    message += f"*High Opportunity:* {high_opp} 🎯\n"
+                if high_urgency > 0:
+                    message += f"*High Urgency:* {high_urgency} 🎯\n"
                 
-                if top_trend and top_score:
+                if top_keyword and top_score:
                     message += f"\n*Top Trend:*\n"
-                    message += f"{top_trend} (Score: {top_score}/100)"
+                    message += f"{top_keyword} (Score: {top_score}/100)"
             
             await self.notification_manager.send_notification(
                 user_id=self.user_id,
@@ -253,7 +247,6 @@ class TrendsNotificationHandler:
                 notification_subtype='daily_summary',
                 message_text=message,
                 message_data={'summary_type': 'daily'}
-
             )
             
             logger.info("✅ Sent trends daily summary")
@@ -276,10 +269,10 @@ class TrendsNotificationHandler:
             True if successful
         """
         try:
-            message = f"🔥 *BREAKING TREND ALERT*\n\n"
+            message = "🔥 *BREAKING TREND ALERT*\n\n"
             message += f"*{keyword}* is going viral!\n\n"
             message += f"Opportunity Score: {score}/100 🎯\n"
-            message += f"Status: 🚀 RAPIDLY RISING\n\n"
+            message += "Status: 🚀 RAPIDLY RISING\n\n"
             message += "Act fast to capitalize on this opportunity!"
             
             await self.notification_manager.send_notification(

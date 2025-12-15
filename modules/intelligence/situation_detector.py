@@ -7,6 +7,7 @@ Takes raw ContextSignal objects and combines them into actionable Situation obje
 that warrant user notification and suggested actions.
 
 Created: 10/22/25
+Updated: 12/11/25 - Added singleton pattern
 """
 
 import logging
@@ -14,7 +15,6 @@ from uuid import UUID, uuid4
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,21 @@ class Situation:
 
 
 #===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_detector_instance: Optional['SituationDetector'] = None
+
+
+def get_situation_detector() -> 'SituationDetector':
+    """Get singleton SituationDetector instance"""
+    global _detector_instance
+    if _detector_instance is None:
+        _detector_instance = SituationDetector()
+    return _detector_instance
+
+
+#===============================================================================
 # SITUATION DETECTOR - Main pattern recognition engine
 #===============================================================================
 
@@ -71,12 +86,8 @@ class SituationDetector:
     - High UV + headache risk + busy calendar = stay inside day
     """
     
-    def __init__(self, db_manager=None):
-        """
-        Args:
-            db_manager: Database manager (optional, for future enhancements)
-        """
-        self.db = db_manager
+    def __init__(self):
+        """Initialize the situation detector"""
         self.detector_name = "SituationDetector"
         
     async def detect_all_situations(self, signals: List) -> List[Situation]:
@@ -200,7 +211,8 @@ class SituationDetector:
         urgent_types = [
             'deadline_approaching_prep_needed',
             'email_priority_meeting_context',
-            'weather_impact_calendar'
+            'weather_impact_calendar',
+            'weather_emergency_alert'
         ]
         
         if situation_type in urgent_types:
@@ -290,12 +302,6 @@ class SituationDetector:
                 elif signal.signal_type == 'meeting_upcoming':
                     # This might be a follow-up to a previous meeting
                     meetings_with_actions[meeting_id]['upcoming_related'] = signal
-            
-            # DEBUG: Log what we grouped
-            logger.info(f"📊 Grouped {len(meetings_with_actions)} unique meeting_ids")
-            for mid, data in meetings_with_actions.items():
-                logger.info(f"  Meeting {mid}: has_meeting={data['meeting'] is not None}, action_count={len(data['action_items'])}")
-
             
             # Create situations for meetings that have action items
             for meeting_id, data in meetings_with_actions.items():
@@ -443,7 +449,6 @@ class SituationDetector:
                     meeting_title = (action_signal.data.get('meeting_title') or '').lower()
                     
                     # Check if action is related to this event
-                    # (matches by common words in titles)
                     event_keywords = set(event_title.split())
                     action_keywords = set(action_text.split() + meeting_title.split())
                     
@@ -460,13 +465,13 @@ class SituationDetector:
             for event_id, data in events_needing_prep.items():
                 event_signal = data['event']
                 prep_signal = data['prep_signal']
-                action_signals = data['related_actions']
+                action_signals_for_event = data['related_actions']
                 
                 if not event_signal:
                     continue
                 
                 # Only create situation if there's prep needed OR related action items
-                if not prep_signal and not action_signals:
+                if not prep_signal and not action_signals_for_event:
                     continue
                 
                 hours_until = event_signal.data.get('hours_until', 48)
@@ -491,7 +496,7 @@ class SituationDetector:
                     context['prep_required'] = False
                 
                 # Add related action items if found
-                if action_signals:
+                if action_signals_for_event:
                     context['related_action_items'] = [
                         {
                             'id': s.data.get('action_item_id'),
@@ -500,9 +505,9 @@ class SituationDetector:
                             'overdue': s.signal_type == 'action_item_overdue',
                             'days_until_due': s.data.get('days_until_due')
                         }
-                        for s in action_signals
+                        for s in action_signals_for_event
                     ]
-                    context['action_item_count'] = len(action_signals)
+                    context['action_item_count'] = len(action_signals_for_event)
                 else:
                     context['action_item_count'] = 0
                 
@@ -510,7 +515,7 @@ class SituationDetector:
                 related_signals = [event_signal]
                 if prep_signal:
                     related_signals.append(prep_signal)
-                related_signals.extend(action_signals)
+                related_signals.extend(action_signals_for_event)
                 
                 # Determine expiry - expires when event happens
                 expires_hours = max(int(hours_until), 2)
@@ -555,8 +560,8 @@ class SituationDetector:
             trend_signals = self._get_signals_by_type(signals, [
                 'trend_spike',
                 'trend_rising',
-                'trend_stable_high',
-                'trend_opportunity_created'
+                'trend_high',
+                'trend_opportunity'
             ])
             
             # Get conversation and knowledge signals
@@ -566,7 +571,9 @@ class SituationDetector:
             ])
             
             knowledge_signals = self._get_signals_by_type(signals, [
-                'knowledge_exists'
+                'knowledge_frequently_accessed',
+                'knowledge_high_relevance',
+                'knowledge_topic_match'
             ])
             
             if not trend_signals:
@@ -597,10 +604,13 @@ class SituationDetector:
                 # Try to find related knowledge
                 related_knowledge = []
                 for knowledge_signal in knowledge_signals:
-                    knowledge_topic = knowledge_signal.data.get('topic', '').lower()
+                    knowledge_topics = knowledge_signal.data.get('topics', [])
+                    knowledge_title = (knowledge_signal.data.get('title') or '').lower()
                     
                     # Check if knowledge exists about this trend
-                    if keyword in knowledge_topic or knowledge_topic in keyword:
+                    if keyword in knowledge_title:
+                        related_knowledge.append(knowledge_signal)
+                    elif any(keyword in str(t).lower() for t in knowledge_topics):
                         related_knowledge.append(knowledge_signal)
                 
                 # Build context for this situation
@@ -608,9 +618,8 @@ class SituationDetector:
                     'keyword': trend_signal.data.get('keyword'),
                     'business_area': business_area,
                     'trend_type': trend_signal.signal_type,
-                    'trend_score': trend_signal.data.get('current_score') or trend_signal.data.get('trend_score'),
+                    'trend_score': trend_signal.data.get('trend_score'),
                     'trend_momentum': trend_signal.data.get('momentum') or trend_signal.data.get('trend_momentum'),
-                    'search_volume': trend_signal.data.get('search_volume'),
                     'related_topics': trend_signal.data.get('related_topics', [])
                 }
                 
@@ -622,7 +631,7 @@ class SituationDetector:
                     }
                 
                 # Add opportunity details if this came from trend_opportunities table
-                if trend_signal.signal_type == 'trend_opportunity_created':
+                if trend_signal.signal_type == 'trend_opportunity':
                     context['opportunity_details'] = {
                         'opportunity_id': trend_signal.data.get('opportunity_id'),
                         'opportunity_type': trend_signal.data.get('opportunity_type'),
@@ -648,19 +657,27 @@ class SituationDetector:
                 
                 # Add knowledge context if found
                 if related_knowledge:
-                    # Get first knowledge signal's entries
-                    knowledge_entries = related_knowledge[0].data.get('entries', [])
-                    context['related_knowledge'] = knowledge_entries
-                    context['knowledge_count'] = len(knowledge_entries)
+                    context['related_knowledge'] = [
+                        {
+                            'entry_id': s.data.get('entry_id'),
+                            'title': s.data.get('title'),
+                            'content_type': s.data.get('content_type')
+                        }
+                        for s in related_knowledge
+                    ]
+                    context['knowledge_count'] = len(related_knowledge)
                 else:
                     context['knowledge_count'] = 0
                 
                 # Determine which Bluesky account to use based on business_area
-                # Your accounts: ghostlineco, amcf_updates, prayerconnect, islamicgiving, syntaxprime
                 account_mapping = {
+                    'amcf': 'amcf_updates',
                     'nonprofit': 'amcf_updates',
-                    'islamic': 'prayerconnect',
-                    'charity': 'islamicgiving',
+                    'bcdodge': 'ghostlineco',
+                    'damnitcarl': 'syntaxprime',
+                    'mealsnfeelz': 'syntaxprime',
+                    'roseandangel': 'ghostlineco',
+                    'tvsignals': 'syntaxprime',
                     'tech': 'syntaxprime',
                     'business': 'ghostlineco'
                 }
@@ -740,10 +757,9 @@ class SituationDetector:
             
             # Try to correlate emails with events/meetings
             for email_signal in email_signals:
-                sender_name = email_signal.data.get('sender_name', '').lower()
-                sender_email = email_signal.data.get('sender_email', '').lower()
-                subject = email_signal.data.get('subject', '').lower()
-                categories = email_signal.data.get('categories', [])
+                sender_name = (email_signal.data.get('sender_name') or '').lower()
+                sender_email = (email_signal.data.get('sender_email') or '').lower()
+                subject = (email_signal.data.get('subject') or '').lower()
                 
                 # Extract keywords from email
                 email_keywords = set(sender_name.split() + subject.split())
@@ -751,11 +767,11 @@ class SituationDetector:
                 
                 # Check calendar events
                 for calendar_signal in calendar_signals:
-                    event_title = calendar_signal.data.get('event_title', '').lower()
-                    attendees = calendar_signal.data.get('attendees', [])
+                    event_title = (calendar_signal.data.get('event_title') or '').lower()
+                    attendees = calendar_signal.data.get('attendees') or []
                     
                     # Check if sender is attending the meeting
-                    attendee_emails = [a.lower() for a in attendees if isinstance(a, str)]
+                    attendee_emails = [str(a).lower() for a in attendees if a]
                     sender_attending = sender_email in ' '.join(attendee_emails)
                     
                     # Check if email keywords appear in event title
@@ -809,8 +825,8 @@ class SituationDetector:
                 
                 # Also check past meetings (if email is follow-up to a meeting)
                 for meeting_signal in meeting_signals:
-                    meeting_title = meeting_signal.data.get('meeting_title', '').lower()
-                    attendees = meeting_signal.data.get('attendees', [])
+                    meeting_title = (meeting_signal.data.get('meeting_title') or '').lower()
+                    attendees = meeting_signal.data.get('attendees') or []
                     
                     if not attendees:
                         continue
@@ -855,7 +871,7 @@ class SituationDetector:
                         
                         situations.append(situation)
                         
-                        logger.info(f"📧 Detected email as meeting follow-up: {sender_name} → {meeting_title}")
+                        logger.info(f"📧 Detected email-meeting followup: {sender_name} following up on {meeting_title}")
         
         except Exception as e:
             logger.error(f"Error detecting email-meeting correlations: {e}", exc_info=True)
@@ -890,13 +906,14 @@ class SituationDetector:
             trend_signals = self._get_signals_by_type(signals, [
                 'trend_spike',
                 'trend_rising',
-                'trend_stable_high'
+                'trend_high'
             ])
             
             # Get knowledge signals
             knowledge_signals = self._get_signals_by_type(signals, [
-                'knowledge_exists',
-                'knowledge_gap'
+                'knowledge_frequently_accessed',
+                'knowledge_high_relevance',
+                'knowledge_topic_match'
             ])
             
             if not conversation_signals or not trend_signals:
@@ -929,7 +946,6 @@ class SituationDetector:
                     trend_keywords = set(trend_keyword.split())
                     
                     # Check for keyword overlap
-                    # Need at least 1 significant keyword match or full substring match
                     keyword_overlap = len(conversation_keywords & trend_keywords)
                     substring_match = conversation_topic in trend_keyword or trend_keyword in conversation_topic
                     
@@ -939,13 +955,10 @@ class SituationDetector:
                         # Try to find related knowledge
                         related_knowledge = None
                         for knowledge_signal in knowledge_signals:
-                            knowledge_topic = knowledge_signal.data.get('topic', '').lower()
+                            knowledge_title = (knowledge_signal.data.get('title') or '').lower()
                             
-                            # Check if knowledge matches either conversation or trend
-                            if (conversation_topic in knowledge_topic or 
-                                trend_keyword in knowledge_topic or
-                                knowledge_topic in conversation_topic or
-                                knowledge_topic in trend_keyword):
+                            if (conversation_topic in knowledge_title or 
+                                trend_keyword in knowledge_title):
                                 related_knowledge = knowledge_signal
                                 break
                         
@@ -957,7 +970,7 @@ class SituationDetector:
                             'thread_id': conversation_signal.data.get('thread_id'),
                             'message_count': conversation_signal.data.get('message_count', 1),
                             'trend_keyword': trend_signal.data.get('keyword'),
-                            'trend_score': trend_signal.data.get('current_score') or trend_signal.data.get('trend_score'),
+                            'trend_score': trend_signal.data.get('trend_score'),
                             'trend_type': trend_signal.signal_type,
                             'trend_momentum': trend_signal.data.get('momentum') or trend_signal.data.get('trend_momentum'),
                             'business_area': trend_signal.data.get('business_area'),
@@ -971,21 +984,19 @@ class SituationDetector:
                         
                         # Add knowledge context if found
                         if related_knowledge:
-                            if related_knowledge.signal_type == 'knowledge_exists':
-                                context['knowledge_available'] = True
-                                context['knowledge_entries'] = related_knowledge.data.get('entries', [])
-                                context['knowledge_count'] = related_knowledge.data.get('match_count', 0)
-                            else:  # knowledge_gap
-                                context['knowledge_available'] = False
-                                context['knowledge_gap_suggestion'] = related_knowledge.data.get('suggestion')
+                            context['knowledge_available'] = True
+                            context['knowledge_entry'] = {
+                                'entry_id': related_knowledge.data.get('entry_id'),
+                                'title': related_knowledge.data.get('title')
+                            }
                         else:
                             context['knowledge_available'] = False
                         
                         # Create actionable insight
                         if context['knowledge_available']:
-                            context['insight'] = f"You've discussed {conversation_topic}, it's trending (score: {context['trend_score']}), and you have {context['knowledge_count']} knowledge entries - perfect alignment for content creation!"
+                            context['insight'] = f"You've discussed {conversation_topic}, it's trending (score: {context['trend_score']}), and you have relevant knowledge - perfect alignment for content creation!"
                         else:
-                            context['insight'] = f"You've discussed {conversation_topic} and it's now trending (score: {context['trend_score']}) - consider creating content even though you don't have formal knowledge documented yet."
+                            context['insight'] = f"You've discussed {conversation_topic} and it's now trending (score: {context['trend_score']}) - consider creating content."
                         
                         # Collect related signals
                         related_signals = [conversation_signal, trend_signal]
@@ -994,9 +1005,9 @@ class SituationDetector:
                         
                         # Determine expiry based on trend urgency
                         if trend_signal.signal_type == 'trend_spike':
-                            expires_hours = 48  # Act fast on spikes
+                            expires_hours = 48
                         else:
-                            expires_hours = 72  # More time for rising/stable trends
+                            expires_hours = 72
                         
                         # Create the situation
                         situation = self._create_situation(
@@ -1009,7 +1020,7 @@ class SituationDetector:
                         
                         situations.append(situation)
                         
-                        knowledge_note = f"with {context['knowledge_count']} knowledge entries" if context['knowledge_available'] else "no formal knowledge yet"
+                        knowledge_note = "with knowledge" if context['knowledge_available'] else "no formal knowledge yet"
                         logger.info(f"💡 Detected conversation-trend alignment: {conversation_topic} ↔ {trend_keyword} ({knowledge_note})")
         
         except Exception as e:
@@ -1078,8 +1089,8 @@ class SituationDetector:
                     # Find outdoor events
                     outdoor_events = []
                     for calendar_signal in calendar_signals:
-                        event_title = calendar_signal.data.get('event_title', '').lower()
-                        location = calendar_signal.data.get('location', '').lower()
+                        event_title = (calendar_signal.data.get('event_title') or '').lower()
+                        location = (calendar_signal.data.get('location') or '').lower()
                         
                         # Check if event is likely outdoor
                         outdoor_keywords = ['outdoor', 'outside', 'park', 'garden', 'lunch', 'walk', 'site visit', 'field']
@@ -1152,7 +1163,7 @@ class SituationDetector:
                                 'total_minutes': cluster.data.get('total_minutes')
                             }
                         
-                        related_signals = [weather_signal] + calendar_signals[:3]  # Include up to 3 calendar signals
+                        related_signals = [weather_signal] + calendar_signals[:3]
                     else:
                         context['calendar_status'] = 'light'
                         context['event_count'] = len(calendar_signals)
@@ -1192,7 +1203,7 @@ class SituationDetector:
                                 'event_time': s.data.get('start_time'),
                                 'hours_until': s.data.get('hours_until')
                             }
-                            for s in calendar_signals[:5]  # Max 5 events
+                            for s in calendar_signals[:5]
                         ]
                         context['event_count'] = len(calendar_signals)
                         context['recommendation'] = f"SEVERE WEATHER ALERT - Consider rescheduling {len(calendar_signals)} events for safety"
@@ -1220,3 +1231,14 @@ class SituationDetector:
             logger.error(f"Error detecting weather impacts: {e}", exc_info=True)
         
         return situations
+
+
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'Situation',
+    'SituationDetector',
+    'get_situation_detector',
+]

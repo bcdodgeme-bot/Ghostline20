@@ -1,7 +1,8 @@
 """
 Slack-ClickUp Integration Router with Enhanced Debug Logging
 API endpoints for webhook handling and manual commands
-Updated: 9/24/25 - Added comprehensive debug logging to track task creation failures
+
+Updated: Session 13 - Converted to lazy initialization with singleton getters
 """
 import os
 import json
@@ -13,18 +14,45 @@ from .slack_handler import SlackHandler
 from .clickup_handler import ClickUpHandler
 from .task_mapper import TaskMapper
 
-#-- Section 1: Router Initialization & Configuration - 9/23/25
+#-- Section 1: Router Initialization & Singleton Getters
 router = APIRouter(prefix="/integrations/slack-clickup", tags=["slack-clickup"])
 logger = logging.getLogger(__name__)
 
-# Initialize handlers
-slack_handler = SlackHandler()
-clickup_handler = ClickUpHandler()
-task_mapper = TaskMapper()
+# Singleton instances (lazy initialization)
+_slack_handler: Optional[SlackHandler] = None
+_clickup_handler: Optional[ClickUpHandler] = None
+_task_mapper: Optional[TaskMapper] = None
 
-#-- Section 2: Webhook Verification & Security with Debug Logging - Updated 9/24/25
+
+def get_slack_handler() -> SlackHandler:
+    """Get singleton SlackHandler instance"""
+    global _slack_handler
+    if _slack_handler is None:
+        _slack_handler = SlackHandler()
+    return _slack_handler
+
+
+def get_clickup_handler() -> ClickUpHandler:
+    """Get singleton ClickUpHandler instance"""
+    global _clickup_handler
+    if _clickup_handler is None:
+        _clickup_handler = ClickUpHandler()
+    return _clickup_handler
+
+
+def get_task_mapper() -> TaskMapper:
+    """Get singleton TaskMapper instance"""
+    global _task_mapper
+    if _task_mapper is None:
+        _task_mapper = TaskMapper()
+    return _task_mapper
+
+
+#-- Section 2: Webhook Verification & Security with Debug Logging
 async def verify_slack_request(request: Request) -> Dict:
     """Verify and parse incoming Slack webhook request with comprehensive debug logging"""
+    
+    slack_handler = get_slack_handler()
     
     logger.info(f"🔐 WEBHOOK VERIFICATION STARTED")
     
@@ -110,9 +138,15 @@ async def verify_slack_request(request: Request) -> Dict:
         logger.error(f"📦 Body: {body[:500]}")
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
-#-- Section 3: Background Task Processing with Debug Logging - Updated 9/24/25
+
+#-- Section 3: Background Task Processing with Debug Logging
 async def process_mention_task(message_data: Dict):
     """Background task to process Slack mentions with comprehensive debug logging"""
+    
+    task_mapper = get_task_mapper()
+    clickup_handler = get_clickup_handler()
+    slack_handler = get_slack_handler()
+    
     logger.info(f"🔄 BACKGROUND TASK STARTED - Processing mention task")
     logger.info(f"📝 Message data received: {json.dumps(message_data, indent=2)}")
     
@@ -173,13 +207,19 @@ async def process_mention_task(message_data: Dict):
         import traceback
         logger.error(f"📚 Full traceback: {traceback.format_exc()}")
 
+
 async def process_command_task(command: str, context: str = ""):
     """Background task to process AI command tasks"""
+    
+    task_mapper = get_task_mapper()
+    clickup_handler = get_clickup_handler()
+    
     logger.info(f"🔄 Processing command task: {command}")
     
     try:
         # Extract task details
         task_info = task_mapper.extract_command_task(command, context)
+        
         if not task_info:
             logger.warning("Could not extract task from command")
             return
@@ -201,10 +241,14 @@ async def process_command_task(command: str, context: str = ""):
         logger.error(f"Error processing command task: {e}")
         return None
 
-#-- Section 4: Slack Webhook Endpoints with Debug Logging - Updated 9/24/25
+
+#-- Section 4: Slack Webhook Endpoints with Debug Logging
 @router.post("/slack/events")
 async def handle_slack_events(request: Request, background_tasks: BackgroundTasks):
     """Handle Slack Events API webhooks with enhanced debug logging"""
+    
+    slack_handler = get_slack_handler()
+    
     # EMERGENCY DEBUG - This should ALWAYS show if endpoint is called
     print("🚨 EMERGENCY DEBUG: /slack/events endpoint called!")
     print(f"🚨 Request headers: {dict(request.headers)}")
@@ -291,9 +335,13 @@ async def handle_slack_events(request: Request, background_tasks: BackgroundTask
         print(f"🚨 Full traceback: {traceback.format_exc()}")
         return {"status": "error", "error": str(e)}
 
+
 @router.post("/slack/slash")
 async def handle_slash_commands(request: Request, background_tasks: BackgroundTasks):
     """Handle Slack slash commands"""
+    
+    slack_handler = get_slack_handler()
+    
     data = await verify_slack_request(request)
     
     command = data.get("command", "")
@@ -311,10 +359,14 @@ async def handle_slash_commands(request: Request, background_tasks: BackgroundTa
     
     return {"text": "Command processed", "response_type": "ephemeral"}
 
-#-- Section 5: Manual API Endpoints - 9/23/25
+
+#-- Section 5: Manual API Endpoints
 @router.post("/tasks/personal")
 async def create_personal_task_endpoint(task_data: Dict):
     """Manual endpoint to create personal tasks"""
+    
+    clickup_handler = get_clickup_handler()
+    
     title = task_data.get("title")
     description = task_data.get("description", "")
     
@@ -328,9 +380,13 @@ async def create_personal_task_endpoint(task_data: Dict):
     else:
         raise HTTPException(status_code=500, detail="Failed to create task")
 
+
 @router.post("/tasks/work")
 async def create_work_task_endpoint(task_data: Dict):
     """Manual endpoint to create AMCF work tasks"""
+    
+    clickup_handler = get_clickup_handler()
+    
     title = task_data.get("title")
     description = task_data.get("description", "")
     
@@ -344,10 +400,15 @@ async def create_work_task_endpoint(task_data: Dict):
     else:
         raise HTTPException(status_code=500, detail="Failed to create task")
 
-#-- Section 6: Status & Health Check Endpoints - 9/23/25
+
+#-- Section 6: Status & Health Check Endpoints
 @router.get("/status")
 async def integration_status():
     """Get integration status and configuration"""
+    
+    slack_handler = get_slack_handler()
+    clickup_handler = get_clickup_handler()
+    
     return {
         "status": "active",
         "slack_user_id": slack_handler.user_id,
@@ -362,10 +423,14 @@ async def integration_status():
         }
     }
 
-#-- Section 7: Debug Testing Endpoint - Added 9/24/25
+
+#-- Section 7: Debug Testing Endpoint
 @router.post("/debug/test-mention")
 async def debug_test_mention(test_data: Dict):
     """Debug endpoint to test mention processing manually"""
+    
+    slack_handler = get_slack_handler()
+    
     logger.info(f"🧪 DEBUG TEST - Manual mention test")
     
     # Create a fake Slack mention event for testing

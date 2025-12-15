@@ -1,14 +1,26 @@
+# modules/core/health.py
 """
 Health check module for Syntax Prime V2.
 Database connectivity and system status verification.
+
+Updated: Session 19 - Added __all__ exports, removed unused import
 """
 
-from typing import Dict, Any
-from modules.core.database import db_manager
-import asyncio
 import time
+from typing import Dict, Any
 
-#-- Section 1: Database Health Check - 9/23/25
+from modules.core.database import db_manager
+
+__all__ = [
+    'check_database',
+    'get_health_status',
+]
+
+
+# =============================================================================
+# Section 1: Database Health Check - 9/23/25
+# =============================================================================
+
 async def check_database() -> Dict[str, Any]:
     """Check database connectivity and response time."""
     start_time = time.time()
@@ -32,7 +44,11 @@ async def check_database() -> Dict[str, Any]:
             "error": str(e)
         }
 
-#-- Section 2: System Health Aggregation - 9/23/25
+
+# =============================================================================
+# Section 2: System Health Aggregation - 9/23/25
+# =============================================================================
+
 async def get_health_status() -> Dict[str, Any]:
     """Get complete system health status."""
     start_time = time.time()
@@ -53,6 +69,9 @@ async def get_health_status() -> Dict[str, Any]:
         }
     }
 
-#-- Section 3: Future Health Checks - 9/23/25
+
+# =============================================================================
+# Section 3: Future Health Checks - 9/23/25
+# =============================================================================
 # Additional health check functions will be added here
 # Examples: check_redis(), check_external_apis(), check_disk_space()

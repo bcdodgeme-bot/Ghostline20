@@ -2,6 +2,8 @@
 """
 RSS Learning Integration Info - Health checks and system information
 Provides comprehensive status information for the RSS learning system
+
+UPDATED: Session 15 - Use singleton getters instead of creating new instances
 """
 
 import os
@@ -10,11 +12,12 @@ from typing import Dict, Any
 from datetime import datetime
 import logging
 
-from .database_manager import RSSDatabase
-from .feed_processor import RSSFeedProcessor
-from .marketing_insights import MarketingInsightsExtractor
+from .database_manager import get_rss_database
+from .feed_processor import get_feed_processor
+from .marketing_insights import get_marketing_insights_extractor
 
 logger = logging.getLogger(__name__)
+
 
 async def get_integration_health() -> Dict[str, Any]:
     """Get comprehensive health check for RSS learning integration"""
@@ -28,8 +31,8 @@ async def get_integration_health() -> Dict[str, Any]:
     }
     
     try:
-        # Database health
-        db = RSSDatabase()
+        # Database health - use singleton
+        db = get_rss_database()
         stats = await db.get_rss_statistics()
         
         health_status['components']['database'] = {
@@ -37,11 +40,12 @@ async def get_integration_health() -> Dict[str, Any]:
             'total_sources': stats.get('total_sources', 0),
             'active_sources': stats.get('active_sources', 0),
             'total_items': stats.get('total_items', 0),
-            'processed_items': stats.get('processed_items', 0)
+            'processed_items': stats.get('processed_items', 0),
+            'knowledge_entries': stats.get('knowledge_entries', 0)
         }
         
-        # Processor health
-        processor = RSSFeedProcessor()
+        # Processor health - use singleton
+        processor = get_feed_processor()
         processor_status = processor.get_status()
         
         health_status['components']['feed_processor'] = {
@@ -52,19 +56,25 @@ async def get_integration_health() -> Dict[str, Any]:
         }
         
         # AI Analysis health
-        insights = MarketingInsightsExtractor()
-        
         health_status['components']['ai_analysis'] = {
             'status': 'healthy',
             'openai_available': bool(os.getenv('OPENAI_API_KEY')),
             'fallback_mode': not bool(os.getenv('OPENAI_API_KEY'))
         }
         
+        # Knowledge base integration health
+        health_status['components']['knowledge_base'] = {
+            'status': 'healthy' if stats.get('knowledge_entries', 0) > 0 else 'empty',
+            'entries_synced': stats.get('knowledge_entries', 0),
+            'integration_active': True
+        }
+        
         # Configuration check
         health_status['configuration'] = {
             'database_url': bool(os.getenv('DATABASE_URL')),
             'openai_key': bool(os.getenv('OPENAI_API_KEY')),
-            'background_processing': processor_status.get('running', False)
+            'background_processing': processor_status.get('running', False),
+            'knowledge_base_integration': True
         }
         
         # Metrics
@@ -72,7 +82,8 @@ async def get_integration_health() -> Dict[str, Any]:
             'avg_relevance_score': stats.get('avg_relevance', 0),
             'avg_trend_score': stats.get('avg_trend_score', 0),
             'recent_items_7_days': stats.get('recent_items', 0),
-            'processing_rate': f"{stats.get('processed_items', 0)}/{stats.get('total_items', 1)}"
+            'processing_rate': f"{stats.get('processed_items', 0)}/{stats.get('total_items', 1)}",
+            'knowledge_entries': stats.get('knowledge_entries', 0)
         }
         
         # Overall status
@@ -99,20 +110,22 @@ async def get_integration_health() -> Dict[str, Any]:
     
     return health_status
 
+
 async def get_system_info() -> Dict[str, Any]:
     """Get detailed system information for RSS learning integration"""
     
     info = {
         'module': 'rss_learning',
-        'version': '1.0.0',
+        'version': '1.1.0',  # Updated version for Session 15 changes
         'description': 'RSS Learning System for marketing insights and AI brain integration',
         'features': [
             'Weekly RSS feed processing',
-            'AI-powered content analysis', 
+            'AI-powered content analysis',
             'Marketing insights extraction',
             'Trend identification',
             'Content categorization',
-            'AI brain integration for writing assistance'
+            'AI brain integration for writing assistance',
+            'Knowledge base synchronization'  # New feature
         ],
         'endpoints': {
             'status': '/integrations/rss/status',
@@ -125,13 +138,15 @@ async def get_system_info() -> Dict[str, Any]:
             'fetch': '/integrations/rss/fetch',
             'ai_brain_trends': '/integrations/rss/ai-brain/latest-trends',
             'ai_brain_context': '/integrations/rss/ai-brain/writing-context',
-            'health': '/integrations/rss/health'
+            'health': '/integrations/rss/health',
+            'backfill_knowledge': '/integrations/rss/backfill-knowledge',  # New endpoint
+            'knowledge_stats': '/integrations/rss/knowledge-stats'  # New endpoint
         }
     }
     
     try:
-        # Get RSS sources info
-        db = RSSDatabase()
+        # Get RSS sources info - use singleton
+        db = get_rss_database()
         query = "SELECT name, category, feed_url FROM rss_sources WHERE active = true ORDER BY category, name"
         sources = await db.db.fetch_all(query)
         
@@ -156,6 +171,7 @@ async def get_system_info() -> Dict[str, Any]:
     
     return info
 
+
 async def get_ai_brain_integration_status() -> Dict[str, Any]:
     """Get AI brain integration status and capabilities"""
     
@@ -167,7 +183,8 @@ async def get_ai_brain_integration_status() -> Dict[str, Any]:
             'Campaign insights for email/blog/social',
             'Content research and keyword analysis',
             'Trending topics identification',
-            'Best practices compilation'
+            'Best practices compilation',
+            'Knowledge base full-text search'  # New capability
         ],
         'ai_brain_endpoints': [
             '/integrations/rss/ai-brain/latest-trends',
@@ -177,13 +194,14 @@ async def get_ai_brain_integration_status() -> Dict[str, Any]:
             'trends_lookup': 'get_latest_trends(category, limit)',
             'writing_context': 'get_writing_inspiration(content_type, topic)',
             'campaign_insights': 'get_campaign_insights(campaign_type)',
-            'content_research': 'get_content_research(keywords)'
+            'content_research': 'get_content_research(keywords)',
+            'knowledge_search': 'Full-text search via knowledge_entries table'  # New method
         }
     }
     
     try:
-        # Test integration by getting sample data
-        insights_extractor = MarketingInsightsExtractor()
+        # Test integration by getting sample data - use singleton
+        insights_extractor = get_marketing_insights_extractor()
         
         # Test trends retrieval
         trends = await insights_extractor.get_latest_trends(limit=3)
@@ -201,6 +219,14 @@ async def get_ai_brain_integration_status() -> Dict[str, Any]:
             'trending_angles_count': len(inspiration.get('trending_angles', []))
         }
         
+        # Get knowledge base stats
+        db = get_rss_database()
+        stats = await db.get_rss_statistics()
+        integration['knowledge_base'] = {
+            'entries_synced': stats.get('knowledge_entries', 0),
+            'searchable': stats.get('knowledge_entries', 0) > 0
+        }
+        
         integration['last_tested'] = datetime.now().isoformat()
         integration['test_status'] = 'passed'
         
@@ -211,6 +237,7 @@ async def get_ai_brain_integration_status() -> Dict[str, Any]:
         integration['error'] = str(e)
     
     return integration
+
 
 def get_configuration_status() -> Dict[str, Any]:
     """Get configuration status for RSS learning system"""
@@ -231,7 +258,9 @@ def get_configuration_status() -> Dict[str, Any]:
         },
         'database_tables': [
             'rss_sources',
-            'rss_feed_entries' 
+            'rss_feed_entries',
+            'knowledge_sources',  # New table reference
+            'knowledge_entries'   # New table reference
         ],
         'background_services': {
             'rss_processor': {
@@ -244,7 +273,8 @@ def get_configuration_status() -> Dict[str, Any]:
             'content_analysis': 'enabled',
             'insights_extraction': 'enabled',
             'trend_identification': 'enabled',
-            'fallback_analysis': 'enabled'
+            'fallback_analysis': 'enabled',
+            'knowledge_base_sync': 'enabled'  # New feature
         }
     }
     
@@ -263,6 +293,7 @@ def get_configuration_status() -> Dict[str, Any]:
     
     return config
 
+
 async def run_system_diagnostics() -> Dict[str, Any]:
     """Run comprehensive system diagnostics"""
     
@@ -280,7 +311,7 @@ async def run_system_diagnostics() -> Dict[str, Any]:
         
         # Determine overall status
         health_status = diagnostics['health']['status']
-        config_status = diagnostics['configuration']['status'] 
+        config_status = diagnostics['configuration']['status']
         ai_status = diagnostics['ai_brain_integration']['status']
         
         if all(status in ['healthy', 'complete', 'active'] for status in [health_status, config_status, ai_status]):
@@ -295,8 +326,10 @@ async def run_system_diagnostics() -> Dict[str, Any]:
             'rss_sources': len(diagnostics['system_info'].get('rss_sources', [])),
             'categories': len(diagnostics['system_info'].get('categories', [])),
             'total_items': diagnostics['health']['components']['database']['total_items'],
+            'knowledge_entries': diagnostics['health']['components']['database'].get('knowledge_entries', 0),
             'ai_features': 'enabled' if diagnostics['configuration']['environment_variables']['OPENAI_API_KEY']['present'] else 'fallback',
-            'background_processing': diagnostics['health']['components']['feed_processor']['running']
+            'background_processing': diagnostics['health']['components']['feed_processor']['running'],
+            'knowledge_base_active': diagnostics['health']['components'].get('knowledge_base', {}).get('status') == 'healthy'
         }
         
     except Exception as e:

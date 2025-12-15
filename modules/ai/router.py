@@ -8,6 +8,24 @@ Date: 9/27/25 - Added prayer notifications, location detection, and Google Trend
 Date: 9/28/25 - Added Voice Synthesis and Image Generation to integration chain
 """
 
+__all__ = [
+    # Router instance
+    'router',
+    # Request/Response models
+    'ChatRequest',
+    'ChatResponse',
+    'FeedbackRequest',
+    'FeedbackResponse',
+    'CreateThreadRequest',
+    'CreateThreadResponse',
+    # Constants and dependencies
+    'DEFAULT_USER_ID',
+    'get_current_user_id',
+    # Utility functions
+    'get_integration_info',
+    'check_module_health',
+]
+
 import asyncio
 import uuid
 import time
@@ -17,9 +35,8 @@ import json
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Depends, Request,Form, UploadFile,File
+from fastapi import APIRouter, HTTPException, Depends, Request, Form, UploadFile, File
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any
 
 # Import our AI brain components
 from .openrouter_client import get_openrouter_client, cleanup_openrouter_client
@@ -104,7 +121,7 @@ async def chat_with_ai(
             logger.info(f"🔍 FILE DEBUG [{idx}]: filename={file.filename}, content_type={file.content_type}, size={file.size if hasattr(file, 'size') else 'unknown'}")
     
     if files and len(files) > 0:
-        logger.info(f"📎 Processing {len(files)} uploaded files")    
+        logger.info(f"📎 Processing {len(files)} uploaded files")
         
         try:
             processed_files = await process_uploaded_files(files)
@@ -212,8 +229,9 @@ async def chat_with_ai(
         try:
             from .chat import (
                  get_current_datetime_context,
-                 detect_weather_request, get_weather_for_user,get_weather_forecast_for_user, 
+                 detect_weather_request, get_weather_for_user,get_weather_forecast_for_user,
                  detect_prayer_command, process_prayer_command,
+                 detect_bluesky_reply_approval, post_bluesky_reply_from_thread,
                  detect_prayer_notification_command, process_prayer_notification_command,
                  detect_intelligence_command, handle_intelligence_command,
                  detect_location_command, process_location_command,
@@ -395,6 +413,51 @@ Weather data powered by Tomorrow.io"""
             except Exception as e:
                 logger.error(f"❌ DEBUG: Weather processing failed: {e}")
                 special_response = f"🌦️ **Weather Processing Error**\n\nError: {str(e)}"
+        
+        # 🦋 BLUESKY REPLY POSTING FROM THREAD - 11/21/25
+        if detect_bluesky_reply_approval(message) and thread_id:
+            # Check if this thread has Bluesky opportunity data
+            thread_messages = await memory_manager.get_conversation_history(thread_id, limit=10)
+            opportunity_id = None
+            
+            # Look for opportunity_id in thread metadata
+            for msg in thread_messages:
+                if msg.get('metadata') and msg['metadata'].get('opportunity_id'):
+                    opportunity_id = msg['metadata']['opportunity_id']
+                    break
+            
+            if opportunity_id:
+                # Find the last assistant message (the draft reply)
+                draft_reply = None
+                for msg in reversed(thread_messages):
+                    if msg.get('role') == 'assistant' and len(msg.get('content', '')) > 20:
+                        draft_reply = msg['content']
+                        break
+                
+                if draft_reply:
+                    logger.info(f"🦋 Posting Bluesky reply for opportunity {opportunity_id}")
+                    result = await post_bluesky_reply_from_thread(
+                        reply_text=draft_reply,
+                        opportunity_id=opportunity_id,
+                        user_id=user_id
+                    )
+                    
+                    if result['success']:
+                        response_text = result['message']
+                    else:
+                        response_text = f"❌ Failed to post: {result['error']}"
+                    
+                    # Save to memory
+                    await memory_manager.add_message(thread_id, 'user', message)
+                    await memory_manager.add_message(thread_id, 'assistant', response_text)
+                    
+                    return ChatResponse(
+                        response=response_text,
+                        personality=personality_id,
+                        thread_id=thread_id,
+                        message_id=str(uuid.uuid4()),
+                        processing_time=time.time() - start_time
+                    )
         
         # 2. 🔵 Bluesky command detection (SECOND)
         elif detect_bluesky_command(message):

@@ -12,13 +12,14 @@ Key Features:
 """
 
 import asyncio
-import asyncpg
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta, date, timezone
 import re
 import logging
 from dataclasses import dataclass
 from collections import defaultdict
+
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,23 @@ class TrendRSSCorrelation:
     optimal_content_angle: str
     timing_advantage: bool
 
+
+# Singleton instance
+_rss_cross_reference_instance: Optional['RSSCrossReference'] = None
+
+
+def get_rss_cross_reference() -> 'RSSCrossReference':
+    """Get singleton RSSCrossReference instance"""
+    global _rss_cross_reference_instance
+    if _rss_cross_reference_instance is None:
+        _rss_cross_reference_instance = RSSCrossReference()
+    return _rss_cross_reference_instance
+
+
 class RSSCrossReference:
     """Cross-references Google Trends with RSS marketing insights"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
-        
+    def __init__(self):
         # Correlation scoring weights
         self.scoring_weights = {
             'exact_keyword_match': 1.0,
@@ -85,10 +97,6 @@ class RSSCrossReference:
             ]
         }
     
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
-    
     def _make_timezone_aware(self, dt: datetime) -> datetime:
         """Make a datetime timezone-aware if it isn't already"""
         if dt.tzinfo is None:
@@ -101,9 +109,10 @@ class RSSCrossReference:
     
     async def correlate_trends_with_rss(self, hours_lookback: int = 72) -> List[TrendRSSCorrelation]:
         """Find correlations between trending keywords and RSS content"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_lookback)
             
             # Get recent trending keywords
@@ -115,6 +124,10 @@ class RSSCrossReference:
                 AND trend_score >= 15  -- Low threshold for correlation analysis
                 ORDER BY keyword, business_area, created_at DESC
             ''', cutoff_time)
+            
+            # Release connection before calling other async methods
+            await db_manager.release_connection(conn)
+            conn = None
             
             correlations = []
             
@@ -137,14 +150,16 @@ class RSSCrossReference:
             return correlations
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def _analyze_keyword_rss_correlation(self, keyword: str, business_area: str,
                                              trend_score: int, hours_lookback: int) -> Optional[TrendRSSCorrelation]:
         """Analyze correlation between a specific keyword and RSS content"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_lookback)
             
             # Get relevant RSS entries
@@ -209,9 +224,10 @@ class RSSCrossReference:
             )
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
-    async def _find_related_rss_entries(self, conn: asyncpg.Connection, keyword: str,
+    async def _find_related_rss_entries(self, conn: Any, keyword: str,
                                       business_area: str, cutoff_time: datetime) -> List[Dict[str, Any]]:
         """Find RSS entries related to the trending keyword"""
         
@@ -603,16 +619,14 @@ class RSSCrossReference:
             ]
         }
 
+
 # ============================================================================
 # TESTING AND UTILITIES
 # ============================================================================
 
 async def test_rss_cross_reference():
     """Test the RSS cross-reference functionality"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    cross_ref = RSSCrossReference(database_url)
+    cross_ref = get_rss_cross_reference()
     
     print("🧪 TESTING RSS CROSS-REFERENCE")
     print("=" * 40)
@@ -650,6 +664,7 @@ async def test_rss_cross_reference():
         print(f"   Sentiment distribution: {report['sentiment_distribution']}")
     
     print("\n✅ RSS cross-reference test complete!")
+
 
 if __name__ == "__main__":
     asyncio.run(test_rss_cross_reference())

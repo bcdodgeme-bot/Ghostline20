@@ -2,6 +2,8 @@
 """
 RSS Feed Processor - Fetches and processes marketing RSS feeds
 Handles weekly RSS collection with error handling and status tracking
+
+UPDATED: Session 15 - Added singleton pattern, use getter functions for dependencies
 """
 
 import asyncio
@@ -15,17 +17,30 @@ import logging
 from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
-from .database_manager import RSSDatabase
-from .content_analyzer import ContentAnalyzer
+from .database_manager import get_rss_database
+from .content_analyzer import get_content_analyzer
 
 logger = logging.getLogger(__name__)
+
+# Singleton instance
+_feed_processor_instance: Optional['RSSFeedProcessor'] = None
+
+
+def get_feed_processor() -> 'RSSFeedProcessor':
+    """Get singleton RSSFeedProcessor instance"""
+    global _feed_processor_instance
+    if _feed_processor_instance is None:
+        _feed_processor_instance = RSSFeedProcessor()
+    return _feed_processor_instance
+
 
 class RSSFeedProcessor:
     """Processes RSS feeds for marketing content analysis"""
     
     def __init__(self):
-        self.db = RSSDatabase()
-        self.analyzer = ContentAnalyzer()
+        # Use singleton getters for dependencies
+        self._db: Optional[Any] = None
+        self._analyzer: Optional[Any] = None
         self.session: Optional[aiohttp.ClientSession] = None
         self.background_task: Optional[asyncio.Task] = None
         self.running = False
@@ -38,6 +53,20 @@ class RSSFeedProcessor:
         }
         
         self.timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    
+    @property
+    def db(self):
+        """Lazy-load database manager"""
+        if self._db is None:
+            self._db = get_rss_database()
+        return self._db
+    
+    @property
+    def analyzer(self):
+        """Lazy-load content analyzer"""
+        if self._analyzer is None:
+            self._analyzer = get_content_analyzer()
+        return self._analyzer
         
     async def start_background_processing(self):
         """Start weekly RSS processing in background"""
@@ -121,6 +150,7 @@ class RSSFeedProcessor:
             'sources': len(sources),
             'success': 0,
             'errors': 0,
+            'knowledge_entries_created': 0,
             'details': []
         }
         
@@ -132,6 +162,7 @@ class RSSFeedProcessor:
                 if result['success']:
                     results['success'] += 1
                     results['processed'] += result.get('items_processed', 0)
+                    results['knowledge_entries_created'] += result.get('knowledge_entries_created', 0)
                 else:
                     results['errors'] += 1
                     
@@ -148,7 +179,7 @@ class RSSFeedProcessor:
                     'items_processed': 0
                 })
         
-        logger.info(f"RSS processing complete: {results['success']}/{results['sources']} sources successful")
+        logger.info(f"RSS processing complete: {results['success']}/{results['sources']} sources successful, {results['knowledge_entries_created']} knowledge entries created")
         return results
     
     async def _process_single_source(self, source: Dict[str, Any]) -> Dict[str, Any]:
@@ -187,25 +218,35 @@ class RSSFeedProcessor:
             # Process and store items
             processed_count = 0
             for item in items:
-                if await self._process_feed_item(item, source_id, source['category']):
-                    processed_count += 1
+                try:
+                    # Get category from source
+                    category = source.get('category', 'marketing')
+                    
+                    # Process the item (this now includes knowledge base injection)
+                    success = await self._process_feed_item(item, source_id, category)
+                    if success:
+                        processed_count += 1
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to process item from {source_name}: {e}")
+                    continue
             
             # Update source status
             await self.db.update_source_status(source_id, success=True, items_count=processed_count)
             
-            logger.info(f"Processed {processed_count}/{len(items)} items from {source_name}")
+            logger.info(f"Completed {source_name}: {processed_count}/{len(items)} items processed")
             
             return {
                 'source': source_name,
                 'success': True,
+                'items_processed': processed_count,
                 'items_found': len(items),
-                'items_processed': processed_count
+                'knowledge_entries_created': processed_count  # Each item creates a knowledge entry
             }
             
         except Exception as e:
             logger.error(f"Error processing {source_name}: {e}")
             await self.db.update_source_status(source_id, success=False, error=str(e))
-            
             return {
                 'source': source_name,
                 'success': False,
@@ -368,7 +409,7 @@ class RSSFeedProcessor:
             # Final verification before database insertion
             logger.info(f"Inserting scores for '{item['title'][:30]}...': Sentiment={db_item['sentiment_score']:.2f}, Trend={db_item['trend_score']:.2f}, Relevance={db_item['relevance_score']:.2f}")
             
-            # Store in database
+            # Store in database (this now also injects to knowledge base)
             await self.db.insert_feed_item(db_item)
             
             logger.debug(f"Successfully processed: {item['title'][:50]}...")

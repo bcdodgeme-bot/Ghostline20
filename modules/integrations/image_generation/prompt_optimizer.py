@@ -11,13 +11,14 @@ Key Features:
 - Provides context-aware prompt enhancements
 """
 
-import asyncio
-import asyncpg
 import logging
 import re
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import json
+
+# Use centralized database manager - NOT direct asyncpg
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,7 @@ class PromptOptimizer:
     Transforms basic prompts into marketing-aware, trend-conscious image descriptions
     """
     
-    def __init__(self, database_url: str = None):
-        import os
-        self.database_url = database_url or os.getenv('DATABASE_URL')
-        
+    def __init__(self):
         # Content type mappings for visual optimization
         self.content_type_enhancements = {
             'blog': {
@@ -71,10 +69,6 @@ class PromptOptimizer:
             'voice': ['conversational', 'natural', 'human-centered', 'approachable']
         }
     
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
-    
     async def optimize_prompt(self, original_prompt: str, content_type: str = 'general',
                             business_context: str = None, style_template: Dict = None) -> Dict[str, Any]:
         """
@@ -98,7 +92,7 @@ class PromptOptimizer:
             
             # Build enhanced prompt
             enhanced_prompt = await self._build_enhanced_prompt(
-                original_prompt, content_type, marketing_context, 
+                original_prompt, content_type, marketing_context,
                 trending_keywords, style_template
             )
             
@@ -128,8 +122,6 @@ class PromptOptimizer:
     
     async def _get_marketing_intelligence(self, prompt: str, content_type: str) -> Dict[str, Any]:
         """Get relevant marketing intelligence from RSS learning system"""
-        conn = await self.get_connection()
-        
         try:
             # Extract keywords from the prompt for RSS matching
             prompt_keywords = self._extract_prompt_keywords(prompt)
@@ -138,6 +130,7 @@ class PromptOptimizer:
                 return {'insights': [], 'rss_matches': [], 'trends': []}
             
             # Search RSS content for relevant marketing insights
+            # Using parameterized query - search_patterns is a list passed as $1
             rss_query = '''
                 SELECT title, marketing_insights, actionable_tips, keywords, 
                        trend_score, category, sentiment_score
@@ -155,7 +148,7 @@ class PromptOptimizer:
             '''
             
             search_patterns = [f'%{keyword}%' for keyword in prompt_keywords]
-            rss_matches = await conn.fetch(rss_query, search_patterns)
+            rss_matches = await db_manager.fetch_all(rss_query, search_patterns)
             
             # Get general trending insights for the content type
             trending_query = '''
@@ -170,35 +163,36 @@ class PromptOptimizer:
             '''
             
             content_category = self._map_content_type_to_rss_category(content_type)
-            trending_insights = await conn.fetch(trending_query, f'%{content_category}%')
+            trending_insights = await db_manager.fetch_all(trending_query, f'%{content_category}%')
             
             # Process and extract actionable insights
             insights = []
-            for row in list(rss_matches) + list(trending_insights):
+            all_matches = list(rss_matches or []) + list(trending_insights or [])
+            for row in all_matches:
                 if row['marketing_insights']:
                     insights.append({
                         'insight': row['marketing_insights'][:200],  # Truncate for prompt use
-                        'trend_score': float(row['trend_score']),
+                        'trend_score': float(row['trend_score']) if row['trend_score'] else 0.0,
                         'category': row.get('category', ''),
-                        'sentiment': float(row['sentiment_score']) if row['sentiment_score'] else 0.0
+                        'sentiment': float(row['sentiment_score']) if row.get('sentiment_score') else 0.0
                     })
             
             return {
                 'insights': insights,
-                'rss_matches': [dict(row) for row in rss_matches],
-                'trending_insights': [dict(row) for row in trending_insights],
+                'rss_matches': [dict(row) for row in (rss_matches or [])],
+                'trending_insights': [dict(row) for row in (trending_insights or [])],
                 'prompt_keywords': prompt_keywords
             }
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get marketing intelligence: {e}")
+            return {'insights': [], 'rss_matches': [], 'trends': [], 'prompt_keywords': []}
     
     async def _get_trending_keywords(self, prompt: str) -> List[str]:
         """Get trending keywords relevant to the prompt from RSS data"""
-        conn = await self.get_connection()
-        
         try:
             # Get trending keywords from recent high-scoring RSS entries
+            # Fixed: No string interpolation, using static INTERVAL
             trending_query = '''
                 SELECT 
                     jsonb_array_elements_text(keywords) as keyword,
@@ -214,23 +208,24 @@ class PromptOptimizer:
                 LIMIT 15
             '''
             
-            trending_data = await conn.fetch(trending_query)
+            trending_data = await db_manager.fetch_all(trending_query)
             
             # Filter keywords relevant to the prompt
             prompt_lower = prompt.lower()
             relevant_keywords = []
             
-            for row in trending_data:
+            for row in (trending_data or []):
                 keyword = row['keyword'].lower()
                 # Check if keyword is semantically related to prompt
-                if (self._keywords_are_related(keyword, prompt_lower) or 
+                if (self._keywords_are_related(keyword, prompt_lower) or
                     keyword in self.trending_modifiers):
                     relevant_keywords.append(keyword)
             
             return relevant_keywords[:5]  # Limit to top 5 most relevant
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get trending keywords: {e}")
+            return []
     
     async def _build_enhanced_prompt(self, original_prompt: str, content_type: str,
                                    marketing_context: Dict, trending_keywords: List[str],
@@ -299,7 +294,7 @@ class PromptOptimizer:
         """Extract meaningful keywords from user prompt"""
         # Remove common words and extract meaningful terms
         stop_words = {
-            'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
             'of', 'with', 'by', 'create', 'make', 'generate', 'image', 'picture'
         }
         
@@ -340,7 +335,7 @@ class PromptOptimizer:
         }
         
         for theme_keywords in themes.values():
-            if (keyword in theme_keywords and 
+            if (keyword in theme_keywords and
                 any(theme_word in prompt for theme_word in theme_keywords)):
                 return True
         
@@ -382,7 +377,7 @@ class PromptOptimizer:
         return cleaned_parts
     
     def _calculate_optimization_confidence(self, marketing_context: Dict,
-                                         trending_keywords: List[str], 
+                                         trending_keywords: List[str],
                                          content_type: str) -> float:
         """Calculate confidence score for the optimization (0.0 to 1.0)"""
         confidence = 0.3  # Base confidence
@@ -437,42 +432,58 @@ class PromptOptimizer:
     
     async def get_optimization_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get statistics about prompt optimizations"""
-        conn = await self.get_connection()
-        
         try:
+            # Validate days parameter to prevent any issues
+            if not isinstance(days, int) or days < 1:
+                days = 30
+            if days > 365:
+                days = 365
+            
+            # FIXED: Use parameterized interval query
+            # PostgreSQL accepts interval as a string parameter with ::interval cast
+            interval_str = f'{days} days'
+            
             # Get trending keywords stats
-            trending_stats = await conn.fetch('''
+            trending_stats = await db_manager.fetch_all('''
                 SELECT 
                     jsonb_array_elements_text(keywords) as keyword,
                     COUNT(*) as frequency,
                     AVG(trend_score) as avg_score
                 FROM rss_feed_entries
-                WHERE pub_date > NOW() - INTERVAL '%s days'
+                WHERE pub_date > NOW() - $1::interval
                 AND ai_processed = true
                 GROUP BY jsonb_array_elements_text(keywords)
                 ORDER BY frequency DESC
                 LIMIT 10
-            ''' % days)
+            ''', interval_str)
             
             # Get content categories
-            category_stats = await conn.fetch('''
+            category_stats = await db_manager.fetch_all('''
                 SELECT category, COUNT(*) as count, AVG(trend_score) as avg_score
                 FROM rss_feed_entries
-                WHERE pub_date > NOW() - INTERVAL '%s days'
+                WHERE pub_date > NOW() - $1::interval
                 AND ai_processed = true
                 GROUP BY category
                 ORDER BY count DESC
-            ''' % days)
+            ''', interval_str)
             
             return {
-                'trending_keywords': [dict(row) for row in trending_stats],
-                'content_categories': [dict(row) for row in category_stats],
-                'total_insights_available': len(trending_stats),
+                'trending_keywords': [dict(row) for row in (trending_stats or [])],
+                'content_categories': [dict(row) for row in (category_stats or [])],
+                'total_insights_available': len(trending_stats or []),
                 'optimization_sources': ['RSS Learning', 'Content Intelligence', 'Style Templates']
             }
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get optimization stats: {e}")
+            return {
+                'trending_keywords': [],
+                'content_categories': [],
+                'total_insights_available': 0,
+                'optimization_sources': [],
+                'error': str(e)
+            }
+
 
 # Test function for development
 async def test_prompt_optimizer():
@@ -502,5 +513,7 @@ async def test_prompt_optimizer():
         if result['marketing_context'].get('insights'):
             print(f"Marketing insights applied: {len(result['marketing_context']['insights'])}")
 
+
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(test_prompt_optimizer())

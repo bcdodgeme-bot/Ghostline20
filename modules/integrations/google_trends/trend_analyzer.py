@@ -13,13 +13,14 @@ Key Features:
 """
 
 import asyncio
-import asyncpg
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta, date
 import statistics
 import logging
 from dataclasses import dataclass
 from collections import defaultdict
+
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,23 @@ class BusinessTrendCorrelation:
     correlation_strength: float
     shared_momentum: str
 
+
+# Singleton instance
+_trend_analyzer_instance: Optional['TrendAnalyzer'] = None
+
+
+def get_trend_analyzer() -> 'TrendAnalyzer':
+    """Get singleton TrendAnalyzer instance"""
+    global _trend_analyzer_instance
+    if _trend_analyzer_instance is None:
+        _trend_analyzer_instance = TrendAnalyzer()
+    return _trend_analyzer_instance
+
+
 class TrendAnalyzer:
     """Advanced trend analysis and pattern detection"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
-        
+    def __init__(self):
         # Analysis configuration
         self.min_data_points = 3  # Minimum data points for pattern analysis
         self.volatility_threshold = 25  # High volatility if score range > 25
@@ -85,10 +97,6 @@ class TrendAnalyzer:
             }
         }
     
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
-    
     # ============================================================================
     # TREND PATTERN ANALYSIS
     # ============================================================================
@@ -96,9 +104,10 @@ class TrendAnalyzer:
     async def analyze_keyword_pattern(self, keyword: str, business_area: str,
                                     days: int = 14) -> Optional[TrendPattern]:
         """Analyze trend pattern for a specific keyword"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Get historical trend data
             query = '''
                 SELECT trend_date, trend_score, trend_momentum, regional_score
@@ -151,7 +160,8 @@ class TrendAnalyzer:
             )
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     def _detect_pattern(self, scores: List[int]) -> Tuple[str, float, float]:
         """Detect trend pattern from score history"""
@@ -288,9 +298,10 @@ class TrendAnalyzer:
     async def analyze_business_area_trends(self, business_area: str,
                                          days: int = 7, limit: int = 20) -> Dict[str, Any]:
         """Comprehensive trend analysis for a business area"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Get top trending keywords for the business area
             cutoff_date = date.today() - timedelta(days=days)
             
@@ -304,6 +315,10 @@ class TrendAnalyzer:
                 ORDER BY max_score DESC, avg_score DESC
                 LIMIT $4
             ''', business_area, cutoff_date, self.min_data_points, limit)
+            
+            # Release connection before calling other async methods
+            await db_manager.release_connection(conn)
+            conn = None
             
             # Analyze patterns for each keyword
             patterns = []
@@ -378,7 +393,8 @@ class TrendAnalyzer:
             }
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     # ============================================================================
     # CROSS-BUSINESS CORRELATION ANALYSIS
@@ -387,9 +403,10 @@ class TrendAnalyzer:
     async def find_cross_business_correlations(self, days: int = 14,
                                              min_correlation: float = 0.6) -> List[BusinessTrendCorrelation]:
         """Find trending keywords that correlate across business areas"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             cutoff_date = date.today() - timedelta(days=days)
             
             # Get trend data for all business areas
@@ -466,7 +483,8 @@ class TrendAnalyzer:
             return correlations[:10]  # Return top 10 correlations
             
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     def _calculate_correlation(self, scores1: List[int], scores2: List[int]) -> float:
         """Calculate correlation between two score series"""
@@ -572,16 +590,14 @@ class TrendAnalyzer:
             'business_relevance': pattern.business_relevance
         }
 
+
 # ============================================================================
 # TESTING AND UTILITIES
 # ============================================================================
 
 async def test_trend_analyzer():
     """Test the trend analyzer functionality"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    analyzer = TrendAnalyzer(database_url)
+    analyzer = get_trend_analyzer()
     
     print("🧪 TESTING TREND ANALYZER")
     print("=" * 40)
@@ -634,6 +650,7 @@ async def test_trend_analyzer():
         print(f"   Rationale: {timing['rationale']}")
     
     print("\n✅ Trend analyzer test complete!")
+
 
 if __name__ == "__main__":
     asyncio.run(test_trend_analyzer())

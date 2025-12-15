@@ -2,13 +2,13 @@
 """
 Approval System - Draft Generator + Queue Manager
 Generates personality-appropriate drafts and manages approval workflow
+Now with database persistence using bluesky_approval_queue table
 """
 
 import uuid
-import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-import json
 import logging
 
 from ...core.database import db_manager
@@ -16,11 +16,11 @@ from .multi_account_client import get_bluesky_multi_client
 
 logger = logging.getLogger(__name__)
 
+
 class ApprovalSystem:
     """Manages draft generation and approval workflow for all accounts"""
     
     def __init__(self):
-        self.pending_approvals = {}  # In-memory queue
         self.draft_personalities = self._setup_draft_personalities()
         
     def _setup_draft_personalities(self) -> Dict[str, str]:
@@ -42,7 +42,7 @@ class ApprovalSystem:
             This was originally your baby - you can be as creative and authentic as you want here."""
         }
     
-    async def generate_draft_post(self, 
+    async def generate_draft_post(self,
                                 analysis: Dict[str, Any],
                                 post_type: str = "reply") -> Dict[str, Any]:
         """Generate a draft post/reply for an engagement opportunity"""
@@ -128,7 +128,7 @@ Return ONLY the draft text, no quotes or extra formatting."""
         elif 'advice' in suggested_action.lower():
             if personality == 'syntaxprime':
                 return "Thanks for sharing this - really valuable insights."
-            elif personality == 'professional':  
+            elif personality == 'professional':
                 return "Your experience offers valuable insights for others facing similar challenges."
             else:
                 return "Thank you for sharing your experience with the community."
@@ -145,239 +145,378 @@ Return ONLY the draft text, no quotes or extra formatting."""
             else:
                 return "Thank you for sharing this with the community."
     
-    async def create_approval_item(self, 
+    async def create_approval_item(self,
                                  analysis: Dict[str, Any],
                                  draft_result: Dict[str, Any],
                                  priority: str = "medium") -> str:
-        """Create a new approval item in the queue"""
+        """Create a new approval item in the database"""
         
         approval_id = str(uuid.uuid4())
+        expires_at = datetime.now() + timedelta(hours=24)
         
-        approval_item = {
-            "id": approval_id,
-            "account_id": analysis['account_id'],
-            "post_uri": analysis['post_uri'],
-            "author": analysis['author'],
-            "original_post": analysis['post_content'],
-            "draft_text": draft_result['draft_text'],
-            "character_count": draft_result['character_count'],
-            "personality_used": draft_result['personality_used'],
-            "engagement_type": analysis['suggested_action'],
-            "matched_keywords": analysis['keyword_analysis']['matched_keywords'],
-            "keyword_score": analysis['keyword_analysis']['match_score'],
-            "priority": priority,
-            "created_at": datetime.now(),
-            "expires_at": datetime.now() + timedelta(hours=24),  # Expire after 24 hours
-            "status": "pending"
-        }
-        
-        self.pending_approvals[approval_id] = approval_item
-        
-        logger.info(f"Created approval item {approval_id} for {analysis['account_id']}")
-        return approval_id
+        conn = None
+        try:
+            conn = await db_manager.get_connection()
+            
+            await conn.execute('''
+                INSERT INTO bluesky_approval_queue (
+                    id, account_id, post_uri, author_handle,
+                    original_post_text, draft_text, personality_used,
+                    matched_keywords, keyword_score, engagement_potential,
+                    priority, status, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ''',
+                uuid.UUID(approval_id),
+                analysis['account_id'],
+                analysis['post_uri'],
+                analysis['author']['handle'],
+                analysis['post_content'],
+                draft_result['draft_text'],
+                draft_result['personality_used'],
+                json.dumps(analysis['keyword_analysis']['matched_keywords']),
+                analysis['keyword_analysis']['match_score'],
+                analysis.get('engagement_potential', 0),
+                priority,
+                'pending',
+                expires_at
+            )
+            
+            logger.info(f"Created approval item {approval_id} for {analysis['account_id']}")
+            return approval_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create approval item: {e}")
+            raise
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
-    async def get_pending_approvals(self, 
+    async def get_pending_approvals(self,
                                   account_id: Optional[str] = None,
                                   priority: Optional[str] = None,
                                   limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get pending approval items with optional filtering"""
+        """Get pending approval items from database with optional filtering"""
         
-        approvals = list(self.pending_approvals.values())
-        
-        # Filter by account
-        if account_id:
-            approvals = [a for a in approvals if a['account_id'] == account_id]
-        
-        # Filter by priority
-        if priority:
-            approvals = [a for a in approvals if a['priority'] == priority]
-        
-        # Filter out expired items
-        now = datetime.now()
-        approvals = [a for a in approvals if a['expires_at'] > now]
-        
-        # Sort by priority and creation time
-        priority_order = {'high': 3, 'medium': 2, 'low': 1}
-        approvals.sort(
-            key=lambda x: (priority_order.get(x['priority'], 0), x['created_at']), 
-            reverse=True
-        )
-        
-        # Apply limit
-        if limit:
-            approvals = approvals[:limit]
-        
-        return approvals
+        conn = None
+        try:
+            conn = await db_manager.get_connection()
+            
+            # Build query with optional filters
+            query = '''
+                SELECT 
+                    id, account_id, post_uri, author_handle,
+                    original_post_text, draft_text, personality_used,
+                    matched_keywords, keyword_score, engagement_potential,
+                    priority, status, expires_at, created_at
+                FROM bluesky_approval_queue
+                WHERE status = 'pending' AND expires_at > NOW()
+            '''
+            params = []
+            param_idx = 1
+            
+            if account_id:
+                query += f' AND account_id = ${param_idx}'
+                params.append(account_id)
+                param_idx += 1
+            
+            if priority:
+                query += f' AND priority = ${param_idx}'
+                params.append(priority)
+                param_idx += 1
+            
+            # Order by priority (high first) then by creation time
+            query += '''
+                ORDER BY 
+                    CASE priority 
+                        WHEN 'high' THEN 3 
+                        WHEN 'medium' THEN 2 
+                        WHEN 'low' THEN 1 
+                        ELSE 0 
+                    END DESC,
+                    created_at DESC
+            '''
+            
+            if limit:
+                query += f' LIMIT ${param_idx}'
+                params.append(limit)
+            
+            rows = await conn.fetch(query, *params)
+            
+            # Convert to list of dicts
+            approvals = []
+            for row in rows:
+                approval = {
+                    'id': str(row['id']),
+                    'account_id': row['account_id'],
+                    'post_uri': row['post_uri'],
+                    'author': {'handle': row['author_handle']},
+                    'original_post': row['original_post_text'],
+                    'draft_text': row['draft_text'],
+                    'character_count': len(row['draft_text']),
+                    'personality_used': row['personality_used'],
+                    'matched_keywords': json.loads(row['matched_keywords']) if row['matched_keywords'] else [],
+                    'keyword_score': float(row['keyword_score']) if row['keyword_score'] else 0,
+                    'engagement_potential': float(row['engagement_potential']) if row['engagement_potential'] else 0,
+                    'priority': row['priority'],
+                    'status': row['status'],
+                    'created_at': row['created_at'],
+                    'expires_at': row['expires_at']
+                }
+                approvals.append(approval)
+            
+            return approvals
+            
+        except Exception as e:
+            logger.error(f"Failed to get pending approvals: {e}")
+            return []
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def approve_and_post(self, approval_id: str, user_id: str) -> Dict[str, Any]:
         """Approve an item and post it immediately"""
         
-        if approval_id not in self.pending_approvals:
-            return {"success": False, "error": "Approval item not found"}
-        
-        approval_item = self.pending_approvals[approval_id]
-        
-        # Check if expired
-        if datetime.now() > approval_item['expires_at']:
-            del self.pending_approvals[approval_id]
-            return {"success": False, "error": "Approval item has expired"}
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
+            # Get the approval item
+            row = await conn.fetchrow('''
+                SELECT 
+                    id, account_id, post_uri, author_handle,
+                    original_post_text, draft_text, personality_used,
+                    matched_keywords, priority, status, expires_at
+                FROM bluesky_approval_queue
+                WHERE id = $1
+            ''', uuid.UUID(approval_id))
+            
+            if not row:
+                return {"success": False, "error": "Approval item not found"}
+            
+            if row['status'] != 'pending':
+                return {"success": False, "error": f"Approval item is already {row['status']}"}
+            
+            # Check if expired
+            if datetime.now(row['expires_at'].tzinfo) > row['expires_at']:
+                await conn.execute('''
+                    UPDATE bluesky_approval_queue 
+                    SET status = 'expired', resolved_at = NOW()
+                    WHERE id = $1
+                ''', uuid.UUID(approval_id))
+                return {"success": False, "error": "Approval item has expired"}
+            
             # Get multi-client and post
             multi_client = get_bluesky_multi_client()
             
             result = await multi_client.create_post(
-                account_id=approval_item['account_id'],
-                text=approval_item['draft_text']
+                account_id=row['account_id'],
+                text=row['draft_text']
             )
             
             if result['success']:
-                # Mark as approved and remove from queue
-                approval_item['status'] = 'approved'
-                approval_item['posted_at'] = datetime.now()
-                approval_item['post_result'] = result
+                # Update status to approved
+                await conn.execute('''
+                    UPDATE bluesky_approval_queue 
+                    SET status = 'approved', 
+                        resolved_at = NOW(),
+                        post_result = $2
+                    WHERE id = $1
+                ''', uuid.UUID(approval_id), json.dumps({
+                    'uri': result.get('uri'),
+                    'cid': result.get('cid'),
+                    'posted_at': result.get('posted_at').isoformat() if result.get('posted_at') else None
+                }))
                 
-                # Store in database for learning (optional)
-                await self._record_approval_action(approval_id, 'approved', user_id)
-                
-                # Remove from pending queue
-                del self.pending_approvals[approval_id]
-                
-                logger.info(f"Approved and posted {approval_id} to {approval_item['account_id']}")
+                logger.info(f"Approved and posted {approval_id} to {row['account_id']}")
                 
                 return {
                     "success": True,
-                    "message": f"Posted to {approval_item['account_id']}",
+                    "message": f"Posted to {row['account_id']}",
                     "post_result": result,
-                    "approval_item": approval_item
+                    "approval_id": approval_id
                 }
             else:
                 return {
                     "success": False,
-                    "error": f"Failed to post: {result['error']}"
+                    "error": f"Failed to post: {result.get('error')}"
                 }
                 
         except Exception as e:
             logger.error(f"Failed to approve and post {approval_id}: {e}")
             return {"success": False, "error": str(e)}
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def reject_approval(self, approval_id: str, user_id: str, reason: str = "") -> Dict[str, Any]:
         """Reject an approval item"""
         
-        if approval_id not in self.pending_approvals:
-            return {"success": False, "error": "Approval item not found"}
-        
-        approval_item = self.pending_approvals[approval_id]
-        approval_item['status'] = 'rejected'
-        approval_item['rejection_reason'] = reason
-        approval_item['rejected_at'] = datetime.now()
-        
-        # Record for learning
-        await self._record_approval_action(approval_id, 'rejected', user_id, reason)
-        
-        # Remove from pending queue
-        del self.pending_approvals[approval_id]
-        
-        logger.info(f"Rejected approval {approval_id}: {reason}")
-        
-        return {
-            "success": True,
-            "message": "Approval rejected",
-            "approval_item": approval_item
-        }
+        conn = None
+        try:
+            conn = await db_manager.get_connection()
+            
+            # Check if exists and is pending
+            row = await conn.fetchrow('''
+                SELECT id, status, account_id FROM bluesky_approval_queue WHERE id = $1
+            ''', uuid.UUID(approval_id))
+            
+            if not row:
+                return {"success": False, "error": "Approval item not found"}
+            
+            if row['status'] != 'pending':
+                return {"success": False, "error": f"Approval item is already {row['status']}"}
+            
+            # Update to rejected
+            await conn.execute('''
+                UPDATE bluesky_approval_queue 
+                SET status = 'rejected', 
+                    resolved_at = NOW(),
+                    rejection_reason = $2
+                WHERE id = $1
+            ''', uuid.UUID(approval_id), reason)
+            
+            logger.info(f"Rejected approval {approval_id}: {reason}")
+            
+            return {
+                "success": True,
+                "message": "Approval rejected",
+                "approval_id": approval_id,
+                "account_id": row['account_id']
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to reject approval {approval_id}: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
-    async def edit_and_approve(self, 
-                             approval_id: str, 
-                             edited_text: str, 
+    async def edit_and_approve(self,
+                             approval_id: str,
+                             edited_text: str,
                              user_id: str) -> Dict[str, Any]:
         """Edit the draft text and then approve/post"""
-        
-        if approval_id not in self.pending_approvals:
-            return {"success": False, "error": "Approval item not found"}
         
         if len(edited_text) > 300:
             return {"success": False, "error": f"Edited text too long ({len(edited_text)}/300 characters)"}
         
-        approval_item = self.pending_approvals[approval_id]
-        
-        # Update the draft text
-        approval_item['original_draft'] = approval_item['draft_text']
-        approval_item['draft_text'] = edited_text.strip()
-        approval_item['character_count'] = len(approval_item['draft_text'])
-        approval_item['edited_at'] = datetime.now()
-        approval_item['edited_by'] = user_id
-        
-        # Now approve and post
-        return await self.approve_and_post(approval_id, user_id)
-    
-    async def _record_approval_action(self, 
-                                    approval_id: str, 
-                                    action: str, 
-                                    user_id: str, 
-                                    reason: str = "") -> None:
-        """Record approval action for learning purposes"""
+        conn = None
         try:
-            # For now, just log the action
-            # In the future, you could store this in a database table for learning
-            logger.info(f"Approval action recorded: {action} - {approval_id} by {user_id} - {reason}")
+            conn = await db_manager.get_connection()
+            
+            # Update the draft text
+            await conn.execute('''
+                UPDATE bluesky_approval_queue 
+                SET draft_text = $2, edited_text = $2
+                WHERE id = $1 AND status = 'pending'
+            ''', uuid.UUID(approval_id), edited_text.strip())
+            
+            # Now approve and post
+            return await self.approve_and_post(approval_id, user_id)
             
         except Exception as e:
-            logger.warning(f"Failed to record approval action: {e}")
-            # Don't fail the main operation if logging fails
+            logger.error(f"Failed to edit and approve {approval_id}: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
-    def cleanup_expired_approvals(self) -> int:
-        """Remove expired approval items"""
-        now = datetime.now()
-        expired_ids = [
-            approval_id for approval_id, item in self.pending_approvals.items()
-            if item['expires_at'] <= now
-        ]
-        
-        for approval_id in expired_ids:
-            del self.pending_approvals[approval_id]
-        
-        if expired_ids:
-            logger.info(f"Cleaned up {len(expired_ids)} expired approval items")
-        
-        return len(expired_ids)
+    async def cleanup_expired_approvals(self) -> int:
+        """Mark expired approval items"""
+        conn = None
+        try:
+            conn = await db_manager.get_connection()
+            
+            result = await conn.execute('''
+                UPDATE bluesky_approval_queue 
+                SET status = 'expired', resolved_at = NOW()
+                WHERE status = 'pending' AND expires_at <= NOW()
+            ''')
+            
+            # Extract count from result string like "UPDATE 5"
+            count = int(result.split()[-1]) if result else 0
+            
+            if count > 0:
+                logger.info(f"Marked {count} expired approval items")
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired approvals: {e}")
+            return 0
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
     
-    def get_approval_stats(self) -> Dict[str, Any]:
+    async def get_approval_stats(self) -> Dict[str, Any]:
         """Get statistics about pending approvals"""
-        approvals = list(self.pending_approvals.values())
-        
-        stats = {
-            "total_pending": len(approvals),
-            "by_account": {},
-            "by_priority": {"high": 0, "medium": 0, "low": 0},
-            "by_age": {"<1h": 0, "1-6h": 0, "6-24h": 0},
-            "expiring_soon": 0  # < 2 hours
-        }
-        
-        now = datetime.now()
-        
-        for approval in approvals:
-            # By account
-            account = approval['account_id']
-            stats["by_account"][account] = stats["by_account"].get(account, 0) + 1
+        conn = None
+        try:
+            conn = await db_manager.get_connection()
             
-            # By priority
-            priority = approval['priority']
-            stats["by_priority"][priority] = stats["by_priority"].get(priority, 0) + 1
+            # Get counts by status
+            status_counts = await conn.fetch('''
+                SELECT status, COUNT(*) as count
+                FROM bluesky_approval_queue
+                GROUP BY status
+            ''')
             
-            # By age
-            age = now - approval['created_at']
-            if age < timedelta(hours=1):
-                stats["by_age"]["<1h"] += 1
-            elif age < timedelta(hours=6):
-                stats["by_age"]["1-6h"] += 1
-            else:
-                stats["by_age"]["6-24h"] += 1
+            # Get pending breakdown
+            pending_stats = await conn.fetchrow('''
+                SELECT 
+                    COUNT(*) as total_pending,
+                    COUNT(*) FILTER (WHERE priority = 'high') as high_priority,
+                    COUNT(*) FILTER (WHERE priority = 'medium') as medium_priority,
+                    COUNT(*) FILTER (WHERE priority = 'low') as low_priority,
+                    COUNT(*) FILTER (WHERE expires_at - NOW() < INTERVAL '2 hours') as expiring_soon,
+                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as last_hour,
+                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '6 hours' AND created_at <= NOW() - INTERVAL '1 hour') as last_6h,
+                    COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '6 hours') as older
+                FROM bluesky_approval_queue
+                WHERE status = 'pending' AND expires_at > NOW()
+            ''')
             
-            # Expiring soon
-            if approval['expires_at'] - now < timedelta(hours=2):
-                stats["expiring_soon"] += 1
-        
-        return stats
+            # Get by account
+            account_counts = await conn.fetch('''
+                SELECT account_id, COUNT(*) as count
+                FROM bluesky_approval_queue
+                WHERE status = 'pending' AND expires_at > NOW()
+                GROUP BY account_id
+            ''')
+            
+            stats = {
+                "total_pending": pending_stats['total_pending'] if pending_stats else 0,
+                "by_status": {row['status']: row['count'] for row in status_counts},
+                "by_account": {row['account_id']: row['count'] for row in account_counts},
+                "by_priority": {
+                    "high": pending_stats['high_priority'] if pending_stats else 0,
+                    "medium": pending_stats['medium_priority'] if pending_stats else 0,
+                    "low": pending_stats['low_priority'] if pending_stats else 0
+                },
+                "by_age": {
+                    "<1h": pending_stats['last_hour'] if pending_stats else 0,
+                    "1-6h": pending_stats['last_6h'] if pending_stats else 0,
+                    "6-24h": pending_stats['older'] if pending_stats else 0
+                },
+                "expiring_soon": pending_stats['expiring_soon'] if pending_stats else 0
+            }
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get approval stats: {e}")
+            return {
+                "total_pending": 0,
+                "by_account": {},
+                "by_priority": {"high": 0, "medium": 0, "low": 0},
+                "by_age": {"<1h": 0, "1-6h": 0, "6-24h": 0},
+                "expiring_soon": 0,
+                "error": str(e)
+            }
+        finally:
+            if conn:
+                await db_manager.release_connection(conn)
+
 
 # Global approval system
 _approval_system = None

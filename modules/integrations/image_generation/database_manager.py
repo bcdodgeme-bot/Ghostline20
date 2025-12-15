@@ -9,18 +9,23 @@ Key Features:
 - Manage style templates for consistency
 - Track download counts and usage analytics
 - Integration with existing user system
+- Uses core db_manager for connection pooling
 """
 
-import asyncio
-import asyncpg
 import logging
 import json
-from typing import Dict, Any, Optional, List, Tuple
+import re
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-import os
+
+from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+# Default user ID for single-user system
+DEFAULT_USER_ID = 'b7c60682-4815-4d9d-8ebe-66c6cd24eff9'
+
 
 @dataclass
 class GeneratedImage:
@@ -40,6 +45,7 @@ class GeneratedImage:
     download_count: int
     created_at: datetime
 
+
 @dataclass
 class StyleTemplate:
     """Container for style template data"""
@@ -52,33 +58,27 @@ class StyleTemplate:
     usage_count: int
     success_rate: float
 
+
 class ImageDatabase:
     """
     Manages all database operations for image generation system
     Integrates with existing Syntax Prime V2 user system
+    Uses core db_manager for proper connection pooling
     """
     
-    def __init__(self, database_url: str = None):
-        self.database_url = database_url or os.getenv('DATABASE_URL')
-        if not self.database_url:
-            raise ValueError("DATABASE_URL must be provided or set as environment variable")
-    
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
+    def __init__(self):
+        # No longer need database_url - using shared db_manager
+        pass
     
     # ============================================================================
     # USER MANAGEMENT
     # ============================================================================
     
-    async def get_user_id(self) -> Optional[str]:
-        """Get the first user ID (since this is a personal AI system)"""
-        conn = await self.get_connection()
-        try:
-            user = await conn.fetchrow("SELECT id FROM users ORDER BY created_at LIMIT 1")
-            return str(user['id']) if user else None
-        finally:
-            await conn.close()
+    async def get_user_id(self) -> str:
+        """Get user ID - returns default for single-user system"""
+        # For single-user system, return the known user ID
+        # This avoids unnecessary database query
+        return DEFAULT_USER_ID
     
     # ============================================================================
     # IMAGE GENERATION MANAGEMENT
@@ -90,8 +90,8 @@ class ImageDatabase:
         Save a generated image to the database
         
         Args:
-            generation_result: Result from ReplicateImageClient.generate_image()
-            user_id: Optional user ID (will auto-detect if not provided)
+            generation_result: Result from OpenRouterImageClient.generate_image()
+            user_id: Optional user ID (uses default if not provided)
             
         Returns:
             UUID of the saved image record
@@ -99,302 +99,287 @@ class ImageDatabase:
         if not user_id:
             user_id = await self.get_user_id()
         
-        conn = await self.get_connection()
+        # Extract data from generation result
+        original_prompt = generation_result.get('original_prompt', '')
+        enhanced_prompt = generation_result.get('enhanced_prompt', '')
+        image_url = generation_result.get('image_url', '')
+        image_base64 = generation_result.get('image_base64', '')
+        model_used = generation_result.get('model_used', '')
+        generation_time = generation_result.get('generation_time_seconds', 0)
+        style_applied = generation_result.get('style_applied', '')
+        content_type = generation_result.get('content_type', 'general')
+        resolution = generation_result.get('resolution', '1024x1024')
+        file_format = 'png'
+        content_context = json.dumps(generation_result.get('metadata', {}))
+        related_keywords = json.dumps(self._extract_keywords(original_prompt))
+        
+        # Calculate file size estimate (base64 is ~33% larger than binary)
+        file_size_bytes = 0
+        if image_base64:
+            file_size_bytes = int(len(image_base64) * 0.75)
+        
+        # Insert the record
+        query = """
+            INSERT INTO generated_images 
+            (user_id, original_prompt, enhanced_prompt, image_url, image_data_base64,
+             model_used, generation_time_seconds, style_applied, content_type,
+             resolution, file_format, file_size_bytes, content_context, related_keywords)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            RETURNING id
+        """
+        
         try:
-            # Extract data from generation result
-            image_data = {
-                'user_id': user_id,
-                'original_prompt': generation_result.get('original_prompt', ''),
-                'enhanced_prompt': generation_result.get('enhanced_prompt', ''),
-                'image_url': generation_result.get('image_url', ''),
-                'image_data_base64': generation_result.get('image_base64', ''),
-                'model_used': generation_result.get('model_used', ''),
-                'generation_time_seconds': generation_result.get('generation_time_seconds', 0),
-                'style_applied': generation_result.get('style_applied', ''),
-                'content_type': generation_result.get('content_type', 'general'),
-                'resolution': generation_result.get('resolution', '1024x1024'),
-                'file_format': 'png',  # Default format
-                'content_context': json.dumps(generation_result.get('metadata', {})),
-                'related_keywords': json.dumps(self._extract_keywords(generation_result.get('original_prompt', '')))
-            }
-            
-            # Calculate file size estimate (base64 is ~33% larger than binary)
-            if image_data['image_data_base64']:
-                estimated_size = int(len(image_data['image_data_base64']) * 0.75)
-                image_data['file_size_bytes'] = estimated_size
-            
-            # Insert the record
-            image_id = await conn.fetchval('''
-                INSERT INTO generated_images 
-                (user_id, original_prompt, enhanced_prompt, image_url, image_data_base64,
-                 model_used, generation_time_seconds, style_applied, content_type,
-                 resolution, file_format, file_size_bytes, content_context, related_keywords)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                RETURNING id
-            ''', 
-            image_data['user_id'], image_data['original_prompt'], image_data['enhanced_prompt'],
-            image_data['image_url'], image_data['image_data_base64'], image_data['model_used'],
-            image_data['generation_time_seconds'], image_data['style_applied'], 
-            image_data['content_type'], image_data['resolution'], image_data['file_format'],
-            image_data['file_size_bytes'], image_data['content_context'], 
-            image_data['related_keywords']
+            result = await db_manager.fetch_one(
+                query,
+                user_id, original_prompt, enhanced_prompt, image_url, image_base64,
+                model_used, generation_time, style_applied, content_type,
+                resolution, file_format, file_size_bytes, content_context, related_keywords
             )
             
+            image_id = str(result['id']) if result else None
             logger.info(f"Saved generated image with ID: {image_id}")
-            return str(image_id)
+            return image_id
             
         except Exception as e:
             logger.error(f"Failed to save generated image: {e}")
             raise
-        finally:
-            await conn.close()
     
     async def get_image_by_id(self, image_id: str) -> Optional[GeneratedImage]:
         """Get a specific generated image by ID"""
-        conn = await self.get_connection()
-        try:
-            row = await conn.fetchrow('''
-                SELECT id, user_id, original_prompt, enhanced_prompt, image_url,
-                       image_data_base64, model_used, generation_time_seconds,
-                       style_applied, content_type, resolution, file_format,
-                       download_count, created_at
-                FROM generated_images 
-                WHERE id = $1
-            ''', image_id)
-            
-            if row:
-                return GeneratedImage(
-                    id=str(row['id']),
-                    user_id=str(row['user_id']),
-                    original_prompt=row['original_prompt'],
-                    enhanced_prompt=row['enhanced_prompt'],
-                    image_url=row['image_url'],
-                    image_base64=row['image_data_base64'],
-                    model_used=row['model_used'],
-                    generation_time_seconds=float(row['generation_time_seconds']),
-                    style_applied=row['style_applied'],
-                    content_type=row['content_type'],
-                    resolution=row['resolution'],
-                    file_format=row['file_format'],
-                    download_count=row['download_count'],
-                    created_at=row['created_at']
-                )
-            return None
-            
-        finally:
-            await conn.close()
+        query = """
+            SELECT id, user_id, original_prompt, enhanced_prompt, image_url,
+                   image_data_base64, model_used, generation_time_seconds,
+                   style_applied, content_type, resolution, file_format,
+                   download_count, created_at
+            FROM generated_images 
+            WHERE id = $1
+        """
+        
+        row = await db_manager.fetch_one(query, image_id)
+        
+        if row:
+            return GeneratedImage(
+                id=str(row['id']),
+                user_id=str(row['user_id']),
+                original_prompt=row['original_prompt'] or '',
+                enhanced_prompt=row['enhanced_prompt'] or '',
+                image_url=row['image_url'] or '',
+                image_base64=row['image_data_base64'] or '',
+                model_used=row['model_used'] or '',
+                generation_time_seconds=float(row['generation_time_seconds'] or 0),
+                style_applied=row['style_applied'] or '',
+                content_type=row['content_type'] or 'general',
+                resolution=row['resolution'] or '1024x1024',
+                file_format=row['file_format'] or 'png',
+                download_count=row['download_count'] or 0,
+                created_at=row['created_at']
+            )
+        return None
     
     async def get_recent_images(self, user_id: str = None, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent generated images for a user"""
         if not user_id:
             user_id = await self.get_user_id()
         
-        conn = await self.get_connection()
-        try:
-            rows = await conn.fetch('''
-                SELECT id, original_prompt, enhanced_prompt, content_type,
-                       model_used, generation_time_seconds, resolution,
-                       download_count, created_at
-                FROM generated_images 
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
-            ''', user_id, limit)
-            
-            return [dict(row) for row in rows]
-            
-        finally:
-            await conn.close()
+        query = """
+            SELECT id, original_prompt, enhanced_prompt, content_type,
+                   model_used, generation_time_seconds, resolution,
+                   download_count, created_at
+            FROM generated_images 
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+        """
+        
+        rows = await db_manager.fetch_all(query, user_id, limit)
+        return [dict(row) for row in rows] if rows else []
     
-    async def search_images_by_keyword(self, keywords: List[str], 
+    async def search_images_by_keyword(self, keywords: List[str],
                                      user_id: str = None, limit: int = 10) -> List[Dict[str, Any]]:
         """Search generated images by keywords in prompts"""
         if not user_id:
             user_id = await self.get_user_id()
         
-        conn = await self.get_connection()
-        try:
-            # Build search query for keywords in prompts
-            search_terms = []
-            for keyword in keywords:
-                search_terms.append(f"%{keyword.lower()}%")
-            
-            query = '''
-                SELECT id, original_prompt, enhanced_prompt, content_type,
-                       model_used, created_at, download_count
-                FROM generated_images 
-                WHERE user_id = $1 
-                AND (
-                    LOWER(original_prompt) LIKE ANY($2) OR 
-                    LOWER(enhanced_prompt) LIKE ANY($2) OR
-                    related_keywords @> $3
-                )
-                ORDER BY created_at DESC
-                LIMIT $4
-            '''
-            
-            rows = await conn.fetch(query, user_id, search_terms, 
-                                  json.dumps(keywords), limit)
-            
-            return [dict(row) for row in rows]
-            
-        finally:
-            await conn.close()
+        # Build search terms for LIKE matching
+        search_terms = [f"%{keyword.lower()}%" for keyword in keywords]
+        
+        query = """
+            SELECT id, original_prompt, enhanced_prompt, content_type,
+                   model_used, created_at, download_count
+            FROM generated_images 
+            WHERE user_id = $1 
+            AND (
+                LOWER(original_prompt) LIKE ANY($2) OR 
+                LOWER(enhanced_prompt) LIKE ANY($2) OR
+                related_keywords @> $3
+            )
+            ORDER BY created_at DESC
+            LIMIT $4
+        """
+        
+        rows = await db_manager.fetch_all(
+            query, user_id, search_terms, json.dumps(keywords), limit
+        )
+        return [dict(row) for row in rows] if rows else []
     
     async def increment_download_count(self, image_id: str) -> bool:
         """Increment download count for an image"""
-        conn = await self.get_connection()
+        query = """
+            UPDATE generated_images 
+            SET download_count = download_count + 1,
+                downloaded_at = NOW()
+            WHERE id = $1
+        """
+        
         try:
-            # Update download count and timestamp
-            result = await conn.execute('''
-                UPDATE generated_images 
-                SET download_count = download_count + 1,
-                    downloaded_at = NOW()
-                WHERE id = $1
-            ''', image_id)
-            
-            return result == "UPDATE 1"
-            
-        finally:
-            await conn.close()
+            await db_manager.execute(query, image_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to increment download count: {e}")
+            return False
     
     # ============================================================================
     # STYLE TEMPLATE MANAGEMENT
     # ============================================================================
     
-    async def get_style_template(self, name: str = None, 
+    async def get_style_template(self, name: str = None,
                                business_area: str = None) -> Optional[StyleTemplate]:
         """Get a style template by name or business area"""
-        conn = await self.get_connection()
-        try:
-            if name:
-                row = await conn.fetchrow('''
-                    SELECT id, name, business_area, style_prompt, color_scheme,
-                           typical_elements, usage_count, success_rate
-                    FROM image_style_templates 
-                    WHERE name = $1
-                ''', name)
-            elif business_area:
-                row = await conn.fetchrow('''
-                    SELECT id, name, business_area, style_prompt, color_scheme,
-                           typical_elements, usage_count, success_rate
-                    FROM image_style_templates 
-                    WHERE business_area = $1
-                    ORDER BY usage_count DESC
-                    LIMIT 1
-                ''', business_area)
-            else:
-                return None
-            
-            if row:
-                return StyleTemplate(
-                    id=str(row['id']),
-                    name=row['name'],
-                    business_area=row['business_area'],
-                    style_prompt=row['style_prompt'],
-                    color_scheme=json.loads(row['color_scheme']) if row['color_scheme'] else {},
-                    typical_elements=json.loads(row['typical_elements']) if row['typical_elements'] else [],
-                    usage_count=row['usage_count'],
-                    success_rate=float(row['success_rate'])
-                )
+        if name:
+            query = """
+                SELECT id, name, business_area, style_prompt, color_scheme,
+                       typical_elements, usage_count, success_rate
+                FROM image_style_templates 
+                WHERE name = $1
+            """
+            row = await db_manager.fetch_one(query, name)
+        elif business_area:
+            query = """
+                SELECT id, name, business_area, style_prompt, color_scheme,
+                       typical_elements, usage_count, success_rate
+                FROM image_style_templates 
+                WHERE business_area = $1
+                ORDER BY usage_count DESC
+                LIMIT 1
+            """
+            row = await db_manager.fetch_one(query, business_area)
+        else:
             return None
+        
+        if row:
+            # Parse JSON fields safely
+            color_scheme = row['color_scheme']
+            if isinstance(color_scheme, str):
+                color_scheme = json.loads(color_scheme) if color_scheme else {}
+            elif color_scheme is None:
+                color_scheme = {}
             
-        finally:
-            await conn.close()
+            typical_elements = row['typical_elements']
+            if isinstance(typical_elements, str):
+                typical_elements = json.loads(typical_elements) if typical_elements else []
+            elif typical_elements is None:
+                typical_elements = []
+            
+            return StyleTemplate(
+                id=str(row['id']),
+                name=row['name'],
+                business_area=row['business_area'] or '',
+                style_prompt=row['style_prompt'] or '',
+                color_scheme=color_scheme,
+                typical_elements=typical_elements,
+                usage_count=row['usage_count'] or 0,
+                success_rate=float(row['success_rate'] or 0)
+            )
+        return None
     
     async def update_style_usage(self, template_name: str, success: bool = True) -> bool:
         """Update style template usage statistics"""
-        conn = await self.get_connection()
+        query = """
+            UPDATE image_style_templates 
+            SET usage_count = usage_count + 1,
+                success_rate = CASE 
+                    WHEN $2 THEN LEAST(1.0, success_rate + 0.1)
+                    ELSE GREATEST(0.0, success_rate - 0.1)
+                END
+            WHERE name = $1
+        """
+        
         try:
-            # Increment usage count and update success rate
-            await conn.execute('''
-                UPDATE image_style_templates 
-                SET usage_count = usage_count + 1,
-                    success_rate = CASE 
-                        WHEN $2 THEN LEAST(1.0, success_rate + 0.1)
-                        ELSE GREATEST(0.0, success_rate - 0.1)
-                    END
-                WHERE name = $1
-            ''', template_name, success)
-            
+            await db_manager.execute(query, template_name, success)
             return True
-            
         except Exception as e:
             logger.error(f"Failed to update style usage: {e}")
             return False
-        finally:
-            await conn.close()
     
     async def get_available_styles(self) -> List[Dict[str, Any]]:
         """Get all available style templates"""
-        conn = await self.get_connection()
-        try:
-            rows = await conn.fetch('''
-                SELECT name, business_area, style_prompt, usage_count, success_rate
-                FROM image_style_templates 
-                ORDER BY usage_count DESC, success_rate DESC
-            ''')
-            
-            return [dict(row) for row in rows]
-            
-        finally:
-            await conn.close()
+        query = """
+            SELECT name, business_area, style_prompt, usage_count, success_rate
+            FROM image_style_templates 
+            ORDER BY usage_count DESC, success_rate DESC
+        """
+        
+        rows = await db_manager.fetch_all(query)
+        return [dict(row) for row in rows] if rows else []
     
     # ============================================================================
     # ANALYTICS AND REPORTING
     # ============================================================================
     
-    async def get_generation_stats(self, user_id: str = None, 
+    async def get_generation_stats(self, user_id: str = None,
                                  days: int = 30) -> Dict[str, Any]:
         """Get image generation statistics"""
         if not user_id:
             user_id = await self.get_user_id()
         
-        conn = await self.get_connection()
-        try:
-            cutoff_date = datetime.now() - timedelta(days=days)
-            
-            # Total images generated
-            total_images = await conn.fetchval('''
-                SELECT COUNT(*) FROM generated_images 
-                WHERE user_id = $1 AND created_at >= $2
-            ''', user_id, cutoff_date)
-            
-            # Most used content types
-            content_types = await conn.fetch('''
-                SELECT content_type, COUNT(*) as count
-                FROM generated_images 
-                WHERE user_id = $1 AND created_at >= $2
-                GROUP BY content_type
-                ORDER BY count DESC
-            ''', user_id, cutoff_date)
-            
-            # Most used models
-            models = await conn.fetch('''
-                SELECT model_used, COUNT(*) as count
-                FROM generated_images 
-                WHERE user_id = $1 AND created_at >= $2
-                GROUP BY model_used
-                ORDER BY count DESC
-            ''', user_id, cutoff_date)
-            
-            # Average generation time
-            avg_time = await conn.fetchval('''
-                SELECT AVG(generation_time_seconds)
-                FROM generated_images 
-                WHERE user_id = $1 AND created_at >= $2
-            ''', user_id, cutoff_date)
-            
-            return {
-                'total_images': total_images,
-                'avg_generation_time': round(float(avg_time or 0), 2),
-                'content_types': [dict(row) for row in content_types],
-                'models_used': [dict(row) for row in models],
-                'period_days': days
-            }
-            
-        finally:
-            await conn.close()
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        # Total images generated
+        total_query = """
+            SELECT COUNT(*) as count FROM generated_images 
+            WHERE user_id = $1 AND created_at >= $2
+        """
+        total_result = await db_manager.fetch_one(total_query, user_id, cutoff_date)
+        total_images = total_result['count'] if total_result else 0
+        
+        # Most used content types
+        content_query = """
+            SELECT content_type, COUNT(*) as count
+            FROM generated_images 
+            WHERE user_id = $1 AND created_at >= $2
+            GROUP BY content_type
+            ORDER BY count DESC
+        """
+        content_rows = await db_manager.fetch_all(content_query, user_id, cutoff_date)
+        content_types = [dict(row) for row in content_rows] if content_rows else []
+        
+        # Most used models
+        model_query = """
+            SELECT model_used, COUNT(*) as count
+            FROM generated_images 
+            WHERE user_id = $1 AND created_at >= $2
+            GROUP BY model_used
+            ORDER BY count DESC
+        """
+        model_rows = await db_manager.fetch_all(model_query, user_id, cutoff_date)
+        models_used = [dict(row) for row in model_rows] if model_rows else []
+        
+        # Average generation time
+        avg_query = """
+            SELECT AVG(generation_time_seconds) as avg_time
+            FROM generated_images 
+            WHERE user_id = $1 AND created_at >= $2
+        """
+        avg_result = await db_manager.fetch_one(avg_query, user_id, cutoff_date)
+        avg_time = float(avg_result['avg_time'] or 0) if avg_result else 0
+        
+        return {
+            'total_images': total_images,
+            'avg_generation_time': round(avg_time, 2),
+            'content_types': content_types,
+            'models_used': models_used,
+            'period_days': days
+        }
     
     # ============================================================================
     # UTILITY METHODS
@@ -405,65 +390,79 @@ class ImageDatabase:
         if not prompt:
             return []
         
-        # Simple keyword extraction - split by common delimiters
-        import re
+        # Split by common delimiters
         words = re.split(r'[,\s]+', prompt.lower())
         
         # Filter out short words and common terms
-        stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        keywords = [word.strip() for word in words 
+        stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at',
+                      'to', 'for', 'of', 'with', 'by', 'is', 'it', 'as'}
+        keywords = [word.strip() for word in words
                    if len(word.strip()) > 2 and word.strip() not in stop_words]
         
         return keywords[:10]  # Limit to 10 keywords
     
     async def cleanup_old_images(self, days_to_keep: int = 90) -> int:
         """Clean up old generated images to manage storage"""
-        conn = await self.get_connection()
-        try:
-            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
-            
-            # Only delete images that haven't been downloaded recently
-            deleted_count = await conn.fetchval('''
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        
+        # First count images to delete
+        count_query = """
+            SELECT COUNT(*) as count FROM generated_images 
+            WHERE created_at < $1 
+            AND (downloaded_at IS NULL OR downloaded_at < $1)
+            AND download_count = 0
+        """
+        count_result = await db_manager.fetch_one(count_query, cutoff_date)
+        count_to_delete = count_result['count'] if count_result else 0
+        
+        if count_to_delete > 0:
+            # Delete old images
+            delete_query = """
                 DELETE FROM generated_images 
                 WHERE created_at < $1 
                 AND (downloaded_at IS NULL OR downloaded_at < $1)
                 AND download_count = 0
-                RETURNING (SELECT COUNT(*) FROM generated_images 
-                          WHERE created_at < $1 
-                          AND (downloaded_at IS NULL OR downloaded_at < $1)
-                          AND download_count = 0)
-            ''', cutoff_date)
-            
-            logger.info(f"Cleaned up {deleted_count or 0} old images")
-            return deleted_count or 0
-            
-        finally:
-            await conn.close()
+            """
+            await db_manager.execute(delete_query, cutoff_date)
+            logger.info(f"Cleaned up {count_to_delete} old images")
+        
+        return count_to_delete
     
     async def health_check(self) -> Dict[str, Any]:
         """Check database health and image generation system status"""
-        conn = await self.get_connection()
         try:
             # Check table existence
-            tables = await conn.fetch('''
+            tables_query = """
                 SELECT table_name 
                 FROM information_schema.tables 
                 WHERE table_name IN ('generated_images', 'image_style_templates')
                 AND table_schema = 'public'
-            ''')
+            """
+            tables = await db_manager.fetch_all(tables_query)
+            table_names = [row['table_name'] for row in tables] if tables else []
             
             # Get recent activity
-            recent_images = await conn.fetchval('''
-                SELECT COUNT(*) FROM generated_images 
+            recent_query = """
+                SELECT COUNT(*) as count FROM generated_images 
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
-            ''')
+            """
+            recent_result = await db_manager.fetch_one(recent_query)
+            recent_images = recent_result['count'] if recent_result else 0
             
-            total_images = await conn.fetchval('SELECT COUNT(*) FROM generated_images')
-            total_templates = await conn.fetchval('SELECT COUNT(*) FROM image_style_templates')
+            # Get totals
+            total_images_result = await db_manager.fetch_one(
+                "SELECT COUNT(*) as count FROM generated_images"
+            )
+            total_images = total_images_result['count'] if total_images_result else 0
+            
+            total_templates_result = await db_manager.fetch_one(
+                "SELECT COUNT(*) as count FROM image_style_templates"
+            )
+            total_templates = total_templates_result['count'] if total_templates_result else 0
             
             return {
-                'healthy': len(tables) == 2,
-                'tables_exist': [row['table_name'] for row in tables],
+                'healthy': len(table_names) == 2,
+                'tables_exist': table_names,
                 'recent_generations': recent_images,
                 'total_images': total_images,
                 'total_templates': total_templates,
@@ -471,46 +470,9 @@ class ImageDatabase:
             }
             
         except Exception as e:
+            logger.error(f"Health check failed: {e}")
             return {
                 'healthy': False,
                 'error': str(e),
                 'database_accessible': False
             }
-        finally:
-            await conn.close()
-
-# Test function for development
-async def test_image_database():
-    """Test the image database functionality"""
-    db = ImageDatabase()
-    
-    print("🧪 TESTING IMAGE DATABASE")
-    print("=" * 40)
-    
-    # Test health check
-    health = await db.health_check()
-    print(f"Database Health: {'✅' if health['healthy'] else '❌'}")
-    print(f"Total Images: {health.get('total_images', 0)}")
-    print(f"Total Templates: {health.get('total_templates', 0)}")
-    
-    # Test getting user ID
-    user_id = await db.get_user_id()
-    print(f"User ID: {user_id}")
-    
-    if user_id:
-        # Test getting recent images
-        recent = await db.get_recent_images(user_id, limit=5)
-        print(f"Recent Images: {len(recent)}")
-        
-        # Test getting available styles
-        styles = await db.get_available_styles()
-        print(f"Available Styles: {len(styles)}")
-        for style in styles[:3]:  # Show first 3
-            print(f"  - {style['name']} ({style['usage_count']} uses)")
-        
-        # Test generation stats
-        stats = await db.get_generation_stats(user_id)
-        print(f"Generation Stats: {stats['total_images']} images in last 30 days")
-
-if __name__ == "__main__":
-    asyncio.run(test_image_database())

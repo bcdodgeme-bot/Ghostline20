@@ -1,23 +1,27 @@
+# modules/content/content_generator.py
 """
 Content Generator Module
 Generates Bluesky posts and blog content from trend opportunities
+
+Created: 2025-XX-XX
+Updated: 2025-01-XX - Added singleton pattern, fixed db_manager usage, fixed SQL column names
 """
 
 import asyncio
-import asyncpg
+import sys
+import os
+import json
+import logging
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 from datetime import datetime, timedelta
-import json
-import logging
 
-# Import OpenRouter client
-import sys
-import os
+# Add parent path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from modules.ai.openrouter_client import get_openrouter_client
 
-import sys
+from modules.ai.openrouter_client import get_openrouter_client
+from modules.core.database import get_db_manager
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -25,23 +29,66 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
+USER_ID = UUID("b7c60682-4815-4d9d-8ebe-66c6cd24eff9")
+
+#===============================================================================
+# SINGLETON INSTANCE
+#===============================================================================
+
+_generator_instance: Optional['ContentGenerator'] = None
+
+
+def get_content_generator(db_manager=None) -> 'ContentGenerator':
+    """
+    Get or create the singleton ContentGenerator instance.
+    
+    Args:
+        db_manager: Database manager (optional, will use singleton if not provided)
+        
+    Returns:
+        ContentGenerator singleton instance
+    """
+    global _generator_instance
+    
+    if _generator_instance is None:
+        _generator_instance = ContentGenerator(db_manager=db_manager)
+    
+    return _generator_instance
+
+
+#===============================================================================
+# CONTENT GENERATOR
+#===============================================================================
 
 class ContentGenerator:
     """Generate content drafts from trend opportunities"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
+    def __init__(self, db_manager=None):
+        """
+        Initialize ContentGenerator.
+        
+        Args:
+            db_manager: Database manager instance (optional, will use singleton)
+        """
+        self.db = db_manager
         self.openrouter_client = None
+        logger.info("📝 Content Generator initialized")
+    
+    async def _get_db(self):
+        """Get database manager, initializing if needed"""
+        if self.db is None:
+            self.db = await get_db_manager()
+        return self.db
     
     async def _get_client(self):
         """Get or create OpenRouter client"""
         if not self.openrouter_client:
             self.openrouter_client = await get_openrouter_client()
         return self.openrouter_client
-    
-    async def get_connection(self):
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
     
     # ========================================================================
     # BLUESKY POST GENERATION
@@ -67,24 +114,24 @@ class ContentGenerator:
                 'error': str (if failed)
             }
         """
-        conn = await self.get_connection()
+        db = await self._get_db()
         
         try:
-            # Get opportunity details
-            opportunity = await conn.fetchrow('''
+            # Get opportunity details - FIXED column names to match actual schema
+            opportunity = await db.fetch_one('''
                 SELECT 
                     id,
                     keyword,
                     business_area,
                     opportunity_type,
                     urgency_level,
-                    trend_score,
+                    trend_score_at_alert as trend_score,
                     trend_momentum,
-                    business_relevance,
-                    reasoning,
-                    suggested_content_types,
-                    content_window_start,
-                    content_window_end
+                    opportunity_score as business_relevance,
+                    content_angle as reasoning,
+                    suggested_action,
+                    optimal_content_window_start as content_window_start,
+                    optimal_content_window_end as content_window_end
                 FROM trend_opportunities
                 WHERE id = $1
             ''', opportunity_id)
@@ -95,22 +142,25 @@ class ContentGenerator:
                     'error': f'Opportunity {opportunity_id} not found'
                 }
             
+            # Convert to dict for easier access
+            opp_dict = dict(opportunity)
+            
             # Get account personality
             personality = self._get_account_personality(account_id)
             
             # Get context: RSS correlations
             rss_context = await self._get_rss_context(
-                opportunity['keyword'],
-                opportunity['business_area'],
-                conn
+                opp_dict['keyword'],
+                opp_dict['business_area'],
+                db
             )
             
             # Get past successful posts for this account
-            past_posts = await self._get_successful_posts(account_id, conn)
+            past_posts = await self._get_successful_posts(account_id, db)
             
             # Build AI prompt
             prompt = self._build_bluesky_post_prompt(
-                opportunity=dict(opportunity),
+                opportunity=opp_dict,
                 personality=personality,
                 rss_context=rss_context,
                 past_posts=past_posts
@@ -123,7 +173,7 @@ class ContentGenerator:
                     {'role': 'system', 'content': 'You are an expert social media content creator.'},
                     {'role': 'user', 'content': prompt}
                 ],
-                model='anthropic/claude-3.5-sonnet',
+                model='anthropic/claude-sonnet-4-5-20250929',
                 max_tokens=500,
                 temperature=0.8
             )
@@ -135,13 +185,13 @@ class ContentGenerator:
             
             # Calculate recommendation score
             rec_score = self._calculate_recommendation_score(
-                opportunity['trend_score'],
-                opportunity['business_relevance'],
-                opportunity['urgency_level']
+                opp_dict.get('trend_score') or 0,
+                opp_dict.get('business_relevance') or 0.5,
+                opp_dict.get('urgency_level') or 'medium'
             )
             
             # Store in content_recommendation_queue
-            queue_id = await conn.fetchval('''
+            queue_id = await db.fetch_val('''
                 INSERT INTO content_recommendation_queue (
                     trend_opportunity_id,
                     content_type,
@@ -154,16 +204,16 @@ class ContentGenerator:
             ''',
                 opportunity_id,
                 'bluesky_post',
-                opportunity['business_area'],
+                opp_dict['business_area'],
                 json.dumps({
                     'text': post_text,
                     'account_id': account_id,
-                    'keyword': opportunity['keyword'],
-                    'trend_score': opportunity['trend_score'],
-                    'reasoning': opportunity['reasoning']
+                    'keyword': opp_dict['keyword'],
+                    'trend_score': opp_dict.get('trend_score'),
+                    'reasoning': opp_dict.get('reasoning')
                 }),
                 rec_score,
-                opportunity['content_window_end']
+                opp_dict.get('content_window_end')
             )
             
             logger.info(f"Generated Bluesky post for {account_id}: {post_text[:50]}...")
@@ -177,13 +227,11 @@ class ContentGenerator:
             }
             
         except Exception as e:
-            logger.error(f"Failed to generate Bluesky post: {e}")
+            logger.error(f"Failed to generate Bluesky post: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e)
             }
-        finally:
-            await conn.close()
     
     def _get_account_personality(self, account_id: str) -> Dict[str, Any]:
         """Get personality traits for a Bluesky account"""
@@ -225,6 +273,15 @@ class ContentGenerator:
                 'pg13': False,
                 'sensitive': True,
                 'religious': True
+            },
+            'amcf': {
+                'name': 'AMCF',
+                'tone': 'Professional, inspiring, community-focused',
+                'style': 'Nonprofit leadership and fundraising',
+                'topics': 'Muslim nonprofits, community building, philanthropy',
+                'pg13': False,
+                'sensitive': True,
+                'religious': True
             }
         }
         
@@ -234,11 +291,11 @@ class ContentGenerator:
         self,
         keyword: str,
         business_area: str,
-        conn: asyncpg.Connection
+        db
     ) -> List[Dict[str, Any]]:
         """Get related RSS feed insights"""
         try:
-            correlations = await conn.fetch('''
+            correlations = await db.fetch_all('''
                 SELECT 
                     insight_text,
                     actionable_idea,
@@ -251,7 +308,7 @@ class ContentGenerator:
                 LIMIT 3
             ''', keyword, business_area)
             
-            return [dict(r) for r in correlations]
+            return [dict(r) for r in correlations] if correlations else []
         except Exception as e:
             logger.warning(f"Could not fetch RSS context: {e}")
             return []
@@ -259,11 +316,11 @@ class ContentGenerator:
     async def _get_successful_posts(
         self,
         account_id: str,
-        conn: asyncpg.Connection
+        db
     ) -> List[Dict[str, Any]]:
         """Get past successful posts for learning"""
         try:
-            posts = await conn.fetch('''
+            posts = await db.fetch_all('''
                 SELECT 
                     post_text,
                     engagement_score,
@@ -277,7 +334,7 @@ class ContentGenerator:
                 LIMIT 5
             ''', account_id)
             
-            return [dict(p) for p in posts]
+            return [dict(p) for p in posts] if posts else []
         except Exception as e:
             logger.warning(f"Could not fetch past posts: {e}")
             return []
@@ -300,10 +357,10 @@ class ContentGenerator:
 - Topics: {personality['topics']}
 
 **Trend Context:**
-- Trend Score: {opportunity['trend_score']}/100
-- Momentum: {opportunity['trend_momentum']}
-- Urgency: {opportunity['urgency_level']}
-- Why it matters: {opportunity['reasoning']}
+- Trend Score: {opportunity.get('trend_score', 'N/A')}/100
+- Momentum: {opportunity.get('trend_momentum', 'unknown')}
+- Urgency: {opportunity.get('urgency_level', 'medium')}
+- Content Angle: {opportunity.get('reasoning', 'N/A')}
 
 **Constraints:**
 - Maximum 300 characters
@@ -360,11 +417,15 @@ The post should be ready to publish as-is."""
     ) -> float:
         """Calculate 0.0-1.0 recommendation score"""
         
+        # Handle None values
+        trend_score = trend_score or 0
+        business_relevance = business_relevance or 0.5
+        
         # Base score from trend strength (0-0.4)
         base = min(0.4, trend_score / 250)
         
         # Business relevance (0-0.4)
-        relevance = business_relevance * 0.4
+        relevance = float(business_relevance) * 0.4
         
         # Urgency bonus (0-0.2)
         urgency_map = {
@@ -387,7 +448,7 @@ The post should be ready to publish as-is."""
         business_area: str
     ) -> Dict[str, Any]:
         """
-        Generate a blog post outline
+        Generate a blog post outline (actually generates full post)
         
         Args:
             keyword: Main topic/keyword
@@ -396,19 +457,19 @@ The post should be ready to publish as-is."""
         Returns:
             {
                 'title': str,
-                'sections': [{'heading': str, 'points': [str]}],
-                'target_word_count': int,
-                'seo_keywords': [str]
+                'content': str,
+                'word_count': int,
+                'success': bool
             }
         """
-        conn = await self.get_connection()
+        db = await self._get_db()
         
         try:
-            # Get trend context
-            trend_data = await conn.fetchrow('''
+            # Get trend context - FIXED column name
+            trend_data = await db.fetch_one('''
                 SELECT 
                     trend_score,
-                    momentum,
+                    trend_momentum,
                     created_at
                 FROM trend_monitoring
                 WHERE keyword = $1 AND business_area = $2
@@ -417,7 +478,7 @@ The post should be ready to publish as-is."""
             ''', keyword, business_area)
             
             # Get RSS insights
-            rss_insights = await conn.fetch('''
+            rss_insights = await db.fetch_all('''
                 SELECT 
                     insight_text,
                     actionable_idea,
@@ -429,12 +490,15 @@ The post should be ready to publish as-is."""
             ''', keyword, business_area)
             
             # Build prompt
+            trend_score = trend_data['trend_score'] if trend_data else 'N/A'
+            trend_momentum = trend_data['trend_momentum'] if trend_data else 'unknown'
+            
             prompt = f"""Create a blog post outline about: "{keyword}"
 
 **Context:**
 - Business: {business_area}
-- Current trend score: {trend_data['trend_score'] if trend_data else 'N/A'}
-- Trend momentum: {trend_data['momentum'] if trend_data else 'unknown'}
+- Current trend score: {trend_score}
+- Trend momentum: {trend_momentum}
 
 **CRITICAL REQUIREMENTS:**
 - MINIMUM 1200 words (this is NON-NEGOTIABLE)
@@ -451,7 +515,8 @@ The post should be ready to publish as-is."""
             if rss_insights:
                 prompt += "**Related Industry Insights:**\n"
                 for insight in rss_insights:
-                    prompt += f"- {insight['insight_text']}\n"
+                    insight_dict = dict(insight)
+                    prompt += f"- {insight_dict['insight_text']}\n"
             
             prompt += """\n**Output Format:**
 Write the complete blog post as formatted markdown with:
@@ -479,15 +544,15 @@ SEO Keywords: keyword1, keyword2, keyword3, etc.
 
 REMINDER: This must be a COMPLETE blog post with full paragraphs, not an outline. Minimum 1200 words."""
             
-            # Generate outline
+            # Generate blog post
             client = await self._get_client()
             response = await client.chat_completion(
                 messages=[
                     {'role': 'system', 'content': 'You are an expert blog writer who creates comprehensive, SEO-optimized content. You ALWAYS meet word count requirements and write in full paragraphs, never outlines.'},
                     {'role': 'user', 'content': prompt}
                 ],
-                model='anthropic/claude-3.5-sonnet',  # Force Claude for quality
-                max_tokens=4000,  # Increased for longer content
+                model='anthropic/claude-sonnet-4-5-20250929',
+                max_tokens=4000,
                 temperature=0.7
             )
             
@@ -508,10 +573,8 @@ REMINDER: This must be a COMPLETE blog post with full paragraphs, not an outline
             }
             
         except Exception as e:
-            logger.error(f"Failed to generate blog outline: {e}")
+            logger.error(f"Failed to generate blog outline: {e}", exc_info=True)
             raise
-        finally:
-            await conn.close()
     
     async def generate_blog_post(
         self,
@@ -536,11 +599,12 @@ REMINDER: This must be a COMPLETE blog post with full paragraphs, not an outline
                 'seo_metadata': dict
             }
         """
-        conn = await self.get_connection()
+        db = await self._get_db()
         
         try:
             # Generate each section
             sections_content = []
+            client = await self._get_client()
             
             # Introduction
             intro_prompt = f"""Write the introduction section for this blog post:
@@ -556,7 +620,6 @@ Write 2-3 paragraphs (150-200 words) that:
 
 Output only the introduction paragraphs, no headings or meta-commentary."""
             
-            client = await self._get_client()
             intro_response = await client.chat_completion(
                 messages=[{'role': 'user', 'content': intro_prompt}],
                 model='anthropic/claude-sonnet-4-5-20250929',
@@ -584,7 +647,7 @@ Output only the section content, no heading (I'll add that)."""
                 
                 section_response = await client.chat_completion(
                     messages=[{'role': 'user', 'content': section_prompt}],
-                    model='anthropic/claude-3.5-sonnet',
+                    model='anthropic/claude-sonnet-4-5-20250929',
                     max_tokens=600,
                     temperature=0.7
                 )
@@ -609,7 +672,7 @@ Output only the conclusion paragraphs."""
             
             conclusion_response = await client.chat_completion(
                 messages=[{'role': 'user', 'content': conclusion_prompt}],
-                model='anthropic/claude-3.5-sonnet',
+                model='anthropic/claude-sonnet-4-5-20250929',
                 max_tokens=400,
                 temperature=0.7
             )
@@ -633,7 +696,7 @@ Output only the conclusion paragraphs."""
             rec_score = 0.85  # High confidence for blog posts
             
             # Store in content_recommendation_queue
-            queue_id = await conn.fetchval('''
+            queue_id = await db.fetch_val('''
                 INSERT INTO content_recommendation_queue (
                     content_type,
                     business_area,
@@ -665,21 +728,22 @@ Output only the conclusion paragraphs."""
             }
             
         except Exception as e:
-            logger.error(f"Failed to generate blog post: {e}")
+            logger.error(f"Failed to generate blog post: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e)
             }
-        finally:
-            await conn.close()
 
 
-# Convenience function
-async def get_content_generator(database_url: str = None) -> ContentGenerator:
-    """Get content generator instance"""
-    if not database_url:
-        database_url = os.getenv('DATABASE_URL')
-    return ContentGenerator(database_url)
+#===============================================================================
+# MODULE EXPORTS
+#===============================================================================
+
+__all__ = [
+    'ContentGenerator',
+    'get_content_generator',
+    'USER_ID'
+]
 
 
 # Test script
@@ -690,7 +754,7 @@ if __name__ == "__main__":
             print("❌ DATABASE_URL not set")
             return
         
-        generator = await get_content_generator(database_url)
+        generator = get_content_generator()
         
         print("🧪 Testing blog outline generation...")
         outline = await generator.generate_blog_outline(
@@ -698,8 +762,8 @@ if __name__ == "__main__":
             business_area="damnitcarl"
         )
         
-        print(f"\n✅ Generated outline: {outline['title']}")
-        print(f"Sections: {len(outline['sections'])}")
-        print(f"Target words: {outline['target_word_count']}")
+        print(f"\n✅ Generated outline")
+        print(f"Word count: {outline['word_count']}")
+        print(f"Success: {outline['success']}")
     
     asyncio.run(test())

@@ -9,17 +9,19 @@ Key Features:
 - User feedback processing (good/bad match training)
 - Cross-system data integration (RSS correlation)
 - Analytics and reporting queries
+
+FIXED: Now uses centralized db_manager instead of direct asyncpg.connect()
 """
 
-import asyncio
-import asyncpg
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, date
-import json
 import logging
 from dataclasses import dataclass
 
+from ...core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TrendAlert:
@@ -34,6 +36,7 @@ class TrendAlert:
     processed: bool = False
     user_feedback: Optional[str] = None
 
+
 @dataclass
 class TrendSummary:
     """Summary of trend activity for a business area"""
@@ -45,15 +48,14 @@ class TrendSummary:
     avg_trend_score: float
     top_keywords: List[Tuple[str, int]]
 
+
 class TrendsDatabase:
     """Manages all database operations for Google Trends system"""
     
-    def __init__(self, database_url: str):
-        self.database_url = database_url
-    
-    async def get_connection(self) -> asyncpg.Connection:
-        """Get database connection"""
-        return await asyncpg.connect(self.database_url)
+    def __init__(self):
+        """Initialize TrendsDatabase - uses centralized db_manager"""
+        # No database_url needed - we use the centralized db_manager
+        pass
     
     # ============================================================================
     # TREND DATA MANAGEMENT
@@ -64,13 +66,11 @@ class TrendsDatabase:
                             regional_score: Optional[int] = None,
                             trend_date: Optional[date] = None) -> bool:
         """Save trend data to database"""
-        conn = await self.get_connection()
-        
         try:
             if trend_date is None:
                 trend_date = date.today()
             
-            await conn.execute('''
+            await db_manager.execute('''
                 INSERT INTO trend_monitoring 
                 (keyword, business_area, trend_score, trend_date, trend_momentum,
                  regional_score, region, created_at, updated_at)
@@ -91,14 +91,10 @@ class TrendsDatabase:
         except Exception as e:
             logger.error(f"Failed to save trend data for {keyword}: {e}")
             return False
-        finally:
-            await conn.close()
     
     async def get_recent_trends(self, business_area: Optional[str] = None,
                               days: int = 7, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent trend data"""
-        conn = await self.get_connection()
-        
         try:
             if business_area:
                 query = '''
@@ -109,7 +105,12 @@ class TrendsDatabase:
                     ORDER BY trend_score DESC, created_at DESC
                     LIMIT $3
                 '''
-                params = [date.today() - timedelta(days=days), business_area, limit]
+                rows = await db_manager.fetch_all(
+                    query,
+                    date.today() - timedelta(days=days),
+                    business_area,
+                    limit
+                )
             else:
                 query = '''
                     SELECT keyword, business_area, trend_score, trend_date, 
@@ -119,20 +120,21 @@ class TrendsDatabase:
                     ORDER BY trend_score DESC, created_at DESC
                     LIMIT $2
                 '''
-                params = [date.today() - timedelta(days=days), limit]
-            
-            rows = await conn.fetch(query, *params)
+                rows = await db_manager.fetch_all(
+                    query,
+                    date.today() - timedelta(days=days),
+                    limit
+                )
             
             return [dict(row) for row in rows]
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get recent trends: {e}")
+            return []
     
     async def get_trending_keywords(self, business_area: str,
                                   min_score: int = 20, days: int = 3) -> List[Dict[str, Any]]:
         """Get currently trending keywords for a business area"""
-        conn = await self.get_connection()
-        
         try:
             query = '''
                 SELECT keyword, trend_score, trend_momentum, trend_date,
@@ -145,7 +147,7 @@ class TrendsDatabase:
                 LIMIT 20
             '''
             
-            rows = await conn.fetch(
+            rows = await db_manager.fetch_all(
                 query,
                 business_area,
                 date.today() - timedelta(days=days),
@@ -154,8 +156,9 @@ class TrendsDatabase:
             
             return [dict(row) for row in rows]
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get trending keywords: {e}")
+            return []
     
     # ============================================================================
     # OPPORTUNITY ALERTS MANAGEMENT
@@ -166,9 +169,10 @@ class TrendsDatabase:
                                      trend_momentum: str, trend_score: int,
                                      content_window_hours: int = 48) -> str:
         """Create a new trend opportunity alert"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             window_start = datetime.now()
             window_end = window_start + timedelta(hours=content_window_hours)
             
@@ -197,36 +201,44 @@ class TrendsDatabase:
             logger.error(f"Failed to create opportunity alert: {e}")
             return ""
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_unprocessed_alerts(self, urgency_level: Optional[str] = None) -> List[TrendAlert]:
         """Get unprocessed opportunity alerts"""
-        conn = await self.get_connection()
-        
         try:
-            where_clause = "WHERE processed = FALSE"
-            params = []
-            
             if urgency_level:
-                where_clause += " AND urgency_level = $1"
-                params.append(urgency_level)
-            
-            query = f'''
-                SELECT id, keyword, business_area, opportunity_type, urgency_level,
-                       trend_score_at_alert, created_at, processed, user_feedback
-                FROM trend_opportunities 
-                {where_clause}
-                ORDER BY 
-                    CASE urgency_level 
-                        WHEN 'high' THEN 1 
-                        WHEN 'medium' THEN 2 
-                        ELSE 3 
-                    END,
-                    created_at DESC
-                LIMIT 50
-            '''
-            
-            rows = await conn.fetch(query, *params)
+                query = '''
+                    SELECT id, keyword, business_area, opportunity_type, urgency_level,
+                           trend_score_at_alert, created_at, processed, user_feedback
+                    FROM trend_opportunities 
+                    WHERE processed = FALSE AND urgency_level = $1
+                    ORDER BY 
+                        CASE urgency_level 
+                            WHEN 'high' THEN 1 
+                            WHEN 'medium' THEN 2 
+                            ELSE 3 
+                        END,
+                        created_at DESC
+                    LIMIT 50
+                '''
+                rows = await db_manager.fetch_all(query, urgency_level)
+            else:
+                query = '''
+                    SELECT id, keyword, business_area, opportunity_type, urgency_level,
+                           trend_score_at_alert, created_at, processed, user_feedback
+                    FROM trend_opportunities 
+                    WHERE processed = FALSE
+                    ORDER BY 
+                        CASE urgency_level 
+                            WHEN 'high' THEN 1 
+                            WHEN 'medium' THEN 2 
+                            ELSE 3 
+                        END,
+                        created_at DESC
+                    LIMIT 50
+                '''
+                rows = await db_manager.fetch_all(query)
             
             alerts = []
             for row in rows:
@@ -244,15 +256,14 @@ class TrendsDatabase:
             
             return alerts
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get unprocessed alerts: {e}")
+            return []
     
     async def mark_alert_processed(self, alert_id: str, user_feedback: Optional[str] = None) -> bool:
         """Mark an alert as processed with optional user feedback"""
-        conn = await self.get_connection()
-        
         try:
-            await conn.execute('''
+            await db_manager.execute('''
                 UPDATE trend_opportunities 
                 SET processed = TRUE, 
                     user_feedback = $2,
@@ -265,8 +276,6 @@ class TrendsDatabase:
         except Exception as e:
             logger.error(f"Failed to mark alert {alert_id} as processed: {e}")
             return False
-        finally:
-            await conn.close()
     
     # ============================================================================
     # ANALYTICS AND REPORTING
@@ -274,9 +283,9 @@ class TrendsDatabase:
     
     async def get_business_area_summary(self, business_area: str, days: int = 7) -> TrendSummary:
         """Get comprehensive summary for a business area"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
             cutoff_date = date.today() - timedelta(days=days)
             
             # Total keywords monitored
@@ -337,14 +346,24 @@ class TrendsDatabase:
                 top_keywords=top_keywords
             )
             
+        except Exception as e:
+            logger.error(f"Failed to get business area summary: {e}")
+            return TrendSummary(
+                business_area=business_area,
+                total_keywords_monitored=0,
+                trending_keywords=0,
+                high_priority_alerts=0,
+                recent_opportunities=0,
+                avg_trend_score=0.0,
+                top_keywords=[]
+            )
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_trend_momentum_analysis(self, keyword: str, business_area: str,
                                         days: int = 14) -> Dict[str, Any]:
         """Analyze trend momentum for a specific keyword"""
-        conn = await self.get_connection()
-        
         try:
             query = '''
                 SELECT trend_date, trend_score, trend_momentum, regional_score
@@ -354,7 +373,7 @@ class TrendsDatabase:
                 ORDER BY trend_date ASC
             '''
             
-            rows = await conn.fetch(
+            rows = await db_manager.fetch_all(
                 query, keyword, business_area,
                 date.today() - timedelta(days=days)
             )
@@ -410,8 +429,9 @@ class TrendsDatabase:
                 ]
             }
             
-        finally:
-            await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get trend momentum analysis: {e}")
+            return {}
     
     # ============================================================================
     # USER FEEDBACK AND TRAINING
@@ -420,14 +440,15 @@ class TrendsDatabase:
     async def record_user_feedback(self, alert_id: str, feedback: str,
                                  feedback_details: Optional[str] = None) -> bool:
         """Record user feedback for training the system"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
             # Validate feedback
             valid_feedback = ['good_match', 'bad_match', 'relevant', 'irrelevant']
             if feedback not in valid_feedback:
                 logger.warning(f"Invalid feedback value: {feedback}")
                 return False
+            
+            conn = await db_manager.get_connection()
             
             await conn.execute('''
                 UPDATE trend_opportunities 
@@ -453,13 +474,14 @@ class TrendsDatabase:
             logger.error(f"Failed to record feedback: {e}")
             return False
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def get_feedback_statistics(self, days: int = 30) -> Dict[str, Any]:
         """Get feedback statistics for system improvement"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
             cutoff_date = datetime.now() - timedelta(days=days)
             
             # Overall feedback counts
@@ -495,16 +517,25 @@ class TrendsDatabase:
                 'urgency_level_feedback': [dict(row) for row in urgency_feedback]
             }
             
+        except Exception as e:
+            logger.error(f"Failed to get feedback statistics: {e}")
+            return {
+                'feedback_period_days': days,
+                'overall_feedback': {},
+                'business_area_feedback': [],
+                'urgency_level_feedback': []
+            }
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     # ============================================================================
     # UTILITY METHODS
     # ============================================================================
     
-    async def _calculate_momentum_change(self, conn: asyncpg.Connection,
+    async def _calculate_momentum_change(self, conn,
                                        keyword: str, business_area: str) -> Optional[float]:
-        """Calculate momentum change percentage"""
+        """Calculate momentum change percentage (uses passed connection)"""
         try:
             # Get last two trend scores
             rows = await conn.fetch('''
@@ -530,24 +561,30 @@ class TrendsDatabase:
     
     async def cleanup_old_data(self, days_to_keep: int = 90) -> int:
         """Clean up old trend data to manage database size"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
             cutoff_date = date.today() - timedelta(days=days_to_keep)
             
             # Delete old trend monitoring data
             deleted_trends = await conn.fetchval('''
-                DELETE FROM trend_monitoring 
-                WHERE trend_date < $1
-                RETURNING (SELECT COUNT(*) FROM trend_monitoring WHERE trend_date < $1)
+                WITH deleted AS (
+                    DELETE FROM trend_monitoring 
+                    WHERE trend_date < $1
+                    RETURNING 1
+                )
+                SELECT COUNT(*) FROM deleted
             ''', cutoff_date)
             
             # Keep opportunity alerts longer (1 year)
             alert_cutoff = datetime.now() - timedelta(days=365)
             deleted_alerts = await conn.fetchval('''
-                DELETE FROM trend_opportunities 
-                WHERE created_at < $1 AND processed = TRUE
-                RETURNING (SELECT COUNT(*) FROM trend_opportunities WHERE created_at < $1 AND processed = TRUE)
+                WITH deleted AS (
+                    DELETE FROM trend_opportunities 
+                    WHERE created_at < $1 AND processed = TRUE
+                    RETURNING 1
+                )
+                SELECT COUNT(*) FROM deleted
             ''', alert_cutoff)
             
             total_deleted = (deleted_trends or 0) + (deleted_alerts or 0)
@@ -555,14 +592,19 @@ class TrendsDatabase:
             
             return total_deleted
             
+        except Exception as e:
+            logger.error(f"Failed to cleanup old data: {e}")
+            return 0
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
     
     async def health_check(self) -> Dict[str, Any]:
         """Check database health and system status"""
-        conn = await self.get_connection()
-        
+        conn = None
         try:
+            conn = await db_manager.get_connection()
+            
             # Check table existence and basic stats
             tables_check = await conn.fetch('''
                 SELECT table_name 
@@ -606,46 +648,20 @@ class TrendsDatabase:
                 'last_check': datetime.now().isoformat()
             }
         finally:
-            await conn.close()
+            if conn:
+                await db_manager.release_connection(conn)
+
 
 # ============================================================================
-# TESTING AND UTILITIES
+# SINGLETON GETTER
 # ============================================================================
 
-async def test_database_manager():
-    """Test the database manager functionality"""
-    import os
-    database_url = os.getenv('DATABASE_URL', 'postgresql://localhost/syntaxprime_v2')
-    
-    db = TrendsDatabase(database_url)
-    
-    print("🧪 TESTING TRENDS DATABASE MANAGER")
-    print("=" * 45)
-    
-    # Test health check
-    print("\n🏥 Health check...")
-    health = await db.health_check()
-    print(f"   Database connected: {health['database_connected']}")
-    print(f"   Tables exist: {health['tables_exist']}")
-    print(f"   Recent trends (24h): {health['recent_trends_24h']}")
-    print(f"   Unprocessed alerts: {health['unprocessed_alerts']}")
-    
-    # Test business area summary
-    print("\n📊 Business area summary for 'tvsignals'...")
-    summary = await db.get_business_area_summary('tvsignals')
-    print(f"   Keywords monitored: {summary.total_keywords_monitored}")
-    print(f"   Trending keywords: {summary.trending_keywords}")
-    print(f"   High priority alerts: {summary.high_priority_alerts}")
-    print(f"   Average trend score: {summary.avg_trend_score:.1f}")
-    print(f"   Top keywords: {summary.top_keywords[:3]}")
-    
-    # Test recent trends
-    print("\n📈 Recent trends...")
-    recent = await db.get_recent_trends(business_area='tvsignals', limit=5)
-    for trend in recent:
-        print(f"   {trend['keyword']}: Score {trend['trend_score']} ({trend['trend_momentum']})")
-    
-    print("\n✅ Database manager test complete!")
+_trends_database: Optional[TrendsDatabase] = None
 
-if __name__ == "__main__":
-    asyncio.run(test_database_manager())
+
+def get_trends_database() -> TrendsDatabase:
+    """Get or create the TrendsDatabase singleton instance"""
+    global _trends_database
+    if _trends_database is None:
+        _trends_database = TrendsDatabase()
+    return _trends_database

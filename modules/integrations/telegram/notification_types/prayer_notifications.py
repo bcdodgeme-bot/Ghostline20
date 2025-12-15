@@ -7,11 +7,12 @@ Sends proactive prayer time reminders via Telegram
 import logging
 from datetime import datetime, time, timedelta
 from typing import Optional, Dict, Any
-
-from ....core.database import db_manager
 from zoneinfo import ZoneInfo
 
+from ....core.database import db_manager
+
 logger = logging.getLogger(__name__)
+
 
 class PrayerNotificationHandler:
     """
@@ -43,8 +44,6 @@ class PrayerNotificationHandler:
             from ..database_manager import TelegramDatabaseManager
             self._db_manager = TelegramDatabaseManager()
         return self._db_manager
-        
-        
     
     async def check_and_notify(self) -> bool:
         """
@@ -62,7 +61,6 @@ class PrayerNotificationHandler:
                 return False
             
             # Check each prayer
-            from zoneinfo import ZoneInfo
             eastern = ZoneInfo('America/New_York')
             now = datetime.now(eastern)
             current_time = now.time()
@@ -169,7 +167,7 @@ class PrayerNotificationHandler:
         await self.notification_manager.send_notification(
             user_id=self.user_id,
             notification_type='prayer',
-            notification_subtype='initial',
+            notification_subtype='reminder',
             message_text=message,
             buttons=[[
                 {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
@@ -199,14 +197,20 @@ class PrayerNotificationHandler:
             
             message += "\n_You'll receive reminders 15 minutes before each prayer_ 🔔"
             
+            # Metadata for tracking - THIS WAS MISSING!
+            metadata = {
+                'schedule_type': 'daily',
+                'notification_time': datetime.now().isoformat()
+            }
+            
             # Send schedule
             await self.notification_manager.send_notification(
                 user_id=self.user_id,
                 notification_type='prayer',
-                notification_subtype='initial',
+                notification_subtype='daily_schedule',
                 message_text=message,
                 buttons=[[
-                    {"text": "✅ Prayed", "callback_data": f"prayer:prayed:{self.user_id}"}
+                    {"text": "✅ Got it", "callback_data": f"prayer:acknowledged:{self.user_id}"}
                 ]],
                 message_data=metadata
             )

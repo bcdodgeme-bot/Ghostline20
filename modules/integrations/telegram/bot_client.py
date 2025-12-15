@@ -5,10 +5,13 @@ Handles all communication with Telegram Bot API
 """
 
 import logging
-import aiohttp
+import os
 from typing import Dict, List, Optional, Any
 
+import aiohttp
+
 logger = logging.getLogger(__name__)
+
 
 class TelegramBotClient:
     """Wrapper for Telegram Bot API operations"""
@@ -20,11 +23,11 @@ class TelegramBotClient:
         Args:
             bot_token: Telegram bot token from BotFather
         """
-        self.bot_token = bot_token
-        self.base_url = f"https://api.telegram.org/bot{bot_token}"
-        
         if not bot_token:
             raise ValueError("bot_token is required")
+            
+        self.bot_token = bot_token
+        self.base_url = f"https://api.telegram.org/bot{bot_token}"
         
         logger.info("Telegram Bot Client initialized")
     
@@ -42,6 +45,26 @@ class TelegramBotClient:
         return {
             "inline_keyboard": buttons
         }
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        """
+        Test connection to Telegram API
+        
+        Returns:
+            Dict with 'success' bool and 'bot_info' or 'error'
+        """
+        try:
+            bot_info = await self.get_me()
+            return {
+                'success': True,
+                'bot_info': bot_info
+            }
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     async def get_me(self) -> Dict[str, Any]:
         """
@@ -214,8 +237,6 @@ class TelegramBotClient:
         Returns:
             True if successful
         """
-        import os
-        
         # Get chat_id from environment
         chat_id = os.getenv('TELEGRAM_CHAT_ID')
         if not chat_id:
@@ -261,3 +282,31 @@ class TelegramBotClient:
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
             return False
+
+
+# Global singleton instance
+_bot_client: Optional[TelegramBotClient] = None
+
+
+def get_bot_client() -> TelegramBotClient:
+    """
+    Get the global Telegram bot client instance (singleton pattern)
+    
+    Returns:
+        TelegramBotClient instance
+        
+    Raises:
+        ValueError: If TELEGRAM_BOT_TOKEN environment variable is not set
+    """
+    global _bot_client
+    
+    if _bot_client is None:
+        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            raise ValueError(
+                "TELEGRAM_BOT_TOKEN environment variable is not set. "
+                "Please configure it in your Railway environment."
+            )
+        _bot_client = TelegramBotClient(bot_token)
+    
+    return _bot_client

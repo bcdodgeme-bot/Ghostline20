@@ -4,13 +4,14 @@ Health Monitor for Weather-Based Alerts
 Pressure tracking for headaches and UV monitoring for sun sensitivity
 """
 
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
+from datetime import datetime
 import logging
 
 from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
 
 class HealthMonitor:
     """Monitor weather conditions for health impacts"""
@@ -25,17 +26,18 @@ class HealthMonitor:
     
     async def get_pressure_history(self, user_id: str, hours_back: int = 3) -> Optional[float]:
         """Get pressure reading from X hours ago"""
+        # Use parameterized interval - make_interval() is PostgreSQL safe
         query = """
-        SELECT pressure_surface_level 
-        FROM weather_readings 
-        WHERE user_id = $1 
-        AND timestamp <= NOW() - INTERVAL '%s hours'
-        ORDER BY timestamp DESC 
-        LIMIT 1;
-        """ % hours_back
+            SELECT pressure_surface_level 
+            FROM weather_readings 
+            WHERE user_id = $1 
+            AND timestamp <= NOW() - make_interval(hours => $2)
+            ORDER BY timestamp DESC 
+            LIMIT 1;
+        """
         
         try:
-            result = await db_manager.fetch_one(query, user_id)
+            result = await db_manager.fetch_one(query, user_id, hours_back)
             return float(result['pressure_surface_level']) if result else None
         except Exception as e:
             logger.error(f"Failed to get pressure history: {e}")
@@ -74,9 +76,9 @@ class HealthMonitor:
         
         # Pressure-based headache alerts
         pressure_change = weather_data.get('pressure_change_3h')
-        if headache_risk == "high":
+        if headache_risk == "high" and pressure_change is not None:
             alerts.append(f"HEADACHE ALERT: Significant pressure drop detected ({pressure_change:.1f} mbar)")
-        elif headache_risk == "moderate":
+        elif headache_risk == "moderate" and pressure_change is not None:
             alerts.append(f"Moderate headache risk: Pressure dropping ({pressure_change:.1f} mbar)")
         
         # UV-based sun protection alerts
