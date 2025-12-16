@@ -29,7 +29,7 @@ class iOSDatabaseManager:
     _instance = None
     
     def __init__(self):
-        self.db = get_db_manager()
+        self.db = db_manager
     
     # =========================================================================
     # DEVICE MANAGEMENT
