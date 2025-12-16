@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
-from modules.database.db_manager import get_db_manager
+from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
