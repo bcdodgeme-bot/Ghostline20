@@ -2,6 +2,8 @@
 """
 Prayer Times Notification Handler
 Sends proactive prayer time reminders via Telegram
+
+FIXED: 2025-12-16 - Changed advance time to 18 minutes, added cache refresh fallback
 """
 
 import logging
@@ -19,7 +21,7 @@ class PrayerNotificationHandler:
     Handles prayer time notifications
     
     Checks every 5 minutes for upcoming prayer times
-    Sends notification 15 minutes before each prayer
+    Sends notification 18 minutes before each prayer
     """
     
     def __init__(self, notification_manager):
@@ -58,7 +60,11 @@ class PrayerNotificationHandler:
             
             if not prayer_times:
                 logger.warning("No prayer times found in cache for today")
-                return False
+                # Try to refresh the cache
+                prayer_times = await self._refresh_prayer_cache()
+                if not prayer_times:
+                    logger.error("Failed to refresh prayer times cache")
+                    return False
             
             # Check each prayer
             eastern = ZoneInfo('America/New_York')
@@ -69,8 +75,8 @@ class PrayerNotificationHandler:
                 if prayer_name not in self.prayer_names:
                     continue
                 
-                # Calculate notification time (15 minutes before prayer)
-                notification_time = self._subtract_minutes(prayer_time, 15)
+                # Calculate notification time (18 minutes before prayer)
+                notification_time = self._subtract_minutes(prayer_time, 18)
                 
                 # Check if we should send notification now
                 # (within 5 minute window from notification time)
@@ -109,6 +115,27 @@ class PrayerNotificationHandler:
             'maghrib': result['maghrib_time'],
             'isha': result['isha_time']
         }
+    
+    async def _refresh_prayer_cache(self) -> Optional[Dict[str, time]]:
+        """
+        Refresh prayer times cache by fetching from API
+        Called when cache is empty (e.g., after midnight)
+        """
+        try:
+            from ....integrations.prayer_times.database_manager import get_prayer_database_manager
+            
+            prayer_manager = await get_prayer_database_manager()
+            result = await prayer_manager.get_todays_prayer_times()
+            
+            if result and result.get('prayer_times'):
+                logger.info("✅ Successfully refreshed prayer times cache")
+                return result['prayer_times']
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh prayer cache: {e}")
+            return None
     
     async def _check_if_sent_today(self, prayer_name: str) -> bool:
         """Check if notification was already sent today for this prayer"""
@@ -153,7 +180,7 @@ class PrayerNotificationHandler:
         # Create message
         message = f"🕌 *{display_name} Prayer Reminder*\n\n"
         message += f"Prayer time is at *{formatted_time}*\n"
-        message += f"_15 minutes from now_\n\n"
+        message += f"_18 minutes from now_\n\n"
         message += "May Allah accept your prayers 🤲"
         
         # Metadata for tracking
@@ -183,7 +210,10 @@ class PrayerNotificationHandler:
             prayer_times = await self._get_todays_prayer_times()
             
             if not prayer_times:
-                return False
+                # Try to refresh cache first
+                prayer_times = await self._refresh_prayer_cache()
+                if not prayer_times:
+                    return False
             
             # Build schedule message
             message = "🕌 *Today's Prayer Times*\n\n"
@@ -195,9 +225,9 @@ class PrayerNotificationHandler:
                     formatted_time = prayer_time.strftime("%I:%M %p").lstrip('0')
                     message += f"• *{display_name}*: {formatted_time}\n"
             
-            message += "\n_You'll receive reminders 15 minutes before each prayer_ 🔔"
+            message += "\n_You'll receive reminders 18 minutes before each prayer_ 🔔"
             
-            # Metadata for tracking - THIS WAS MISSING!
+            # Metadata for tracking
             metadata = {
                 'schedule_type': 'daily',
                 'notification_time': datetime.now().isoformat()

@@ -5,6 +5,7 @@ UPDATED: Added Contextual Intelligence Layer handlers
 FIXED: Corrected database connection patterns (db_manager instead of asyncpg.connect)
 FIXED: 2025-12-15 - Added html.escape() for user content to prevent Telegram parse errors
 FIXED: 2025-12-15 - Corrected button format (list not dict) in all handlers
+FIXED: 2025-12-16 - Corrected table name (trend_opportunities) and column names for trend callbacks
 """
 
 import os
@@ -1084,6 +1085,7 @@ class CallbackHandler:
 
     # ========================================================================
     # TREND CALLBACKS
+    # FIXED: 2025-12-16 - Corrected table name and column names
     # ========================================================================
     
     async def _handle_trend_callback(
@@ -1100,6 +1102,7 @@ class CallbackHandler:
             - draft: Generate a Bluesky post draft for this trend
             - skip: Dismiss this trend opportunity
             - details: Show more details about the trend
+            - research: Research this trend (placeholder)
         """
         
         if action == 'draft':
@@ -1113,14 +1116,14 @@ class CallbackHandler:
                 # Create draft using approval system
                 approval_system = get_approval_system()
                 
-                # Fetch trend details
+                # Fetch trend details from correct table with correct columns
                 conn = await db_manager.get_connection()
                 try:
                     trend = await conn.fetchrow('''
-                        SELECT keyword, trend_score, area_id
-                        FROM google_trends_opportunities
+                        SELECT keyword, trend_score_at_alert, business_area
+                        FROM trend_opportunities
                         WHERE id = $1
-                    ''', UUID(opportunity_id))
+                    ''', int(opportunity_id))
                     
                     if not trend:
                         await self.bot_client.edit_message(
@@ -1132,12 +1135,12 @@ class CallbackHandler:
                     
                     keyword = trend['keyword']
                     
-                    # Mark as drafting
+                    # Mark as processed
                     await conn.execute('''
-                        UPDATE google_trends_opportunities
-                        SET status = 'drafting', updated_at = NOW()
+                        UPDATE trend_opportunities
+                        SET processed = true
                         WHERE id = $1
-                    ''', UUID(opportunity_id))
+                    ''', int(opportunity_id))
                     
                 finally:
                     await db_manager.release_connection(conn)
@@ -1168,10 +1171,10 @@ class CallbackHandler:
                 conn = await db_manager.get_connection()
                 
                 await conn.execute('''
-                    UPDATE google_trends_opportunities
-                    SET status = 'dismissed', updated_at = NOW()
+                    UPDATE trend_opportunities
+                    SET processed = true
                     WHERE id = $1
-                ''', UUID(opportunity_id))
+                ''', int(opportunity_id))
                 
                 await self.bot_client.edit_message(
                     message_id,
@@ -1198,23 +1201,23 @@ class CallbackHandler:
                 conn = await db_manager.get_connection()
                 
                 trend = await conn.fetchrow('''
-                    SELECT keyword, trend_score, area_id, detected_at
-                    FROM google_trends_opportunities
+                    SELECT keyword, trend_score_at_alert, business_area, created_at
+                    FROM trend_opportunities
                     WHERE id = $1
-                ''', UUID(opportunity_id))
+                ''', int(opportunity_id))
                 
                 if not trend:
                     return {"success": False, "ack_text": "Not found"}
                 
                 keyword = html.escape(str(trend['keyword'] or ''))
-                area = html.escape(str(trend['area_id'] or 'unknown'))
-                score = trend['trend_score'] or 0
-                detected = trend['detected_at'].strftime('%b %d at %I:%M %p') if trend['detected_at'] else 'Unknown'
+                area = html.escape(str(trend['business_area'] or 'unknown'))
+                score = trend['trend_score_at_alert'] or 0
+                detected = trend['created_at'].strftime('%b %d at %I:%M %p') if trend['created_at'] else 'Unknown'
                 
                 details = f"""📈 <b>Trend Details</b>
 
 <b>Keyword:</b> {keyword}
-<b>Area:</b> {area}
+<b>Business Area:</b> {area}
 <b>Score:</b> {score}
 <b>Detected:</b> {detected}
 """
@@ -1234,6 +1237,15 @@ class CallbackHandler:
             finally:
                 if conn:
                     await db_manager.release_connection(conn)
+        
+        elif action == 'research':
+            # Placeholder for research action
+            await self.bot_client.edit_message(
+                message_id,
+                "🔍 Research feature coming soon...",
+                reply_markup=None
+            )
+            return {"success": True, "ack_text": "Research"}
         
         return {"success": False, "error": "Unknown trend action"}
 

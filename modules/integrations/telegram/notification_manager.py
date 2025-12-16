@@ -25,8 +25,9 @@ RATE_LIMITS = {
     'bluesky': 100,
     'trends': 100,
     'analytics': 100,
-    'intelligence': 1000,  # ← ADD THIS - High limit for situation notifications
-    'fathom': 100
+    'intelligence': 1000,  # High limit for situation notifications
+    'fathom': 100,
+    'engagement': 100  # Added - was causing "Invalid notification type" errors
 }
 
 class NotificationManager:
@@ -90,14 +91,14 @@ class NotificationManager:
                 "blocked_by": "preferences"
             }
         
-        # SAFETY CHECK 3: Quiet hours
-        if await self._is_quiet_hours(user_id, notification_type):
-            logger.info(f"Notification blocked by quiet hours: {notification_type}")
-            return {
-                "success": False,
-                "error": "Quiet hours active",
-                "blocked_by": "quiet_hours"
-            }
+        # SAFETY CHECK 3: Quiet hours - DISABLED (phone handles Do Not Disturb)
+        # if await self._is_quiet_hours(user_id, notification_type):
+        #     logger.info(f"Notification blocked by quiet hours: {notification_type}")
+        #     return {
+        #         "success": False,
+        #         "error": "Quiet hours active",
+        #         "blocked_by": "quiet_hours"
+        #     }
         
         # SAFETY CHECK 4: Rate limiting
         if not await self._check_rate_limit(user_id, notification_type):
@@ -213,30 +214,11 @@ class NotificationManager:
         """
         Check if current time is within user's quiet hours
         
-        Emergency weather notifications bypass quiet hours
+        DISABLED: Phone handles Do Not Disturb mode now.
+        Keeping method for potential future use.
         """
-        # Emergency weather always allowed
-        if notification_type in ['weather', 'prayer']:
-            return False
-        
-        prefs = await self.db_manager.get_user_preferences(user_id)
-        if not prefs:
-            return False
-        
-        quiet_start = prefs.get('quiet_hours_start')
-        quiet_end = prefs.get('quiet_hours_end')
-        
-        if not quiet_start or not quiet_end:
-            return False
-        
-        eastern = ZoneInfo('America/New_York')
-        now = datetime.now(eastern).time()
-        
-        # Handle overnight quiet hours (e.g., 23:00 to 07:00)
-        if quiet_start > quiet_end:
-            return now >= quiet_start or now <= quiet_end
-        else:
-            return quiet_start <= now <= quiet_end
+        # Quiet hours disabled - phone handles DND
+        return False
     
     async def _check_rate_limit(
         self,
@@ -287,7 +269,8 @@ class NotificationManager:
                 'fathom': 'Meeting Summaries',
                 'email': 'Email Notifications',
                 'calendar': 'Calendar Alerts',
-                'reminders': 'Reminders'
+                'reminders': 'Reminders',
+                'engagement': 'Engagement Opportunities'
             }
             
             # Bluesky gets individual threads per draft

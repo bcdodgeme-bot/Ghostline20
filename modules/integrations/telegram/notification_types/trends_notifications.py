@@ -4,16 +4,26 @@ Trends Notification Handler
 Sends proactive notifications for trending topics and opportunities
 
 FIXED: 2025-12-15 - Fixed empty insights {} display, added html.escape for user content
+FIXED: 2025-12-16 - Converted HTML to Markdown for Telegram compatibility
 """
 
 import logging
-import html
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+
+def escape_markdown(text: str) -> str:
+    """Escape special Markdown characters in user content"""
+    if not text:
+        return ""
+    # Escape characters that have special meaning in Telegram Markdown
+    for char in ['*', '_', '`', '[']:
+        text = text.replace(char, '\\' + char)
+    return text
 
 
 class TrendsNotificationHandler:
@@ -128,9 +138,9 @@ class TrendsNotificationHandler:
     async def _send_individual_trend(self, trend: Dict[str, Any]) -> None:
         """Send a single trend opportunity notification with action buttons"""
         
-        # Format trend info - escape user content
-        keyword = html.escape(str(trend.get('keyword') or 'Topic'))
-        business_area = html.escape(str(trend.get('business_area') or 'general'))
+        # Format trend info - escape user content for Markdown
+        keyword = escape_markdown(str(trend.get('keyword') or 'Topic'))
+        business_area = escape_markdown(str(trend.get('business_area') or 'general'))
         score = int(trend.get('trend_score_at_alert') or 0)
         momentum = str(trend.get('trend_momentum') or 'STABLE').upper()
         urgency = str(trend.get('urgency_level') or 'low')
@@ -147,27 +157,27 @@ class TrendsNotificationHandler:
             "DECLINING": "📉"
         }.get(momentum, "📊")
         
-        # Build message
-        message = f"{momentum_emoji} <b>Trending: {keyword}</b>\n\n"
-        message += f"<b>Business:</b> {business_area}\n"
-        message += f"<b>Score:</b> {score}/100 | {urgency_emoji} {urgency.upper()}\n"
-        message += f"<b>Momentum:</b> {momentum}\n"
+        # Build message using Markdown (not HTML)
+        message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
+        message += f"*Business:* {business_area}\n"
+        message += f"*Score:* {score}/100 | {urgency_emoji} {urgency.upper()}\n"
+        message += f"*Momentum:* {momentum}\n"
         
         if trend.get('momentum_change_percent') is not None:
             change = trend['momentum_change_percent']
-            message += f"<b>Change:</b> {change:+.1f}%\n"
+            message += f"*Change:* {change:+.1f}%\n"
         
-        # FIXED: Only show insights if it's a non-empty string with actual content
+        # Only show insights if it's a non-empty string with actual content
         insights = trend.get('related_rss_insights')
         if insights and isinstance(insights, str) and insights.strip() and insights.strip() != '{}':
-            escaped_insights = html.escape(insights[:100])
-            message += f"\n💡 <b>Insights:</b> {escaped_insights}...\n"
+            escaped_insights = escape_markdown(insights[:100])
+            message += f"\n💡 *Insights:* {escaped_insights}...\n"
         
-        # FIXED: Only show Bluesky potential if it's meaningful
+        # Only show Bluesky potential if it's meaningful
         bluesky_potential = trend.get('bluesky_engagement_potential')
         if bluesky_potential and isinstance(bluesky_potential, str) and bluesky_potential.strip():
-            escaped_potential = html.escape(bluesky_potential)
-            message += f"🦋 <b>Bluesky Potential:</b> {escaped_potential}\n"
+            escaped_potential = escape_markdown(bluesky_potential)
+            message += f"🦋 *Bluesky Potential:* {escaped_potential}\n"
         
         # Action buttons - use list format
         buttons = [
@@ -227,7 +237,7 @@ class TrendsNotificationHandler:
             result = await self.db.fetch_one(query)
             
             if not result or result['total_opportunities'] == 0:
-                message = "📈 <b>Daily Trends Summary</b>\n\n"
+                message = "📈 *Daily Trends Summary*\n\n"
                 message += "No new trends detected today.\n"
                 message += "Keep monitoring for opportunities!"
             else:
@@ -235,19 +245,19 @@ class TrendsNotificationHandler:
                 high_urgency = result['high_urgency'] or 0
                 rising = result['rising_trends'] or 0
                 top_score = result['top_score'] or 0
-                top_keyword = html.escape(str(result['top_keyword'] or 'N/A'))
+                top_keyword = escape_markdown(str(result['top_keyword'] or 'N/A'))
                 
-                message = "📈 <b>Daily Trends Summary</b>\n\n"
-                message += f"<b>Trends Detected:</b> {total}\n"
+                message = "📈 *Daily Trends Summary*\n\n"
+                message += f"*Trends Detected:* {total}\n"
                 
                 if rising > 0:
-                    message += f"<b>Rising:</b> {rising} 🚀\n"
+                    message += f"*Rising:* {rising} 🚀\n"
                 
                 if high_urgency > 0:
-                    message += f"<b>High Urgency:</b> {high_urgency} 🎯\n"
+                    message += f"*High Urgency:* {high_urgency} 🎯\n"
                 
                 if top_keyword and top_score:
-                    message += f"\n<b>Top Trend:</b>\n"
+                    message += f"\n*Top Trend:*\n"
                     message += f"{top_keyword} (Score: {top_score}/100)"
             
             await self.notification_manager.send_notification(
@@ -278,10 +288,10 @@ class TrendsNotificationHandler:
             True if successful
         """
         try:
-            escaped_keyword = html.escape(str(keyword))
+            escaped_keyword = escape_markdown(str(keyword))
             
-            message = "🔥 <b>BREAKING TREND ALERT</b>\n\n"
-            message += f"<b>{escaped_keyword}</b> is going viral!\n\n"
+            message = "🔥 *BREAKING TREND ALERT*\n\n"
+            message += f"*{escaped_keyword}* is going viral!\n\n"
             message += f"Opportunity Score: {score}/100 🎯\n"
             message += "Status: 🚀 RAPIDLY RISING\n\n"
             message += "Act fast to capitalize on this opportunity!"
