@@ -22,6 +22,8 @@ FIXES APPLIED (Session 6 - Fathom Review):
 - Changed from module-level instantiation to lazy initialization pattern
 - Use get_bot_client() and get_kill_switch() from Telegram module (Session 5 fixes)
 - All handler access now goes through getter functions
+FIXES APPLIED (Session 27 - 2025-12-16):
+- Fixed await on non-async functions get_bot_client() and get_kill_switch()
 """
 
 import logging
@@ -309,8 +311,9 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
             logger.info("   📱 Sending Telegram notification...")
             
             # Use factory functions from Session 5 fixes (not new instances)
-            telegram_bot = await get_bot_client()
-            kill_switch = await get_kill_switch()
+            # NOTE: These are regular functions, not async - don't await them
+            telegram_bot = get_bot_client()
+            kill_switch = get_kill_switch()
             notification_manager = NotificationManager(telegram_bot, kill_switch)
             
             # Extract meeting details for notification

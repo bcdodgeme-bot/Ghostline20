@@ -102,6 +102,10 @@ from modules.integrations.fathom import get_integration_info as fathom_integrati
 #-- Section 2l: Intelligence Hub Integration - added 10/22/25
 from modules.intelligence.intelligence_orchestrator import get_intelligence_orchestrator
 
+#-- Section 2m: iOS Integration - added 12/16/25
+from modules.integrations.ios import router as ios_router
+from modules.integrations.ios import get_integration_info as ios_integration_info, check_module_health as ios_module_health
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -1326,6 +1330,7 @@ app.include_router(image_generation_router)
 app.include_router(google_workspace_router)
 app.include_router(telegram_router, prefix="/integrations", tags=["telegram"])
 app.include_router(fathom_router)
+app.include_router(ios_router)
 
 #-- Section 17: Development Server - 9/23/25
 if __name__ == "__main__":
