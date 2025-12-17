@@ -1056,6 +1056,28 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
             conversation_context={'error': True, 'error_type': type(e).__name__}
         )
 
+#-- iOS/JSON Chat Endpoint
+@router.post("/chat-json", response_model=ChatResponse)
+async def chat_with_ai_json(
+    request: ChatRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    JSON-based chat endpoint for iOS and API clients.
+    Same as /chat but accepts JSON body instead of form data.
+    Does not support file uploads.
+    """
+    # Delegate to the form-based endpoint with extracted values
+    return await chat_with_ai(
+        message=request.message,
+        personality_id=request.personality_id,
+        thread_id=request.thread_id,
+        include_knowledge=request.include_knowledge,
+        files=[],
+        request=None,
+        user_id=user_id
+    )
+
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
 
 @router.post("/feedback", response_model=FeedbackResponse)
