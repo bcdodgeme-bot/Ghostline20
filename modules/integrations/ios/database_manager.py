@@ -71,7 +71,7 @@ class iOSDatabaseManager:
             """
             
             now = datetime.now(timezone.utc)
-            result = await self.db.fetchrow(
+            result = await self.db.fetch_one(
                 query,
                 UUID(user_id), device_identifier, device_name,
                 device_model, os_version, app_version, now
@@ -96,7 +96,7 @@ class iOSDatabaseManager:
                 SELECT * FROM ios_devices 
                 WHERE device_identifier = $1 AND is_active = TRUE
             """
-            result = await self.db.fetchrow(query, device_identifier)
+            result = await self.db.fetch_one(query, device_identifier)
             return dict(result) if result else None
             
         except Exception as e:
@@ -113,7 +113,7 @@ class iOSDatabaseManager:
                 SELECT * FROM ios_devices 
                 WHERE id = $1 AND is_active = TRUE
             """
-            result = await self.db.fetchrow(query, UUID(device_id))
+            result = await self.db.fetch_one(query, UUID(device_id))
             return dict(result) if result else None
             
         except Exception as e:
@@ -196,7 +196,7 @@ class iOSDatabaseManager:
                 WHERE user_id = $1 AND is_active = TRUE
                 ORDER BY last_seen_at DESC
             """
-            results = await self.db.fetch(query, UUID(user_id))
+            results = await self.db.fetch_all(query, UUID(user_id))
             return [dict(r) for r in results]
             
         except Exception as e:
@@ -215,7 +215,7 @@ class iOSDatabaseManager:
                 FROM ios_devices 
                 WHERE device_identifier = $1 AND is_active = TRUE
             """
-            result = await self.db.fetchrow(query, device_identifier)
+            result = await self.db.fetch_one(query, device_identifier)
             return dict(result) if result else None
             
         except Exception as e:
@@ -302,7 +302,7 @@ class iOSDatabaseManager:
             """
             
             now = datetime.now(timezone.utc)
-            result = await self.db.fetchrow(
+            result = await self.db.fetch_one(
                 query,
                 UUID(user_id),
                 UUID(device_id) if device_id else None,
@@ -355,7 +355,7 @@ class iOSDatabaseManager:
             """
             
             now = datetime.now(timezone.utc)
-            results = await self.db.fetch(query, UUID(user_id), now, limit)
+            results = await self.db.fetch_all(query, UUID(user_id), now, limit)
             
             notifications = []
             for r in results:
@@ -470,7 +470,7 @@ class iOSDatabaseManager:
                 WHERE user_id = $1
                 GROUP BY status
             """
-            results = await self.db.fetch(query, UUID(user_id))
+            results = await self.db.fetch_all(query, UUID(user_id))
             
             stats = {
                 'pending': 0,
