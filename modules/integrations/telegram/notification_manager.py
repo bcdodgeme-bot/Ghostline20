@@ -1,10 +1,12 @@
 """
 Telegram Notification Manager - Central Routing and Rate Limiting
 All notifications flow through here for safety checks and logging
+UPDATED: Now also routes to iOS pending notifications
 """
 
 import logging
 import os
+import json
 from typing import Dict, Optional, Any
 from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
@@ -185,6 +187,18 @@ class NotificationManager:
                     f"Thread: {thread_id or 'N/A'})"
                 )
                 
+                # ============================================================
+                # iOS NOTIFICATION ROUTING - Queue for iOS devices
+                # ============================================================
+                await self._queue_ios_notification(
+                    user_id=user_id,
+                    notification_type=notification_type,
+                    notification_subtype=notification_subtype,
+                    message_text=message_text,
+                    message_data=message_data,
+                    thread_id=thread_id
+                )
+                
                 return {
                     "success": True,
                     "notification_id": notification_id,
@@ -205,6 +219,80 @@ class NotificationManager:
                 "success": False,
                 "error": str(e)
             }
+    
+    # ========================================================================
+    # iOS NOTIFICATION ROUTING
+    # ========================================================================
+    
+    async def _queue_ios_notification(
+        self,
+        user_id: str,
+        notification_type: str,
+        notification_subtype: str,
+        message_text: str,
+        message_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None
+    ) -> None:
+        """
+        Queue notification for iOS devices
+        
+        This inserts into ios_pending_notifications table which the iOS app
+        polls every 30 seconds. The app then schedules local notifications.
+        """
+        try:
+            from modules.core.database import db_manager
+            
+            # Get all registered iOS devices for this user
+            devices = await db_manager.fetch_all(
+                "SELECT device_identifier FROM ios_devices WHERE user_id = $1 AND is_active = true",
+                user_id
+            )
+            
+            if not devices:
+                logger.debug(f"📱 No active iOS devices for user {user_id}")
+                return  # No iOS devices registered
+            
+            # Extract title from message (first line, clean markdown)
+            lines = message_text.strip().split('\n')
+            title = lines[0].replace('*', '').replace('_', '').strip()[:100] if lines else notification_type.title()
+            
+            # Build body (rest of message, truncated, clean markdown)
+            body_lines = [l for l in lines[1:] if l.strip()]
+            body = '\n'.join(body_lines)[:500] if body_lines else ""
+            body = body.replace('*', '').replace('_', '')
+            
+            # Build data payload
+            data_payload = {
+                'notification_type': notification_type,
+                'notification_subtype': notification_subtype,
+                'thread_id': thread_id,
+                **(message_data or {})
+            }
+            
+            # Insert for each device
+            for device in devices:
+                await db_manager.execute(
+                    """
+                    INSERT INTO ios_pending_notifications 
+                    (device_identifier, notification_type, title, body, data, created_at)
+                    VALUES ($1, $2, $3, $4, $5, NOW())
+                    """,
+                    device['device_identifier'],
+                    notification_type,
+                    title,
+                    body,
+                    json.dumps(data_payload)
+                )
+            
+            logger.info(f"📱 Queued iOS notification for {len(devices)} device(s): {notification_type}/{notification_subtype}")
+            
+        except Exception as e:
+            # Don't fail the main notification if iOS queueing fails
+            logger.warning(f"⚠️ Failed to queue iOS notification: {e}")
+    
+    # ========================================================================
+    # HELPER METHODS
+    # ========================================================================
     
     async def _is_quiet_hours(
         self,
@@ -263,6 +351,7 @@ class NotificationManager:
             # Map notification types to thread titles
             thread_titles = {
                 'weather': 'Weather Alerts',
+                'prayer': 'Prayer Times',
                 'trends': 'Trending Opportunities',
                 'analytics': 'Analytics Reports',
                 'intelligence': 'Intelligence Briefings',
