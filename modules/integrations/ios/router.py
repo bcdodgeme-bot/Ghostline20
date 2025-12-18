@@ -149,6 +149,33 @@ class HealthResponse(BaseModel):
 
 
 # =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def parse_json_field(value: Any, default: Any = None) -> Any:
+    """
+    Parse a field that may be returned as a JSON string by asyncpg.
+    
+    Args:
+        value: The value to parse (may be string, dict, list, or None)
+        default: Default value if parsing fails
+    
+    Returns:
+        Parsed value or default
+    """
+    if value is None:
+        return default if default is not None else ([] if isinstance(default, list) else {})
+    
+    if isinstance(value, str):
+        try:
+            return json.loads(value) if value else default
+        except json.JSONDecodeError:
+            return default if default is not None else ([] if isinstance(default, list) else {})
+    
+    return value
+
+
+# =============================================================================
 # ENDPOINTS
 # =============================================================================
 
@@ -187,14 +214,7 @@ async def get_pending_notifications(
         notification_list = []
         for notif in notifications:
             # Handle payload - asyncpg may return JSONB as string
-            payload = notif.get('payload', {})
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload) if payload else {}
-                except json.JSONDecodeError:
-                    payload = {}
-            elif payload is None:
-                payload = {}
+            payload = parse_json_field(notif.get('payload'), default={})
             
             notification_list.append(PendingNotification(
                 id=notif['id'],
@@ -254,12 +274,18 @@ async def register_device(registration: DeviceRegistration):
         if result:
             logger.info(f"📱 Device registered: {registration.device_identifier} ({registration.device_model})")
             
+            # Handle notification_types - asyncpg may return array as string
+            notification_types = parse_json_field(
+                result.get('notification_types'),
+                default=[]
+            )
+            
             return DeviceRegistrationResponse(
                 success=True,
                 device_id=str(result['id']),
                 message="Device registered successfully",
                 notifications_enabled=result.get('notifications_enabled', True),
-                notification_types=result.get('notification_types', [])
+                notification_types=notification_types
             )
         else:
             return DeviceRegistrationResponse(
