@@ -15,6 +15,7 @@ Authentication:
 """
 
 import os
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -185,12 +186,22 @@ async def get_pending_notifications(
         # Convert to response format
         notification_list = []
         for notif in notifications:
+            # Handle payload - asyncpg may return JSONB as string
+            payload = notif.get('payload', {})
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload) if payload else {}
+                except json.JSONDecodeError:
+                    payload = {}
+            elif payload is None:
+                payload = {}
+            
             notification_list.append(PendingNotification(
                 id=notif['id'],
                 notification_type=notif['notification_type'],
                 title=notif['title'],
                 body=notif['body'],
-                payload=notif.get('payload', {}),
+                payload=payload,
                 priority=notif.get('priority', 'medium'),
                 scheduled_for=notif['scheduled_for'],
                 expires_at=notif.get('expires_at'),
@@ -265,7 +276,7 @@ async def register_device(registration: DeviceRegistration):
     "/ack-notification/{notification_id}",
     response_model=AcknowledgeResponse,
     summary="Acknowledge notification",
-    description="Mark a notification as delivered or acknowledged"
+    description="Mark notification as delivered or acknowledged by user"
 )
 async def acknowledge_notification(
     notification_id: str,

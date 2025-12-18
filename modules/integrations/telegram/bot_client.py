@@ -2,15 +2,108 @@
 """
 Telegram Bot Client - Core API Wrapper
 Handles all communication with Telegram Bot API
+
+UPDATED: Added sanitize_markdown() to fix parse errors from unbalanced * and _
 """
 
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Any
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# MARKDOWN SANITIZATION
+# ============================================================================
+
+def sanitize_markdown(text: str) -> str:
+    """
+    Sanitize text for Telegram Markdown to prevent parse errors.
+    
+    Telegram's Markdown parser fails on:
+    - Unbalanced * (bold markers)
+    - Unbalanced _ (italic markers)
+    - Unclosed formatting entities
+    
+    This function ensures all formatting markers are properly paired.
+    
+    Args:
+        text: Raw message text that may have unbalanced markdown
+        
+    Returns:
+        Sanitized text safe for Telegram Markdown parsing
+    """
+    if not text:
+        return text
+    
+    # Strategy: Count markers and remove unpaired ones
+    # We process * and _ separately
+    
+    result = text
+    
+    # Fix unbalanced asterisks (bold)
+    result = _balance_markers(result, '*')
+    
+    # Fix unbalanced underscores (italic)
+    result = _balance_markers(result, '_')
+    
+    return result
+
+
+def _balance_markers(text: str, marker: str) -> str:
+    """
+    Balance a specific markdown marker in text.
+    
+    For single markers (* or _), ensures they come in pairs.
+    Removes trailing unpaired markers.
+    
+    Args:
+        text: Text to process
+        marker: The marker character (* or _)
+        
+    Returns:
+        Text with balanced markers
+    """
+    if marker not in text:
+        return text
+    
+    # Split text by the marker
+    parts = text.split(marker)
+    
+    # If odd number of parts, we have balanced markers (n markers = n+1 parts)
+    # If even number of parts, we have unbalanced markers
+    if len(parts) % 2 == 0:
+        # Unbalanced - we have an odd number of markers
+        # Find and remove the last unpaired marker by joining without it
+        # This effectively removes the last marker
+        
+        # Actually, let's be smarter: escape the problematic markers
+        # by finding positions and escaping lone ones
+        
+        # Simple approach: if unbalanced, escape ALL markers
+        # This is safe - message will display with literal * or _
+        escaped_marker = '\\' + marker
+        return text.replace(marker, escaped_marker)
+    
+    return text
+
+
+def sanitize_markdown_v2(text: str) -> str:
+    """
+    More aggressive sanitization - escapes all special characters
+    for MarkdownV2 mode (not currently used, but available).
+    
+    In MarkdownV2, these must be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    """
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    result = text
+    for char in special_chars:
+        result = result.replace(char, '\\' + char)
+    return result
 
 
 class TelegramBotClient:
@@ -106,6 +199,10 @@ class TelegramBotClient:
         """
         url = f"{self.base_url}/sendMessage"
         
+        # Sanitize markdown to prevent parse errors
+        if parse_mode == "Markdown":
+            text = sanitize_markdown(text)
+        
         payload = {
             "chat_id": chat_id,
             "text": text,
@@ -125,6 +222,24 @@ class TelegramBotClient:
                         return result.get('result', {})
                     else:
                         error_text = await response.text()
+                        
+                        # If markdown parse failed, retry without parse_mode
+                        if "can't parse entities" in error_text.lower():
+                            logger.warning(f"Markdown parse failed, retrying without formatting")
+                            payload["parse_mode"] = None
+                            del payload["parse_mode"]
+                            
+                            async with session.post(url, json=payload) as retry_response:
+                                if retry_response.status == 200:
+                                    result = await retry_response.json()
+                                    message_id = result.get('result', {}).get('message_id')
+                                    logger.info(f"Message sent successfully without formatting (ID: {message_id})")
+                                    return result.get('result', {})
+                                else:
+                                    retry_error = await retry_response.text()
+                                    logger.error(f"Retry also failed: {retry_error}")
+                                    raise Exception(f"Telegram API error: {retry_error}")
+                        
                         logger.error(f"Failed to send message: {error_text}")
                         raise Exception(f"Telegram API error: {error_text}")
         except Exception as e:
@@ -195,6 +310,10 @@ class TelegramBotClient:
         """
         url = f"{self.base_url}/editMessageText"
         
+        # Sanitize markdown to prevent parse errors
+        if parse_mode == "Markdown":
+            text = sanitize_markdown(text)
+        
         payload = {
             "chat_id": chat_id,
             "message_id": message_id,
@@ -213,6 +332,21 @@ class TelegramBotClient:
                         return True
                     else:
                         error_text = await response.text()
+                        
+                        # If markdown parse failed, retry without parse_mode
+                        if "can't parse entities" in error_text.lower():
+                            logger.warning(f"Markdown parse failed on edit, retrying without formatting")
+                            del payload["parse_mode"]
+                            
+                            async with session.post(url, json=payload) as retry_response:
+                                if retry_response.status == 200:
+                                    logger.info(f"Message {message_id} edited successfully without formatting")
+                                    return True
+                                else:
+                                    retry_error = await retry_response.text()
+                                    logger.error(f"Edit retry also failed: {retry_error}")
+                                    return False
+                        
                         logger.error(f"Failed to edit message: {error_text}")
                         return False
         except Exception as e:
@@ -310,3 +444,15 @@ def get_bot_client() -> TelegramBotClient:
         _bot_client = TelegramBotClient(bot_token)
     
     return _bot_client
+
+
+# ============================================================================
+# MODULE EXPORTS
+# ============================================================================
+
+__all__ = [
+    'TelegramBotClient',
+    'get_bot_client',
+    'sanitize_markdown',
+    'sanitize_markdown_v2'
+]

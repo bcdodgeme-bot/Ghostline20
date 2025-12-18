@@ -2,6 +2,7 @@
 SYNTAX PRIME V2 - MEMORY QUERY LAYER
 Created: 2024-10-26
 Updated: 2025 - Fixed SQL injection vulnerabilities (INTERVAL string formatting)
+Updated: 2025-12-18 - Added notification thread filtering to prevent conversation loops
 
 PURPOSE:
 Transform Syntax from conversation-window memory to database-driven memory.
@@ -56,6 +57,26 @@ CONTEXT_CONFIG = {
         'tasks': 20                  # Active tasks
     }
 }
+
+# ============================================================================
+# NOTIFICATION THREAD FILTER
+# ============================================================================
+# These are AI-generated notification threads, NOT user conversations.
+# Including them in memory context causes the AI to regenerate the same content.
+
+EXCLUDED_THREAD_PATTERNS = [
+    'Bluesky Draft:%',           # AI-generated Bluesky drafts
+    'Trending Opportunities',     # Trend notifications
+    'Intelligence Briefings',     # Proactive intelligence
+    'Weather Alerts',             # Weather notifications
+    'Prayer Times',               # Prayer reminders
+    'Meeting Summaries',          # Fathom meeting summaries
+    'Email Notifications',        # Email alerts
+    'Calendar Alerts',            # Calendar reminders
+    'Reminders',                  # General reminders
+    'Engagement Opportunities',   # Bluesky engagement
+    'Analytics Reports',          # Analytics notifications
+]
 
 
 # ============================================================================
@@ -130,12 +151,22 @@ async def query_conversations(
     days: int = 10,
     limit: int = 100,
     keywords: Optional[List[str]] = None,
-    exclude_thread_id: Optional[str] = None
+    exclude_thread_id: Optional[str] = None,
+    include_notification_threads: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Query conversation_messages across ALL threads
     
     This enables TRUE CROSS-THREAD MEMORY
+    
+    Args:
+        user_id: User ID to query
+        days: Number of days to look back
+        limit: Maximum messages to return
+        keywords: Optional keyword filter for semantic search
+        exclude_thread_id: Thread ID to exclude (current thread)
+        include_notification_threads: If False, excludes AI-generated notification threads
+                                      to prevent regenerating the same content (default: False)
     """
     try:
         where_clauses = ["cm.user_id = $1"]
@@ -153,6 +184,20 @@ async def query_conversations(
             param_count += 1
             where_clauses.append(f"NOT (cm.thread_id = ${param_count} AND cm.created_at >= NOW() - INTERVAL '1 hour')")
             params.append(exclude_thread_id)
+        
+        # ================================================================
+        # NEW: Exclude notification-generated threads to prevent loops
+        # ================================================================
+        if not include_notification_threads:
+            exclusion_conditions = []
+            for pattern in EXCLUDED_THREAD_PATTERNS:
+                param_count += 1
+                exclusion_conditions.append(f"ct.title NOT LIKE ${param_count}")
+                params.append(pattern)
+            
+            if exclusion_conditions:
+                where_clauses.append(f"({' AND '.join(exclusion_conditions)})")
+                logger.debug(f"🚫 Excluding {len(EXCLUDED_THREAD_PATTERNS)} notification thread patterns from memory")
         
         # Keyword filter (if semantic search)
         if keywords:
@@ -185,7 +230,7 @@ async def query_conversations(
         """
         
         messages = await db_manager.fetch_all(query, *params)
-        logger.info(f"💬 Found {len(messages)} conversation messages ({days}d, limit={limit})")
+        logger.info(f"💬 Found {len(messages)} conversation messages ({days}d, limit={limit}, excl_notif={not include_notification_threads})")
         return messages
         
     except Exception as e:
@@ -498,12 +543,19 @@ def detect_query_intent(message: str) -> Dict[str, Any]:
     """
     Analyze user message to determine what databases to query
     
-    Returns dict with boolean flags for each data source
+    Returns dict with boolean flags for each query type:
+    - query_meetings
+    - query_emails
+    - query_calendar
+    - query_trends
+    - query_knowledge
+    - query_weather
+    - query_tasks
+    - needs_briefing (comprehensive context)
     """
     message_lower = message.lower()
     
     intent = {
-        'query_conversations': False,
         'query_meetings': False,
         'query_emails': False,
         'query_calendar': False,
@@ -511,88 +563,62 @@ def detect_query_intent(message: str) -> Dict[str, Any]:
         'query_knowledge': False,
         'query_weather': False,
         'query_tasks': False,
-        'search_keywords': [],
-        'is_casual_greeting': False,
         'needs_briefing': False
     }
     
-    # Casual greetings (don't need briefing, just basic context)
-    casual_patterns = [
-        r'^(hey|hi|hello|sup|yo)[\s\?\!]*$',
-        r'^(good morning|good afternoon|good evening)[\s\?\!]*$',
-        r'^(what\'s up|whats up|wassup)[\s\?\!]*$'
-    ]
-    for pattern in casual_patterns:
-        if re.match(pattern, message_lower):
-            intent['is_casual_greeting'] = True
-            return intent
-    
-    # Briefing requests (comprehensive context needed)
+    # Morning/briefing triggers
     briefing_keywords = [
-        'briefing', 'brief me', 'update', 'what\'s new', 'catch me up',
-        'what do i have', 'what\'s on my plate', 'priorities', 'focus'
+        'good morning', 'morning', 'brief me', 'briefing', 'catch me up',
+        'what did i miss', 'update me', 'what\'s new', 'what happened',
+        'summary', 'overview', 'status update', 'daily report'
     ]
     if any(kw in message_lower for kw in briefing_keywords):
         intent['needs_briefing'] = True
-        intent['query_meetings'] = True
-        intent['query_calendar'] = True
-        intent['query_emails'] = True
-        intent['query_tasks'] = True
-        intent['query_trends'] = True
-        intent['query_weather'] = True
-        return intent
-    
-    # Conversation/memory queries
-    memory_keywords = [
-        'remember', 'discussed', 'talked about', 'mentioned', 'said',
-        'conversation', 'chat', 'last time', 'previously', 'before'
-    ]
-    if any(kw in message_lower for kw in memory_keywords):
-        intent['query_conversations'] = True
     
     # Meeting queries
     meeting_keywords = [
-        'meeting', 'call', 'zoom', 'standup', 'sync', 'discussed in'
+        'meeting', 'call', 'zoom', 'teams', 'fathom', 'transcript',
+        'discussed', 'met with', 'talked to', 'conversation with'
     ]
     if any(kw in message_lower for kw in meeting_keywords):
         intent['query_meetings'] = True
     
     # Email queries
     email_keywords = [
-        'email', 'inbox', 'message', 'reply', 'responded', 'sent'
+        'email', 'mail', 'inbox', 'message from', 'received',
+        'sent', 'reply', 'forward', 'gmail', 'urgent email'
     ]
     if any(kw in message_lower for kw in email_keywords):
         intent['query_emails'] = True
     
     # Calendar queries
     calendar_keywords = [
-        'calendar', 'schedule', 'meeting', 'appointment', 'event',
-        'today', 'tomorrow', 'this week', 'next week', 'free', 'available'
+        'calendar', 'schedule', 'event', 'appointment', 'meeting today',
+        'this week', 'tomorrow', 'upcoming', 'when is', 'what time'
     ]
     if any(kw in message_lower for kw in calendar_keywords):
         intent['query_calendar'] = True
     
-    # Trends/intelligence queries
-    trends_keywords = [
-        'trend', 'trending', 'popular', 'spike', 'growth', 'traffic',
-        'keyword', 'search volume', 'analytics'
+    # Trend queries
+    trend_keywords = [
+        'trend', 'trending', 'popular', 'viral', 'google trends',
+        'content idea', 'topic', 'keyword', 'search volume'
     ]
-    if any(kw in message_lower for kw in trends_keywords):
+    if any(kw in message_lower for kw in trend_keywords):
         intent['query_trends'] = True
     
-    # Knowledge base queries (recipes, saved info, etc.)
+    # Knowledge base queries
     knowledge_keywords = [
-        'recipe', 'cook', 'food', 'saved', 'remember saving', 'that article',
-        'that post', 'that note', 'information about'
+        'remember when', 'we discussed', 'previously', 'last time',
+        'you told me', 'i mentioned', 'recall', 'history', 'past'
     ]
     if any(kw in message_lower for kw in knowledge_keywords):
         intent['query_knowledge'] = True
-        # Extract search keywords
-        intent['search_keywords'] = extract_keywords(message)
     
     # Weather queries
     weather_keywords = [
-        'weather', 'temperature', 'rain', 'headache', 'uv', 'forecast'
+        'weather', 'temperature', 'rain', 'sun', 'uv', 'forecast',
+        'hot', 'cold', 'humid', 'headache', 'outside'
     ]
     if any(kw in message_lower for kw in weather_keywords):
         intent['query_weather'] = True
@@ -748,39 +774,26 @@ def format_emails_context(emails: List[Dict]) -> str:
     ]
     
     important = [e for e in emails if e.get('priority_level') in ['high', 'urgent']]
-    requires_response = [e for e in emails if e.get('requires_response', False)]
+    needs_response = [e for e in emails if e.get('requires_response')]
     
     if important:
-        lines.append(f"⭐ {len(important)} high/urgent priority emails")
-    if requires_response:
-        lines.append(f"✉️  {len(requires_response)} emails requiring response")
-    lines.append("")
+        lines.append("🔴 HIGH PRIORITY:")
+        for email in important[:5]:
+            sender = email.get('sender_name') or email.get('sender_email', 'Unknown')
+            subject = email.get('subject', 'No subject')[:50]
+            lines.append(f"   • From: {sender}")
+            lines.append(f"     Subject: {subject}")
     
-    for email in emails[:10]:  # Show first 10
-        received = email['received_at'].strftime('%Y-%m-%d %H:%M')
-        subject = email.get('subject') or '(No Subject)'
-        sender = email.get('sender_name') or email.get('sender_email', 'Unknown')
-        
-        status = "📬"
-        if email.get('priority_level') in ['high', 'urgent']:
-            status += " ⭐"
-        if email.get('requires_response'):
-            status += " ✉️"
-        
-        lines.append(f"{status} From: {sender}")
-        lines.append(f"    Subject: {subject}")
-        lines.append(f"    Time: {received}")
-        
-        if email.get('snippet'):
-            snippet = email['snippet'][:150] + "..." if len(email['snippet']) > 150 else email['snippet']
-            lines.append(f"    Preview: {snippet}")
-        
-        if email.get('category'):
-            lines.append(f"    Category: {email['category']}")
-        
-        lines.append("")
+    if needs_response:
+        lines.append("\n⚡ NEEDS RESPONSE:")
+        for email in needs_response[:5]:
+            sender = email.get('sender_name') or email.get('sender_email', 'Unknown')
+            subject = email.get('subject', 'No subject')[:50]
+            lines.append(f"   • From: {sender}")
+            lines.append(f"     Subject: {subject}")
     
     lines.extend([
+        "",
         "="*80,
         ""
     ])
@@ -795,40 +808,32 @@ def format_calendar_context(events: List[Dict]) -> str:
     
     lines = [
         "\n" + "="*80,
-        "📆 UPCOMING CALENDAR",
+        "📆 UPCOMING EVENTS",
         "="*80,
-        f"Found {len(events)} upcoming events:",
+        f"Found {len(events)} events in next 7 days:",
         ""
     ]
     
-    # Group by day
-    by_day: Dict[str, List[Dict]] = {}
+    # Group by date
+    by_date: Dict[str, List[Dict]] = {}
     for event in events:
-        day = event['start_time'].strftime('%Y-%m-%d')
-        if day not in by_day:
-            by_day[day] = []
-        by_day[day].append(event)
+        start = event.get('start_time')
+        if start:
+            date_key = start.strftime('%Y-%m-%d (%A)')
+            if date_key not in by_date:
+                by_date[date_key] = []
+            by_date[date_key].append(event)
     
-    for day, day_events in sorted(by_day.items())[:7]:  # Next 7 days
-        day_name = datetime.strptime(day, '%Y-%m-%d').strftime('%A, %B %d')
-        lines.append(f"\n📅 {day_name}:")
-        
-        from ..core.timezone_utils import convert_utc_to_user_timezone
-        
-        for event in sorted(day_events, key=lambda e: e['start_time']):
-            # Convert UTC to user timezone for display
-            start_local = convert_utc_to_user_timezone(event['start_time'])
-            start = start_local.strftime('%H:%M')
-
-            end_local = convert_utc_to_user_timezone(event['end_time']) if event.get('end_time') else None
-            end = end_local.strftime('%H:%M') if end_local else '?'
-
-            summary = event.get('summary') or 'Untitled Event'
-            
-            lines.append(f"   {start}-{end}: {summary}")
+    for date_key, date_events in sorted(by_date.items()):
+        lines.append(f"\n📅 {date_key}:")
+        for event in date_events:
+            summary = event.get('summary', 'Untitled')
+            start = event.get('start_time')
+            time_str = start.strftime('%H:%M') if start else 'TBD'
+            lines.append(f"   • {time_str} - {summary}")
             
             if event.get('location'):
-                lines.append(f"      📍 {event['location']}")
+                lines.append(f"     📍 {event['location']}")
     
     lines.extend([
         "",
@@ -840,36 +845,28 @@ def format_calendar_context(events: List[Dict]) -> str:
 
 
 def format_trends_context(trends: List[Dict]) -> str:
-    """Format Google Trends data for AI context"""
+    """Format trends for AI context"""
     if not trends:
         return ""
     
     lines = [
         "\n" + "="*80,
-        "📊 TRENDING KEYWORDS",
+        "📊 TRENDING OPPORTUNITIES",
         "="*80,
-        f"Found {len(trends)} high-priority trends:",
+        f"Found {len(trends)} relevant trends:",
         ""
     ]
     
-    for trend in trends:
-        keyword = trend['keyword']
-        business = trend.get('business_area', 'Unknown')
-        direction = trend.get('trend_direction', 'stable')
-        change = trend.get('change_percentage', 0)
-        priority = trend.get('priority', 0)
+    for trend in trends[:10]:
+        keyword = trend.get('keyword', 'Unknown')
+        score = trend.get('score', 0)
+        momentum = trend.get('momentum', 'stable')
         
-        arrow = "📈" if direction == 'up' else "📉" if direction == 'down' else "➡️"
-        
-        lines.append(f"{arrow} {keyword} ({business})")
-        lines.append(f"   Priority: {priority}/10 | Change: {change:+.1f}%")
-        
-        if trend.get('notes'):
-            notes = trend['notes'][:150] + "..." if len(trend['notes']) > 150 else trend['notes']
-            lines.append(f"   Notes: {notes}")
-        lines.append("")
+        emoji = "🔥" if score > 80 else "📈" if score > 50 else "📊"
+        lines.append(f"{emoji} {keyword} (Score: {score}/100, {momentum})")
     
     lines.extend([
+        "",
         "="*80,
         ""
     ])
@@ -877,40 +874,28 @@ def format_trends_context(trends: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def format_knowledge_context(items: List[Dict]) -> str:
-    """Format knowledge base items for AI context"""
-    if not items:
+def format_knowledge_context(entries: List[Dict]) -> str:
+    """Format knowledge base entries for AI context"""
+    if not entries:
         return ""
     
     lines = [
         "\n" + "="*80,
-        "📚 KNOWLEDGE BASE (Reference Library)",
+        "📚 KNOWLEDGE BASE MATCHES",
         "="*80,
-        f"Found {len(items)} relevant saved items:",
+        f"Found {len(entries)} relevant entries:",
         ""
     ]
     
-    for item in items:
-        title = item.get('title') or 'Untitled'
-        content_type = item.get('content_type') or 'unknown'
+    for entry in entries[:5]:
+        title = entry.get('title', 'Untitled')[:50]
+        content = entry.get('content', '')[:150]
         
-        lines.append(f"📄 {title} ({content_type})")
-        
-        if item.get('key_topics'):
-            topics = item['key_topics']
-            if isinstance(topics, list) and topics:
-                lines.append(f"   Topics: {', '.join(topics[:5])}")
-        
-        if item.get('content'):
-            content = item['content'][:200] + "..." if len(item['content']) > 200 else item['content']
-            lines.append(f"   {content}")
-        
-        if item.get('word_count'):
-            lines.append(f"   Words: {item['word_count']}")
-        
-        lines.append("")
+        lines.append(f"\n📖 {title}")
+        lines.append(f"   {content}...")
     
     lines.extend([
+        "",
         "="*80,
         ""
     ])
@@ -918,49 +903,30 @@ def format_knowledge_context(items: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def format_weather_context(weather: Optional[Dict]) -> str:
-    """Format weather data for AI context"""
+def format_weather_context(weather: Dict) -> str:
+    """Format weather for AI context"""
     if not weather:
         return ""
+    
+    temp = weather.get('temperature', 'N/A')
+    feels = weather.get('temperature_apparent', temp)
+    desc = weather.get('weather_description', 'Unknown')
+    uv = weather.get('uv_index', 0)
+    uv_risk = weather.get('uv_risk_level', 'low')
+    headache = weather.get('headache_risk_level', 'low')
     
     lines = [
         "\n" + "="*80,
         "⛅ CURRENT WEATHER",
         "="*80,
-        ""
+        f"Temperature: {temp}°F (feels like {feels}°F)",
+        f"Conditions: {desc}",
+        f"UV Index: {uv} ({uv_risk} risk)",
+        f"Headache Risk: {headache}",
     ]
     
-    temp = weather.get('temperature')
-    feels = weather.get('temperature_apparent')
-    desc = weather.get('weather_description', 'Unknown')
-    precip = weather.get('precipitation_probability', 0)
-    
-    lines.append(f"🌡️  Temperature: {temp}°F (feels like {feels}°F)")
-    lines.append(f"☁️  Conditions: {desc}")
-    lines.append(f"🌧️  Precipitation: {precip}%")
-    
-    if weather.get('headache_risk_level'):
-        risk = weather['headache_risk_level']
-        score = weather.get('headache_risk_score', 0)
-        lines.append(f"🤕 Headache Risk: {risk.upper()} ({score}/100)")
-        
-        if weather.get('headache_risk_factors'):
-            factors = weather['headache_risk_factors']
-            # Handle JSONB or dict format
-            if isinstance(factors, dict):
-                factors_str = ', '.join([f'{k}: {v}' for k, v in list(factors.items())[:3]])
-                lines.append(f"   Factors: {factors_str}")
-            elif isinstance(factors, str):
-                lines.append(f"   Factors: {factors}")
-    
-    if weather.get('uv_index'):
-        uv = weather['uv_index']
-        uv_risk = weather.get('uv_risk_level', 'unknown')
-        lines.append(f"☀️  UV Index: {uv} ({uv_risk})")
-    
     if weather.get('severe_weather_alert'):
-        alert = weather.get('alert_description', 'Weather alert active')
-        lines.append(f"⚠️  ALERT: {alert}")
+        lines.append(f"⚠️ ALERT: {weather.get('alert_description', 'Severe weather')}")
     
     lines.extend([
         "",
@@ -972,7 +938,7 @@ def format_weather_context(weather: Optional[Dict]) -> str:
 
 
 def format_tasks_context(tasks: List[Dict]) -> str:
-    """Format ClickUp tasks for AI context"""
+    """Format tasks for AI context"""
     if not tasks:
         return ""
     
@@ -1062,11 +1028,13 @@ async def build_memory_context(
         context_parts = []
         
         # ALWAYS: Load recent conversations (hot cache)
+        # NOTE: Notification threads are now EXCLUDED by default to prevent loops
         conversations = await query_conversations(
             user_id=user_id,
             days=CONTEXT_CONFIG['hot_cache_days'],
             limit=CONTEXT_CONFIG['limits']['hot_conversations'],
-            exclude_thread_id=thread_id
+            exclude_thread_id=thread_id,
+            include_notification_threads=False  # Prevents regenerating AI drafts
         )
         if conversations:
             context_parts.append(format_conversations_context(conversations))
@@ -1077,7 +1045,8 @@ async def build_memory_context(
                 user_id=user_id,
                 days=CONTEXT_CONFIG['warm_cache_days'],
                 limit=CONTEXT_CONFIG['limits']['warm_conversations'],
-                exclude_thread_id=thread_id
+                exclude_thread_id=thread_id,
+                include_notification_threads=False  # Prevents regenerating AI drafts
             )
             # Don't duplicate, just note we have deeper history
             if older_conversations and len(older_conversations) > len(conversations):
