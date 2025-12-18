@@ -242,9 +242,9 @@ class NotificationManager:
         try:
             from modules.core.database import db_manager
             
-            # Get all registered iOS devices for this user
+            # Get all registered iOS devices for this user (need id for device_id FK)
             devices = await db_manager.fetch_all(
-                "SELECT device_identifier FROM ios_devices WHERE user_id = $1 AND is_active = true",
+                "SELECT id, device_identifier FROM ios_devices WHERE user_id = $1 AND is_active = true",
                 user_id
             )
             
@@ -261,27 +261,46 @@ class NotificationManager:
             body = '\n'.join(body_lines)[:500] if body_lines else ""
             body = body.replace('*', '').replace('_', '')
             
-            # Build data payload
-            data_payload = {
+            # Build payload (JSONB)
+            payload = {
                 'notification_type': notification_type,
                 'notification_subtype': notification_subtype,
                 'thread_id': thread_id,
                 **(message_data or {})
             }
             
+            # Map notification_type to priority
+            priority_map = {
+                'prayer': 'high',
+                'calendar': 'high',
+                'reminders': 'high',
+                'weather': 'medium',
+                'email': 'medium',
+                'intelligence': 'medium',
+                'bluesky': 'low',
+                'trends': 'low',
+                'engagement': 'low',
+                'analytics': 'low',
+                'fathom': 'medium',
+                'clickup': 'medium'
+            }
+            priority = priority_map.get(notification_type, 'medium')
+            
             # Insert for each device
             for device in devices:
                 await db_manager.execute(
                     """
                     INSERT INTO ios_pending_notifications 
-                    (device_identifier, notification_type, title, body, data, created_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW())
+                    (user_id, device_id, notification_type, title, body, payload, priority, status, scheduled_for, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'pending', NOW(), NOW())
                     """,
-                    device['device_identifier'],
+                    user_id,
+                    device['id'],  # This is the UUID from ios_devices.id
                     notification_type,
                     title,
                     body,
-                    json.dumps(data_payload)
+                    json.dumps(payload),
+                    priority
                 )
             
             logger.info(f"📱 Queued iOS notification for {len(devices)} device(s): {notification_type}/{notification_subtype}")
