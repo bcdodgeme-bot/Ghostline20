@@ -282,9 +282,10 @@ class GoogleWorkspaceBackgroundTasks:
     async def _sync_analytics(self):
         """Sync Analytics data for all configured sites"""
         try:
-            from .analytics_client import analytics_client
+            from .analytics_client import get_analytics_client
             
-            # Initialize client
+            # Get client instance (not the None module-level variable!)
+            analytics_client = get_analytics_client(self._user_id)
             await analytics_client.initialize(self._user_id)
             
             synced_count = 0

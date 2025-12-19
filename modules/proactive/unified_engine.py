@@ -24,7 +24,7 @@ Created: 2025-12-19
 import logging
 import json
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from dataclasses import dataclass
 from enum import Enum
 
@@ -32,6 +32,16 @@ from modules.core.database import db_manager
 from modules.ai.openrouter_client import get_openrouter_client
 
 logger = logging.getLogger(__name__)
+
+
+def json_serialize(obj: Any) -> str:
+    """JSON serialize with datetime handling"""
+    def default_handler(o):
+        if isinstance(o, (datetime, date)):
+            return o.isoformat()
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+    
+    return json.dumps(obj, default=default_handler)
 
 
 class SourceType(str, Enum):
@@ -589,15 +599,15 @@ Write the post now:"""
                 item.source_url,
                 item.source_title,
                 item.source_preview,
-                json.dumps(item.source_metadata) if item.source_metadata else '{}',
-                json.dumps(item.rss_context) if item.rss_context else '[]',
-                json.dumps(item.trend_context) if item.trend_context else '{}',
+                json_serialize(item.source_metadata) if item.source_metadata else '{}',
+                json_serialize(item.rss_context) if item.rss_context else '[]',
+                json_serialize(item.trend_context) if item.trend_context else '{}',
                 item.business_context,
                 item.content_type.value,
                 item.draft_title,
                 item.draft_text,
                 item.draft_secondary,
-                json.dumps(item.draft_structured) if item.draft_structured else '{}',
+                json_serialize(item.draft_structured) if item.draft_structured else '{}',
                 item.personality_used,
                 item.model_used,
                 item.priority,
@@ -916,7 +926,7 @@ Write the post now:"""
                         action_result = $3,
                         actioned_at = NOW()
                     WHERE id = $1
-                ''', queue_id, action, json.dumps(result))
+                ''', queue_id, action, json_serialize(result))
                 
                 # Update Telegram message
                 await self._update_telegram_message(row, action, result)
