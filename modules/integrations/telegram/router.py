@@ -1,202 +1,334 @@
+# modules/integrations/telegram/router.py
 """
-Telegram Router - FastAPI Webhook Endpoints
-Handles incoming webhooks from Telegram for button callbacks and commands
+Telegram FastAPI Router
+=======================
+Provides endpoints for:
+- Webhook receiving (Telegram sends updates here)
+- Webhook management (set/delete/status)
+- Bot status and testing
+
+Webhook URL: https://ghostline20-production.up.railway.app/telegram/webhook
+
+Created: 2025-12-19
 """
 
 import logging
-import uuid
-from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-from .kill_switch import get_kill_switch
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
+
+from ...core.auth import get_current_user
+from .bot_client import get_bot_client
+from .telegram_webhook import process_telegram_update, get_webhook_handler
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
 
+# Default webhook URL
+DEFAULT_WEBHOOK_URL = "https://ghostline20-production.up.railway.app/telegram/webhook"
+
+
 # ============================================================================
-# WEBHOOK ENDPOINT
+# REQUEST/RESPONSE MODELS
+# ============================================================================
+
+class WebhookSetRequest(BaseModel):
+    """Request to set webhook URL"""
+    url: Optional[str] = None  # If None, uses default Railway URL
+    drop_pending_updates: bool = False
+
+
+# ============================================================================
+# WEBHOOK ENDPOINT - Receives updates from Telegram
 # ============================================================================
 
 @router.post("/webhook")
-async def telegram_webhook(request: Request):
+async def telegram_webhook(request: Request) -> Dict[str, Any]:
     """
-    Receive updates from Telegram
-    This endpoint receives button clicks, commands, etc.
+    Receive webhook updates from Telegram.
+    
+    This is the endpoint Telegram sends updates to when:
+    - A user clicks an inline button (callback_query)
+    - A user sends a message to the bot
+    - Other subscribed events occur
+    
+    NO AUTHENTICATION - Telegram must be able to reach this endpoint.
+    We validate the update structure instead.
     """
     try:
-        data = await request.json()
-        logger.info(f"Received Telegram webhook: {data.get('update_id')}")
+        # Parse the incoming update
+        update = await request.json()
         
-        # Handle callback queries (button clicks)
-        if 'callback_query' in data:
-            from .callback_handler import get_callback_handler
-            callback_query = data['callback_query']
-            callback_handler = get_callback_handler()
-            
-            result = await callback_handler.process_callback(
-                callback_query_id=callback_query['id'],
-                callback_data=callback_query['data'],
-                message_id=callback_query['message']['message_id']
-            )
-            
-            return {"success": result['success']}
+        # Basic validation - must have update_id
+        if 'update_id' not in update:
+            logger.warning("Invalid webhook payload - missing update_id")
+            return {"ok": True, "error": "Invalid payload"}
         
-        # Handle text messages (commands)
-        elif 'message' in data:
-            message = data['message']
-            text = message.get('text', '')
-            
-            # Process telegram commands (kill switch, etc.)
-            if text.lower().startswith('telegram'):
-                response = await process_telegram_command(text)
-                return {"success": True, "response": response}
+        # Process the update
+        result = await process_telegram_update(update)
         
-        return {"success": True}
-    
+        # Always return 200 OK to Telegram (even on errors)
+        # Otherwise Telegram will keep retrying
+        return {"ok": True, "result": result}
+        
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Webhook processing error: {e}", exc_info=True)
+        # Still return 200 to prevent Telegram from retrying
+        return {"ok": True, "error": str(e)}
+
 
 # ============================================================================
-# COMMAND PROCESSING
+# WEBHOOK MANAGEMENT ENDPOINTS
 # ============================================================================
 
-async def process_telegram_command(command: str) -> str:
+@router.post("/webhook/set")
+async def set_webhook(
+    request: WebhookSetRequest = None,
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
-    Process telegram control commands
+    Set the Telegram webhook URL.
     
-    Commands:
-        - telegram kill / telegram stop
-        - telegram resume / telegram enable
-        - telegram disable [type]
-        - telegram enable [type]
-        - telegram status
+    If no URL provided, uses the default Railway URL:
+    https://ghostline20-production.up.railway.app/telegram/webhook
     """
-    from .notification_manager import get_notification_manager
-    
-    command_lower = command.lower().strip()
-    user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"  # Your user ID
-    
-    kill_switch = get_kill_switch()
-    
-    # Global kill switch
-    if 'kill' in command_lower or 'stop all' in command_lower:
-        await kill_switch.disable(user_id, "User command via Telegram")
-        return "🛑 All notifications stopped. Use 'telegram resume' to re-enable."
-    
-    # Resume notifications
-    elif 'resume' in command_lower or ('enable' in command_lower and 'disable' not in command_lower):
-        await kill_switch.enable(user_id)
-        return "✅ Notifications resumed."
-    
-    # Status check
-    elif 'status' in command_lower:
-        status = await kill_switch.get_status(user_id)
-        notification_manager = get_notification_manager()
-        rate_limits = await notification_manager.get_rate_limit_status(user_id)
-        
-        # Build status message
-        if not status['enabled']:
-            msg = "🛑 **All notifications STOPPED**\n\n"
-            msg += f"Reason: {status.get('reason', 'Manual stop')}\n"
-            msg += "Use 'telegram resume' to re-enable."
-        else:
-            msg = "✅ **Notifications Active**\n\n"
-            msg += "**Rate Limits (24h):**\n"
-            for notif_type, limits in rate_limits.items():
-                if limits['count'] > 0:
-                    msg += f"  • {notif_type.title()}: {limits['count']}/{limits['limit']}\n"
-        
-        return msg
-    
-    return "❓ Unknown command. Try: kill, resume, status"
-
-# ============================================================================
-# MANUAL NOTIFICATION ENDPOINTS (For Testing)
-# ============================================================================
-
-@router.post("/test/send")
-async def send_test_notification():
-    """Send a test notification to verify system is working"""
     try:
-        from .notification_manager import get_notification_manager
+        bot_client = get_bot_client()
         
-        notification_manager = get_notification_manager()
+        # Use provided URL or default
+        webhook_url = DEFAULT_WEBHOOK_URL
+        if request and request.url:
+            webhook_url = request.url
         
-        result = await notification_manager.send_notification(
-            user_id="b7c60682-4815-4d9d-8ebe-66c6cd24eff9",
-            notification_type="reminders",
-            notification_subtype="test",
-            message_text="🧪 **Test Notification**\n\nTelegram notification system is working!",
-            buttons=[[
-                {"text": "✅ Got it", "callback_data": f"reminder:done:{uuid.uuid4()}"}
-            ]],
-            message_data={"test": True}
+        drop_pending = request.drop_pending_updates if request else False
+        
+        result = await bot_client.set_webhook(
+            url=webhook_url,
+            drop_pending_updates=drop_pending
         )
         
-        return result
-    
+        if result.get('success'):
+            return {
+                "success": True,
+                "message": f"Webhook set successfully",
+                "webhook_url": webhook_url
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to set webhook: {result.get('error')}"
+            )
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to send test notification: {e}")
+        logger.error(f"Error setting webhook: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/webhook")
+async def delete_webhook(
+    drop_pending_updates: bool = False,
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Delete the Telegram webhook (switch to polling mode).
+    
+    Args:
+        drop_pending_updates: Whether to drop any pending updates
+    """
+    try:
+        bot_client = get_bot_client()
+        result = await bot_client.delete_webhook(drop_pending_updates=drop_pending_updates)
+        
+        if result.get('success'):
+            return {
+                "success": True,
+                "message": "Webhook deleted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete webhook: {result.get('error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting webhook: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/webhook/status")
+async def get_webhook_status(
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Get current webhook status and info.
+    """
+    try:
+        bot_client = get_bot_client()
+        result = await bot_client.get_webhook_info()
+        
+        webhook_url = result.get('webhook_url', '')
+        is_set = bool(webhook_url)
+        
+        return {
+            "success": True,
+            "webhook_configured": is_set,
+            "webhook_url": webhook_url or None,
+            "pending_update_count": result.get('pending_update_count', 0),
+            "expected_url": DEFAULT_WEBHOOK_URL,
+            "status": "active" if webhook_url == DEFAULT_WEBHOOK_URL else (
+                "custom" if is_set else "not_configured"
+            ),
+            "raw_info": result.get('result', {})
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting webhook status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# BOT STATUS ENDPOINTS
+# ============================================================================
+
+@router.get("/status")
+async def get_bot_status(
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Get Telegram bot status and connection info.
+    """
+    try:
+        bot_client = get_bot_client()
+        
+        # Test connection
+        connection_result = await bot_client.test_connection()
+        
+        # Get webhook info
+        webhook_info = await bot_client.get_webhook_info()
+        
+        bot_info = connection_result.get('bot_info', {})
+        
+        return {
+            "success": True,
+            "connected": connection_result.get('success', False),
+            "bot": {
+                "username": bot_info.get('username'),
+                "first_name": bot_info.get('first_name'),
+                "can_join_groups": bot_info.get('can_join_groups'),
+                "can_read_all_group_messages": bot_info.get('can_read_all_group_messages'),
+                "supports_inline_queries": bot_info.get('supports_inline_queries')
+            },
+            "webhook": {
+                "configured": bool(webhook_info.get('webhook_url')),
+                "url": webhook_info.get('webhook_url') or None,
+                "pending_updates": webhook_info.get('pending_update_count', 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting bot status: {e}", exc_info=True)
+        return {
+            "success": False,
+            "connected": False,
+            "error": str(e)
+        }
+
+
+@router.post("/test")
+async def test_bot_connection(
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Test the Telegram bot connection.
+    """
+    try:
+        bot_client = get_bot_client()
+        result = await bot_client.test_connection()
+        
+        return {
+            "success": result.get('success', False),
+            "bot_info": result.get('bot_info'),
+            "error": result.get('error')
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing bot connection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# MANUAL TRIGGER ENDPOINTS (For testing)
+# ============================================================================
+
+@router.post("/test-callback")
+async def test_callback_handling(
+    callback_data: str,
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Test callback handling without going through Telegram.
+    Useful for debugging.
+    
+    Args:
+        callback_data: The callback_data string to test (e.g., "bsky:post:uuid")
+    """
+    try:
+        handler = get_webhook_handler()
+        
+        # Simulate callback routing
+        result = await handler._route_callback(
+            callback_data=callback_data,
+            user_id=0,  # Fake user ID
+            chat_id=0,  # Fake chat ID
+            message_id=0  # Fake message ID
+        )
+        
+        return {
+            "success": True,
+            "callback_data": callback_data,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing callback: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================================================
 # HEALTH CHECK
 # ============================================================================
 
 @router.get("/health")
-async def health_check():
-    """Check Telegram integration health"""
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint for Telegram integration.
+    No authentication required.
+    """
     try:
-        from .bot_client import get_bot_client
-        
         bot_client = get_bot_client()
-        connection_test = await bot_client.test_connection()
+        connection = await bot_client.test_connection()
         
         return {
-            "success": True,
-            "status": "healthy" if connection_test['success'] else "unhealthy",
-            "bot_info": connection_test.get('bot_info', {}),
-            "endpoints": {
-                "webhook": "/telegram/webhook",
-                "test": "/telegram/test/send",
-                "health": "/telegram/health"
-            }
+            "status": "healthy" if connection.get('success') else "degraded",
+            "bot_connected": connection.get('success', False),
+            "webhook_handler": "ready"
         }
-    
+        
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
         return {
-            "success": False,
             "status": "unhealthy",
             "error": str(e)
         }
 
+
 # ============================================================================
-# STATUS ENDPOINTS
+# MODULE EXPORTS
 # ============================================================================
 
-@router.get("/status")
-async def get_notification_status():
-    """Get current notification system status"""
-    try:
-        from .notification_manager import get_notification_manager
-        
-        user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
-        
-        kill_switch = get_kill_switch()
-        notification_manager = get_notification_manager()
-        
-        status = await kill_switch.get_status(user_id)
-        rate_limits = await notification_manager.get_rate_limit_status(user_id)
-        
-        return {
-            "success": True,
-            "kill_switch": status,
-            "rate_limits": rate_limits
-        }
-    
-    except Exception as e:
-        logger.error(f"Failed to get status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+__all__ = ['router']

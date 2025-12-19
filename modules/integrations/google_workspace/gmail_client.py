@@ -2,6 +2,8 @@
 """
 Gmail Client - REFACTORED FOR AIOGOOGLE
 Multi-Account Email Intelligence with True Async Support
+
+UPDATED: 2025-12-19 - Now fetches full email body during sync for AI analysis
 """
 
 import logging
@@ -34,7 +36,7 @@ class GmailClient:
         self._user_id = None
         self._user_creds = None
         self._email_account = None
-        self._last_summary_emails = {}  # NEW: user_id -> {index: message_id} mapping
+        self._last_summary_emails = {}  # user_id -> {index: message_id} mapping
         logger.info("📧 Gmail client initialized (aiogoogle)")
     
     async def initialize(self, user_id: str, email: Optional[str] = None):
@@ -65,7 +67,9 @@ class GmailClient:
                                   max_results: int = 20,
                                   days: int = 7) -> List[Dict[str, Any]]:
         """
-        Get recent email messages - TRULY ASYNC
+        Get recent email messages with FULL BODY - TRULY ASYNC
+        
+        UPDATED: Now fetches format='full' to get email body for AI analysis
         """
         try:
             if not self._user_creds:
@@ -76,7 +80,7 @@ class GmailClient:
             after_date = datetime.now() - timedelta(days=days)
             query = f"after:{int(after_date.timestamp())}"
             
-            logger.info(f"📧 Fetching messages (async): max={max_results}, days={days}, query={query}")
+            logger.info(f"📧 Fetching messages with FULL BODY (async): max={max_results}, days={days}")
             
             async with Aiogoogle(user_creds=self._user_creds) as aiogoogle:
                 gmail_v1 = await aiogoogle.discover('gmail', 'v1')
@@ -98,28 +102,31 @@ class GmailClient:
                     logger.info(f"ℹ️ No recent messages found for query: {query}")
                     return []
                 
-                logger.info(f"📬 Found {len(messages)} messages, fetching details...")
+                logger.info(f"📬 Found {len(messages)} messages, fetching FULL details with body...")
                 
-                # Get message details (batch these in production)
+                # Get message details with FULL format (includes body)
                 detailed_messages = []
                 
                 for idx, msg in enumerate(messages):
-                    logger.debug(f"🔍 Fetching details for message {idx+1}/{len(messages)}: {msg['id']}")
+                    logger.debug(f"🔍 Fetching FULL message {idx+1}/{len(messages)}: {msg['id']}")
                     
+                    # CHANGED: format='full' instead of 'metadata' to get body
                     msg_detail = await aiogoogle.as_user(
                         gmail_v1.users.messages.get(
                             userId='me',
                             id=msg['id'],
-                            format='metadata',
-                            metadataHeaders=['From', 'To', 'Subject', 'Date']
+                            format='full'  # FULL format includes body
                         )
                     )
                     
-                    # Extract metadata
+                    # Extract metadata from headers
                     headers = {
                         h['name']: h['value']
                         for h in msg_detail.get('payload', {}).get('headers', [])
                     }
+                    
+                    # Extract body using existing method
+                    body_text = self._extract_email_body(msg_detail.get('payload', {}))
                     
                     message_data = {
                         'id': msg_detail['id'],
@@ -130,15 +137,16 @@ class GmailClient:
                         'date': headers.get('Date', ''),
                         'labels': msg_detail.get('labelIds', []),
                         'snippet': msg_detail.get('snippet', ''),
+                        'body': body_text,  # NEW: Full body text
                         'internal_date': msg_detail.get('internalDate', '')
                     }
                     
                     detailed_messages.append(message_data)
                     
-                    # Store in database for later analysis
+                    # Store in database for later analysis (now includes body)
                     await self._store_email_data(message_data)
                 
-                logger.info(f"✅ Retrieved and stored {len(detailed_messages)} messages")
+                logger.info(f"✅ Retrieved and stored {len(detailed_messages)} messages with full body")
                 return detailed_messages
                 
         except Exception as e:
@@ -146,7 +154,11 @@ class GmailClient:
             raise
     
     async def _store_email_data(self, message: Dict[str, Any]):
-        """Store email data in database for analysis"""
+        """
+        Store email data in database for analysis
+        
+        UPDATED: Now stores body and snippet columns
+        """
         try:
             conn = await db_manager.get_connection()
             try:
@@ -176,13 +188,25 @@ class GmailClient:
                 # Check if requires response (heuristic)
                 requires_response = 'UNREAD' in labels and 'INBOX' in labels
                 
+                # Extract sender name from "Name <email@example.com>" format
+                sender_full = message.get('from', '')
+                sender_name = None
+                sender_email = sender_full
+                if '<' in sender_full and '>' in sender_full:
+                    sender_name = sender_full.split('<')[0].strip().strip('"')
+                    sender_email = sender_full.split('<')[1].split('>')[0]
+                
+                # UPDATED: Now includes body and snippet columns
                 await conn.execute('''
                     INSERT INTO google_gmail_analysis 
-                    (user_id, email_account, message_id, thread_id, sender_email, 
-                     subject_line, priority_level, category, requires_response, 
+                    (user_id, email_account, message_id, thread_id, sender_email, sender_name,
+                     subject_line, snippet, body, priority_level, category, requires_response, 
                      email_date, analyzed_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
                     ON CONFLICT (user_id, message_id) DO UPDATE SET
+                        sender_name = EXCLUDED.sender_name,
+                        snippet = EXCLUDED.snippet,
+                        body = EXCLUDED.body,
                         priority_level = EXCLUDED.priority_level,
                         category = EXCLUDED.category,
                         requires_response = EXCLUDED.requires_response,
@@ -192,15 +216,18 @@ class GmailClient:
                 self._email_account or 'default',
                 message['id'],
                 message['thread_id'],
-                message['from'],
+                sender_email,
+                sender_name,
                 message['subject'],
+                message.get('snippet', ''),
+                message.get('body', ''),  # NEW: Store full body
                 priority_level,
                 category,
                 requires_response,
                 email_date
                 )
                 
-                logger.debug(f"💾 Stored email: {message['subject'][:50]}")
+                logger.debug(f"💾 Stored email with body: {message['subject'][:50]}")
                 
             finally:
                 await db_manager.release_connection(conn)
@@ -295,7 +322,6 @@ class GmailClient:
                 ''', self._user_id, cutoff_date)
 
                 # If no data OR latest email is older than 1 hour, fetch fresh
-                from datetime import timezone
                 needs_refresh = (count == 0) or (latest_email and datetime.now(timezone.utc) - latest_email > timedelta(hours=1))
 
                 logger.debug(f"🔍 Refresh check: count={count}, latest={latest_email}, needs_refresh={needs_refresh}")
@@ -389,7 +415,7 @@ class GmailClient:
                 logger.warning(f"No email found at index {email_index}. Run 'google email summary' first.")
                 return None
             
-            # FIX #1: Fetch the actual email details using the message_id
+            # Fetch the actual email details using the message_id
             return await self.get_email_details(message_id)
             
         except Exception as e:
@@ -400,6 +426,8 @@ class GmailClient:
         """
         Fetch full email content including body
         
+        First checks database for cached body, then fetches from API if needed.
+        
         Args:
             message_id: Gmail message ID
             
@@ -407,6 +435,33 @@ class GmailClient:
             Full email details with body text
         """
         try:
+            # First, check if we have the body cached in database
+            conn = await db_manager.get_connection()
+            try:
+                row = await conn.fetchrow('''
+                    SELECT message_id, thread_id, sender_email, sender_name,
+                           subject_line, snippet, body, email_date
+                    FROM google_gmail_analysis
+                    WHERE user_id = $1 AND message_id = $2
+                ''', self._user_id, message_id)
+                
+                if row and row['body']:
+                    logger.debug(f"📧 Found cached body for message {message_id}")
+                    return {
+                        'message_id': row['message_id'],
+                        'thread_id': row['thread_id'],
+                        'from': f"{row['sender_name']} <{row['sender_email']}>" if row['sender_name'] else row['sender_email'],
+                        'to': '',  # Not stored in analysis table
+                        'subject': row['subject_line'],
+                        'date': row['email_date'].isoformat() if row['email_date'] else '',
+                        'body': row['body'],
+                        'snippet': row['snippet'] or '',
+                        'labels': []
+                    }
+            finally:
+                await db_manager.release_connection(conn)
+            
+            # If not in database, fetch from API
             if not self._user_creds:
                 await self.initialize(self._user_id)
             
@@ -568,7 +623,7 @@ class GmailClient:
             
             logger.debug(f"🔍 Encoded message length: {len(encoded_message)} chars")
             
-            # FIX #2: Need client_creds for token refresh
+            # Need client_creds for token refresh
             from .oauth_manager import google_auth_manager
             
             client_creds = {

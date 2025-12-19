@@ -1,7 +1,15 @@
 # modules/integrations/telegram/notification_types/trends_notifications.py
 """
 Trends Notification Handler
-Sends proactive notifications for trending topics and opportunities
+Sends PROACTIVE notifications for trending topics with AI-generated content
+
+UPDATED: 2025-12-19 - Now uses unified_engine for content generation
+Instead of just notifying "trend detected", we now:
+1. Detect trending opportunity
+2. Fetch RSS context for relevant industry insights
+3. Generate AI blog outline WITH RSS context
+4. Generate AI Bluesky post
+5. Send rich notification with drafts + one-tap actions
 
 FIXED: 2025-12-15 - Fixed empty insights {} display, added html.escape for user content
 FIXED: 2025-12-16 - Converted HTML to Markdown for Telegram compatibility
@@ -9,7 +17,7 @@ FIXED: 2025-12-16 - Converted HTML to Markdown for Telegram compatibility
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from modules.core.database import db_manager
 
@@ -28,18 +36,20 @@ def escape_markdown(text: str) -> str:
 
 class TrendsNotificationHandler:
     """
-    Handles Google Trends notifications
+    Handles Google Trends notifications with AI-powered content generation
     
-    Event-driven notifications for:
-    - Trending topics matching user interests
-    - Breaking trends with high opportunity scores
-    - Daily trend digest
+    Flow:
+    1. Detect trending opportunities (every 4 hours)
+    2. For each, generate blog outline + Bluesky post via unified_engine
+    3. Send rich notification with drafts + action buttons
+    4. User taps once → content created/posted
     """
     
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
         self.db = db_manager
         self._db_manager = None  # Lazy initialization
+        self._unified_engine = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
     @property
@@ -50,9 +60,19 @@ class TrendsNotificationHandler:
             self._db_manager = TelegramDatabaseManager()
         return self._db_manager
     
+    @property
+    def unified_engine(self):
+        """Lazy-load UnifiedProactiveEngine"""
+        if self._unified_engine is None:
+            from modules.proactive.unified_engine import get_unified_engine
+            self._unified_engine = get_unified_engine()
+        return self._unified_engine
+    
     async def check_and_notify(self) -> bool:
         """
-        Check for new trending opportunities
+        Check for new trending opportunities and send proactive notifications
+        
+        Now uses unified_engine to generate AI content before notification.
         
         Returns:
             True if any notifications were sent
@@ -62,11 +82,27 @@ class TrendsNotificationHandler:
             trending_opportunities = await self._get_trending_opportunities()
             
             if not trending_opportunities:
+                logger.debug("No trending opportunities to process")
                 return False
             
-            # Send notification for high-value trends
-            await self._send_trend_notification(trending_opportunities)
-            return True
+            logger.info(f"📊 Processing {len(trending_opportunities)} trend opportunities for proactive content")
+            
+            # Process each trend through unified engine
+            processed_count = 0
+            for trend in trending_opportunities:
+                try:
+                    queue_id = await self._process_trend_proactively(trend)
+                    if queue_id:
+                        processed_count += 1
+                        # Mark as processed in database
+                        await self._mark_trend_processed(trend['id'])
+                        logger.info(f"✅ Processed trend: {trend.get('keyword', 'Unknown')}")
+                except Exception as e:
+                    logger.error(f"Failed to process trend {trend.get('id')}: {e}")
+                    continue
+            
+            logger.info(f"📊 Processed {processed_count}/{len(trending_opportunities)} trends")
+            return processed_count > 0
             
         except Exception as e:
             logger.error(f"Error checking trends notifications: {e}")
@@ -78,7 +114,8 @@ class TrendsNotificationHandler:
         SELECT id, keyword, business_area, opportunity_type,
                urgency_level, trend_momentum, trend_score_at_alert,
                momentum_change_percent, created_at, processed,
-               related_rss_insights, bluesky_engagement_potential
+               related_rss_insights, bluesky_engagement_potential,
+               content_angle, target_audience, suggested_action
         FROM trend_opportunities
         WHERE urgency_level IN ('high', 'medium', 'low')
         AND processed = false
@@ -107,8 +144,9 @@ class TrendsNotificationHandler:
         
         return filtered
     
-    async def _check_if_notified(self, trend_id: int) -> bool:
+    async def _check_if_notified(self, trend_id) -> bool:
         """Check if we already sent notification for this trend"""
+        # Check telegram_notifications table
         query = """
         SELECT COUNT(*) as count
         FROM telegram_notifications
@@ -118,97 +156,74 @@ class TrendsNotificationHandler:
         """
         
         result = await self.db.fetch_one(query, self.user_id, str(trend_id))
-        return result['count'] > 0 if result else False
+        if result and result['count'] > 0:
+            return True
+        
+        # Also check unified_proactive_queue (may have been processed by engine)
+        query2 = """
+        SELECT COUNT(*) as count
+        FROM unified_proactive_queue
+        WHERE source_type = 'trend'
+        AND source_id = $1
+        """
+        
+        result2 = await self.db.fetch_one(query2, str(trend_id))
+        return result2['count'] > 0 if result2 else False
     
-    async def _send_trend_notification(self, trends: List[Dict[str, Any]]) -> None:
-        """Send individual notification for each trending opportunity"""
-        if not trends:
-            return
+    async def _process_trend_proactively(self, trend: Dict[str, Any]) -> Optional[str]:
+        """
+        Process trend through unified engine for AI content generation
         
-        logger.info(f"Sending {len(trends)} individual trend notifications")
-        
-        # Send individual notification for each opportunity
-        for trend in trends:
-            try:
-                await self._send_individual_trend(trend)
-            except Exception as e:
-                logger.error(f"Failed to send notification for trend {trend.get('keyword')}: {e}")
-                continue
-
-    async def _send_individual_trend(self, trend: Dict[str, Any]) -> None:
-        """Send a single trend opportunity notification with action buttons"""
-        
-        # Format trend info - escape user content for Markdown
-        keyword = escape_markdown(str(trend.get('keyword') or 'Topic'))
-        business_area = escape_markdown(str(trend.get('business_area') or 'general'))
-        score = int(trend.get('trend_score_at_alert') or 0)
-        momentum = str(trend.get('trend_momentum') or 'STABLE').upper()
-        urgency = str(trend.get('urgency_level') or 'low')
-        
-        # Urgency emoji
-        urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(urgency, "⚪")
-        
-        # Momentum emoji
-        momentum_emoji = {
-            "BREAKOUT": "🚀",
-            "RISING": "📈",
-            "STABLE_HIGH": "⭐",
-            "STABLE": "➡️",
-            "DECLINING": "📉"
-        }.get(momentum, "📊")
-        
-        # Build message using Markdown (not HTML)
-        message = f"{momentum_emoji} *Trending: {keyword}*\n\n"
-        message += f"*Business:* {business_area}\n"
-        message += f"*Score:* {score}/100 | {urgency_emoji} {urgency.upper()}\n"
-        message += f"*Momentum:* {momentum}\n"
-        
-        if trend.get('momentum_change_percent') is not None:
-            change = trend['momentum_change_percent']
-            message += f"*Change:* {change:+.1f}%\n"
-        
-        # Only show insights if it's a non-empty string with actual content
-        insights = trend.get('related_rss_insights')
-        if insights and isinstance(insights, str) and insights.strip() and insights.strip() != '{}':
-            escaped_insights = escape_markdown(insights[:100])
-            message += f"\n💡 *Insights:* {escaped_insights}...\n"
-        
-        # Only show Bluesky potential if it's meaningful
-        bluesky_potential = trend.get('bluesky_engagement_potential')
-        if bluesky_potential and isinstance(bluesky_potential, str) and bluesky_potential.strip():
-            escaped_potential = escape_markdown(bluesky_potential)
-            message += f"🦋 *Bluesky Potential:* {escaped_potential}\n"
-        
-        # Action buttons - use list format
-        buttons = [
-            [
-                {"text": "💬 Draft Post", "callback_data": f"trend:draft:{trend['id']}"},
-                {"text": "🔍 Research", "callback_data": f"trend:research:{trend['id']}"}
-            ],
-            [
-                {"text": "⏭️ Skip", "callback_data": f"trend:skip:{trend['id']}"},
-                {"text": "📊 Details", "callback_data": f"trend:details:{trend['id']}"}
-            ]
-        ]
-        
-        # Send notification
-        await self.notification_manager.send_notification(
-            user_id=self.user_id,
-            notification_type='trends',
-            notification_subtype='opportunity_alert',
-            message_text=message,
-            buttons=buttons,
-            message_data={
-                'trend_id': str(trend['id']),
-                'keyword': keyword,
-                'business_area': business_area,
-                'score': score,
-                'urgency': urgency,
-                'momentum': momentum
+        Args:
+            trend: Trend data from database
+            
+        Returns:
+            Queue ID if successful, None otherwise
+        """
+        try:
+            # Transform database row to format expected by unified_engine
+            trend_data = {
+                'id': trend['id'],
+                'keyword': trend.get('keyword', ''),
+                'business_area': trend.get('business_area', ''),
+                'opportunity_type': trend.get('opportunity_type', ''),
+                'urgency_level': trend.get('urgency_level', 'medium'),
+                'trend_momentum': trend.get('trend_momentum', 'STABLE'),
+                'trend_score_at_alert': trend.get('trend_score_at_alert', 0),
+                'momentum_change_percent': trend.get('momentum_change_percent'),
+                'related_rss_insights': trend.get('related_rss_insights'),
+                'bluesky_engagement_potential': trend.get('bluesky_engagement_potential'),
+                'content_angle': trend.get('content_angle'),
+                'target_audience': trend.get('target_audience'),
+                'suggested_action': trend.get('suggested_action'),
             }
-        )
-        
-        logger.info(f"✅ Sent individual trend notification: {keyword} (Score: {score})")
+            
+            # Process through unified engine - this handles:
+            # 1. Fetching RSS context
+            # 2. AI blog outline generation with RSS context
+            # 3. AI Bluesky post generation
+            # 4. Storage in unified_proactive_queue
+            # 5. Sending Telegram notification with action buttons
+            queue_id = await self.unified_engine.process_trend(trend_data)
+            
+            return queue_id
+            
+        except Exception as e:
+            logger.error(f"Failed to process trend proactively: {e}")
+            return None
+    
+    async def _mark_trend_processed(self, trend_id) -> None:
+        """Mark trend opportunity as processed"""
+        try:
+            query = """
+            UPDATE trend_opportunities
+            SET processed = true
+            WHERE id = $1
+            """
+            await self.db.execute(query, trend_id)
+            logger.debug(f"Marked trend {trend_id} as processed")
+        except Exception as e:
+            logger.error(f"Failed to mark trend as processed: {e}")
         
     async def send_daily_summary(self) -> bool:
         """
@@ -219,13 +234,11 @@ class TrendsNotificationHandler:
         """
         try:
             # Get today's trend stats
-            # Note: This query doesn't filter by user since trend_opportunities
-            # is a global table (not user-specific)
             query = """
             SELECT 
                 COUNT(*) as total_opportunities,
                 COUNT(*) FILTER (WHERE urgency_level = 'high') as high_urgency,
-                COUNT(*) FILTER (WHERE trend_momentum = 'rising') as rising_trends,
+                COUNT(*) FILTER (WHERE trend_momentum = 'RISING' OR trend_momentum = 'BREAKOUT') as rising_trends,
                 MAX(trend_score_at_alert) as top_score,
                 (SELECT keyword FROM trend_opportunities 
                  WHERE DATE(created_at) = CURRENT_DATE 
@@ -279,6 +292,9 @@ class TrendsNotificationHandler:
         """
         Send immediate notification for breaking/viral trend
         
+        This bypasses the normal check_and_notify flow for urgent trends.
+        Still uses unified_engine for content generation.
+        
         Args:
             trend_id: Trend database ID
             keyword: Trending keyword
@@ -288,6 +304,30 @@ class TrendsNotificationHandler:
             True if successful
         """
         try:
+            logger.info(f"🔥 Breaking trend detected: {keyword} (Score: {score})")
+            
+            # Fetch full trend data
+            query = """
+            SELECT id, keyword, business_area, opportunity_type,
+                   urgency_level, trend_momentum, trend_score_at_alert,
+                   momentum_change_percent, related_rss_insights,
+                   bluesky_engagement_potential
+            FROM trend_opportunities
+            WHERE id = $1
+            """
+            
+            result = await self.db.fetch_one(query, trend_id)
+            
+            if result:
+                # Process through unified engine for full AI treatment
+                queue_id = await self._process_trend_proactively(dict(result))
+                
+                if queue_id:
+                    await self._mark_trend_processed(trend_id)
+                    logger.info(f"✅ Breaking trend processed: {keyword}")
+                    return True
+            
+            # Fallback: send simple notification if engine fails
             escaped_keyword = escape_markdown(str(keyword))
             
             message = "🔥 *BREAKING TREND ALERT*\n\n"

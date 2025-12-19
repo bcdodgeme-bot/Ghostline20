@@ -3,6 +3,12 @@
 Fathom Integration FastAPI Router
 Handles webhooks from Fathom and provides API endpoints for meeting access
 
+UPDATED: 2025-12-19 - Proactive Engine Integration
+- Full meeting summary in notifications (NO TRUNCATION!)
+- Action buttons: Copy to Slack, Create Tasks, Done
+- Action items tracked in meeting_action_items table
+- Uses unified_proactive_queue for consistent handling
+
 Endpoints:
 - POST /integrations/fathom/webhook - Receive Fathom webhooks when meetings end
 - GET /integrations/fathom/meetings - List recent meetings
@@ -16,14 +22,8 @@ Workflow:
 2. Fetch meeting + transcript from Fathom API
 3. Generate AI summary using Claude
 4. Store in PostgreSQL
-5. Return success
-
-FIXES APPLIED (Session 6 - Fathom Review):
-- Changed from module-level instantiation to lazy initialization pattern
-- Use get_bot_client() and get_kill_switch() from Telegram module (Session 5 fixes)
-- All handler access now goes through getter functions
-FIXES APPLIED (Session 27 - 2025-12-16):
-- Fixed await on non-async functions get_bot_client() and get_kill_switch()
+5. Process through Unified Proactive Engine
+6. Send FULL notification with action buttons
 """
 
 import logging
@@ -39,11 +39,6 @@ from .fathom_handler import FathomHandler
 from .meeting_processor import MeetingProcessor
 from .database_manager import FathomDatabaseManager
 
-# Import Telegram factory functions (fixed in Session 5)
-from modules.integrations.telegram.bot_client import get_bot_client
-from modules.integrations.telegram.kill_switch import get_kill_switch
-from modules.integrations.telegram.notification_manager import NotificationManager
-
 logger = logging.getLogger(__name__)
 
 # Create router
@@ -52,9 +47,6 @@ router = APIRouter(prefix="/integrations/fathom", tags=["Fathom Meetings"])
 # ============================================================================
 # LAZY INITIALIZATION PATTERN
 # ============================================================================
-# These are initialized on first use, not at import time.
-# This prevents errors when environment variables aren't loaded yet
-# or when the database pool isn't ready.
 
 _fathom_handler: Optional[FathomHandler] = None
 _meeting_processor: Optional[MeetingProcessor] = None
@@ -240,19 +232,23 @@ async def fathom_webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 # ============================================================================
-# BACKGROUND PROCESSING
+# BACKGROUND PROCESSING - NOW WITH PROACTIVE ENGINE
 # ============================================================================
 
 async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any]):
     """
     Background task to process meeting webhook
-    Uses data directly from webhook instead of fetching from API
+    
+    UPDATED: Now uses Unified Proactive Engine for:
+    - FULL summary in notification (NO TRUNCATION!)
+    - Action buttons (Copy to Slack, Create Tasks, Done)
+    - Proper action item tracking
     
     Steps:
     1. Extract data from webhook payload
     2. Generate AI summary using Claude
     3. Store everything in PostgreSQL
-    4. Send Telegram notification
+    4. Process through Proactive Engine (sends notification with buttons)
     """
     try:
         logger.info(f"🔄 Processing meeting: {meeting_id}")
@@ -299,90 +295,162 @@ async def process_meeting_webhook(meeting_id: str, webhook_data: Dict[str, Any])
             # Continue anyway - we can store meeting without summary
         else:
             logger.info("   ✅ AI summary generated")
+            logger.info(f"      Summary: {len(summary_data.get('summary', ''))} chars")
+            logger.info(f"      Key points: {len(summary_data.get('key_points', []))}")
+            logger.info(f"      Action items: {len(summary_data.get('action_items', []))}")
         
         # Step 3: Store in database
         logger.info("   💾 Storing in database...")
         db_meeting_id = await database_manager.store_meeting(meeting_data, summary_data)
         
-        logger.info(f"✅ Meeting processing complete: {db_meeting_id}")
+        logger.info(f"✅ Meeting stored: {db_meeting_id}")
         
-        # Step 4: Send Telegram notification with summary
+        # Step 4: Process through Unified Proactive Engine
+        # This sends the FULL notification with action buttons
         try:
-            logger.info("   📱 Sending Telegram notification...")
+            logger.info("   🚀 Processing through Proactive Engine...")
             
-            # Use factory functions from Session 5 fixes (not new instances)
-            # NOTE: These are regular functions, not async - don't await them
-            telegram_bot = get_bot_client()
-            kill_switch = get_kill_switch()
-            notification_manager = NotificationManager(telegram_bot, kill_switch)
+            from modules.proactive.unified_engine import get_unified_engine
             
-            # Extract meeting details for notification
-            title = meeting_data['details']['title']
-            meeting_date = meeting_data['details'].get('start_time', 'Date unknown')
+            engine = get_unified_engine()
+            queue_id = await engine.process_meeting(meeting_data, summary_data)
             
-            # Build notification message
-            message_parts = []
-            message_parts.append(f"📝 *New Meeting Processed*")
-            message_parts.append(f"")
-            message_parts.append(f"*{title}*")
-            message_parts.append(f"📅 {meeting_date}")
-            message_parts.append(f"")
-            
-            # Add summary if available
-            if summary_data.get('summary'):
-                summary_preview = summary_data['summary'][:300]
-                if len(summary_data['summary']) > 300:
-                    summary_preview += "..."
-                message_parts.append(f"*Summary:*")
-                message_parts.append(summary_preview)
-                message_parts.append("")
-            
-            # Add key points if available
-            if summary_data.get('key_points'):
-                message_parts.append(f"*Key Points:*")
-                for point in summary_data['key_points'][:3]:  # First 3 points
-                    message_parts.append(f"• {point}")
-                message_parts.append("")
-            
-            # Add action items if available
-            if summary_data.get('action_items'):
-                message_parts.append(f"*Action Items:*")
-                for item in summary_data['action_items'][:3]:  # First 3 items
-                    if isinstance(item, dict):
-                        message_parts.append(f"• {item.get('text', item)}")
-                    else:
-                        message_parts.append(f"• {item}")
-            
-            message_parts.append("")
-            message_parts.append("---")
-            message_parts.append("💬 Ready to paste into Slack")
-            
-            # Join all parts into final message
-            notification_text = "\n".join(message_parts)
-            
-            # Send notification
-            # NOTE: Hardcoded user_id is intentional - this is a single-user personal project
-            result = await notification_manager.send_notification(
-                user_id="b7c60682-4815-4d9d-8ebe-66c6cd24eff9",
-                notification_type="fathom",
-                notification_subtype="meeting_processed",
-                message_text=notification_text
-            )
-            
-            if result.get('success'):
-                logger.info("   ✅ Telegram notification sent successfully")
+            if queue_id:
+                logger.info(f"   ✅ Proactive notification sent: {queue_id}")
             else:
-                logger.warning(f"   ⚠️ Telegram notification failed: {result.get('error')}")
+                logger.warning("   ⚠️ Proactive processing returned no queue ID")
+                # Fall back to legacy notification
+                await _send_legacy_notification(meeting_data, summary_data)
                 
-        except Exception as telegram_error:
-            # Don't fail the whole process if Telegram fails
-            logger.error(f"   ❌ Telegram notification error: {telegram_error}")
-            logger.info("   ℹ️ Meeting still processed successfully, only notification failed")
+        except ImportError as e:
+            logger.warning(f"   ⚠️ Proactive engine not available: {e}")
+            # Fall back to legacy notification (but with full content!)
+            await _send_legacy_notification(meeting_data, summary_data)
+        except Exception as e:
+            logger.error(f"   ❌ Proactive engine error: {e}")
+            # Fall back to legacy notification
+            await _send_legacy_notification(meeting_data, summary_data)
+        
+        logger.info(f"✅ Meeting processing complete: {meeting_id}")
         
     except Exception as e:
         logger.error(f"❌ Background processing failed for {meeting_id}: {e}")
         import traceback
         logger.error(traceback.format_exc())
+
+
+async def _send_legacy_notification(meeting_data: Dict[str, Any], summary_data: Dict[str, Any]):
+    """
+    Fallback notification if proactive engine isn't available.
+    UPDATED: Now sends FULL content, not truncated!
+    """
+    try:
+        logger.info("   📱 Sending legacy Telegram notification (full content)...")
+        
+        from modules.integrations.telegram.bot_client import get_bot_client
+        from modules.integrations.telegram.kill_switch import get_kill_switch
+        from modules.integrations.telegram.notification_manager import NotificationManager
+        
+        telegram_bot = get_bot_client()
+        kill_switch = get_kill_switch()
+        notification_manager = NotificationManager(telegram_bot, kill_switch)
+        
+        # Extract meeting details for notification
+        title = meeting_data['details']['title']
+        meeting_date = meeting_data['details'].get('start_time', 'Date unknown')
+        attendees = [a.get('name', 'Unknown') for a in meeting_data['details'].get('attendees', [])]
+        
+        # Build notification message - FULL CONTENT!
+        message_parts = []
+        message_parts.append("🎙️ *Meeting Summary Ready*")
+        message_parts.append("")
+        message_parts.append(f"*{title}*")
+        message_parts.append(f"📅 {meeting_date}")
+        
+        if attendees:
+            attendees_str = ', '.join(attendees[:5])
+            if len(attendees) > 5:
+                attendees_str += f" +{len(attendees) - 5} more"
+            message_parts.append(f"👥 {attendees_str}")
+        
+        message_parts.append("")
+        message_parts.append("━━━━━━━━━━━━━━━━━━━━━━━")
+        message_parts.append("")
+        
+        # FULL SUMMARY - NO TRUNCATION!
+        if summary_data.get('summary'):
+            message_parts.append("📋 *Summary:*")
+            message_parts.append(summary_data['summary'])  # FULL TEXT!
+            message_parts.append("")
+        
+        # Key points - ALL OF THEM
+        if summary_data.get('key_points'):
+            message_parts.append("📌 *Key Points:*")
+            for point in summary_data['key_points']:
+                message_parts.append(f"• {point}")
+            message_parts.append("")
+        
+        # Action items - ALL OF THEM with priority
+        if summary_data.get('action_items'):
+            message_parts.append("✅ *Action Items:*")
+            for item in summary_data['action_items']:
+                if isinstance(item, dict):
+                    task = item.get('text', str(item))
+                    priority = item.get('priority', 'medium')
+                    priority_marker = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+                    assigned = item.get('assigned_to')
+                    if assigned:
+                        message_parts.append(f"{priority_marker} {task} → {assigned}")
+                    else:
+                        message_parts.append(f"{priority_marker} {task}")
+                else:
+                    message_parts.append(f"• {item}")
+            message_parts.append("")
+        
+        # Decisions made
+        if summary_data.get('decisions_made'):
+            message_parts.append("🎯 *Decisions Made:*")
+            for decision in summary_data['decisions_made']:
+                message_parts.append(f"• {decision}")
+            message_parts.append("")
+        
+        # Join all parts into final message
+        notification_text = "\n".join(message_parts)
+        
+        # Create action buttons
+        buttons = [
+            [
+                {"text": "📋 Copy to Slack", "callback_data": f"meeting:copy:{meeting_data['recording_id']}"},
+                {"text": "📝 Create Tasks", "callback_data": f"meeting:tasks:{meeting_data['recording_id']}"}
+            ],
+            [
+                {"text": "✅ Done", "callback_data": f"meeting:done:{meeting_data['recording_id']}"}
+            ]
+        ]
+        
+        # Add link to recording if available
+        share_url = meeting_data['details'].get('share_url')
+        if share_url:
+            buttons[1].insert(0, {"text": "🔗 View Recording", "url": share_url})
+        
+        # Send notification with buttons
+        result = await notification_manager.send_notification(
+            user_id="b7c60682-4815-4d9d-8ebe-66c6cd24eff9",
+            notification_type="fathom",
+            notification_subtype="meeting_processed",
+            message_text=notification_text,
+            buttons=buttons
+        )
+        
+        if result.get('success'):
+            logger.info("   ✅ Telegram notification sent successfully (full content)")
+        else:
+            logger.warning(f"   ⚠️ Telegram notification failed: {result.get('error')}")
+            
+    except Exception as telegram_error:
+        # Don't fail the whole process if Telegram fails
+        logger.error(f"   ❌ Telegram notification error: {telegram_error}")
+        logger.info("   ℹ️ Meeting still processed successfully, only notification failed")
 
 
 # ============================================================================
@@ -603,16 +671,23 @@ async def get_integration_status():
         config_status = {
             'api_key_configured': bool(os.getenv('FATHOM_API_KEY')),
             'webhook_secret_configured': bool(os.getenv('FATHOM_WEBHOOK_SECRET')),
-            'claude_configured': bool(os.getenv('ANTHROPIC_API_KEY'))
+            'claude_configured': bool(os.getenv('ANTHROPIC_API_KEY')),
+            'proactive_engine_available': _check_proactive_engine()
         }
         
         return {
             'integration': 'fathom_meetings',
-            'version': '1.0.0',
+            'version': '2.0.0',  # Updated version
             'healthy': db_health.get('database_connected', False),
             'database': db_health,
             'configuration': config_status,
             'statistics': stats,
+            'features': {
+                'full_summary_notifications': True,
+                'action_buttons': True,
+                'action_item_tracking': True,
+                'proactive_engine': config_status['proactive_engine_available']
+            },
             'endpoints': {
                 'webhook': '/integrations/fathom/webhook',
                 'meetings': '/integrations/fathom/meetings',
@@ -628,6 +703,15 @@ async def get_integration_status():
             'healthy': False,
             'error': str(e)
         }
+
+
+def _check_proactive_engine() -> bool:
+    """Check if proactive engine is available"""
+    try:
+        from modules.proactive.unified_engine import get_unified_engine
+        return True
+    except ImportError:
+        return False
 
 
 # ============================================================================
@@ -657,8 +741,11 @@ async def startup_fathom_integration():
         logger.info(f"   API Key: {'✅' if os.getenv('FATHOM_API_KEY') else '❌'}")
         logger.info(f"   Webhook Secret: {'✅' if os.getenv('FATHOM_WEBHOOK_SECRET') else '❌'}")
         logger.info(f"   Claude API: {'✅' if os.getenv('ANTHROPIC_API_KEY') else '❌'}")
+        logger.info(f"   Proactive Engine: {'✅' if _check_proactive_engine() else '❌ (fallback mode)'}")
         
         logger.info("🎉 Fathom integration ready!")
+        logger.info("   ✨ Full summaries enabled (no truncation)")
+        logger.info("   ✨ Action buttons enabled")
         
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")

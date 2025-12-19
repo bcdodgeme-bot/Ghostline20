@@ -1,29 +1,40 @@
 # modules/integrations/telegram/notification_types/email_notifications.py
 """
 Email Notification Handler
-Sends proactive notifications for important emails
+Sends PROACTIVE notifications for important emails with AI-drafted replies
+
+UPDATED: 2025-12-19 - Now uses unified_engine for AI draft generation
+Instead of just notifying "you have an email", we now:
+1. Detect important email
+2. Generate AI draft reply BEFORE notification
+3. Send rich notification with draft + one-tap actions
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from modules.core.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+
 class EmailNotificationHandler:
     """
-    Handles email notifications
+    Handles email notifications with AI-powered draft replies
     
-    Checks every hour for important/urgent emails
-    Only notifies for high-priority emails to avoid spam
+    Flow:
+    1. Check for important/urgent emails (hourly)
+    2. For each, generate AI draft reply via unified_engine
+    3. Send rich notification with draft + action buttons
+    4. User taps once → reply sent
     """
     
     def __init__(self, notification_manager):
         self.notification_manager = notification_manager
         self.db = db_manager
         self._db_manager = None  # Lazy initialization
+        self._unified_engine = None  # Lazy initialization
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
 
     @property
@@ -34,25 +45,47 @@ class EmailNotificationHandler:
             self._db_manager = TelegramDatabaseManager()
         return self._db_manager
     
+    @property
+    def unified_engine(self):
+        """Lazy-load UnifiedProactiveEngine"""
+        if self._unified_engine is None:
+            from modules.proactive.unified_engine import get_unified_engine
+            self._unified_engine = get_unified_engine()
+        return self._unified_engine
+    
     async def check_and_notify(self) -> bool:
         """
-        Check for important unread emails and send notifications
+        Check for important unread emails and send proactive notifications
+        
+        Now uses unified_engine to generate AI draft replies before notification.
         
         Returns:
             True if any notifications were sent
         """
         try:
-            # Get important unread emails
+            # Get important unread emails (with full body for AI)
             important_emails = await self._get_important_emails()
             
             if not important_emails:
+                logger.debug("No important emails to process")
                 return False
             
-            # Send notification for each important email
-            for email in important_emails:
-                await self._send_email_notification(email)
+            logger.info(f"📧 Processing {len(important_emails)} important emails for proactive drafts")
             
-            return len(important_emails) > 0
+            # Process each email through unified engine
+            processed_count = 0
+            for email in important_emails:
+                try:
+                    queue_id = await self._process_email_proactively(email)
+                    if queue_id:
+                        processed_count += 1
+                        logger.info(f"✅ Processed email: {email.get('subject_line', 'No subject')[:50]}")
+                except Exception as e:
+                    logger.error(f"Failed to process email {email.get('message_id')}: {e}")
+                    continue
+            
+            logger.info(f"📧 Processed {processed_count}/{len(important_emails)} emails")
+            return processed_count > 0
             
         except Exception as e:
             logger.error(f"Error checking email notifications: {e}")
@@ -60,13 +93,13 @@ class EmailNotificationHandler:
     
     async def _get_important_emails(self) -> List[Dict[str, Any]]:
         """
-        Get important emails from the last hour
+        Get important emails from the last hour WITH full body for AI drafting
         
         Important = high priority OR requires response
         """
         query = """
-        SELECT id, message_id, subject_line, sender_email, 
-               email_date, priority_level, category, requires_response
+        SELECT id, message_id, thread_id, subject_line, sender_email, sender_name,
+               snippet, body, email_date, priority_level, category, requires_response
         FROM google_gmail_analysis
         WHERE user_id = $1
         AND email_date > NOW() - INTERVAL '1 hour'
@@ -94,6 +127,7 @@ class EmailNotificationHandler:
     
     async def _check_if_notified(self, message_id: str) -> bool:
         """Check if we already sent notification for this email"""
+        # Check telegram_notifications table
         query = """
         SELECT COUNT(*) as count
         FROM telegram_notifications
@@ -103,80 +137,61 @@ class EmailNotificationHandler:
         """
         
         result = await self.db.fetch_one(query, self.user_id, message_id)
-        return result['count'] > 0 if result else False
+        if result and result['count'] > 0:
+            return True
+        
+        # Also check unified_proactive_queue (may have been processed by engine)
+        query2 = """
+        SELECT COUNT(*) as count
+        FROM unified_proactive_queue
+        WHERE source_type = 'email'
+        AND source_id = $1
+        """
+        
+        result2 = await self.db.fetch_one(query2, message_id)
+        return result2['count'] > 0 if result2 else False
     
-    async def _send_email_notification(self, email: Dict[str, Any]) -> None:
-        """Send email notification"""
-        subject = email['subject_line']
-        sender_email = email['sender_email']
-        priority = email.get('priority_level', 'normal')
-        requires_response = email.get('requires_response', False)
-        email_date = email['email_date']
+    async def _process_email_proactively(self, email: Dict[str, Any]) -> Optional[str]:
+        """
+        Process email through unified engine for AI draft generation
         
-        if isinstance(email_date, str):
-            email_date = datetime.fromisoformat(email_date)
-        
-        # Ensure email_date is timezone-aware for comparison
-        if email_date.tzinfo is None:
-            email_date = email_date.replace(tzinfo=timezone.utc)
-        
-        # Calculate time ago using timezone-aware datetime
-        now = datetime.now(timezone.utc)
-        time_ago = now - email_date
-        
-        if time_ago.total_seconds() < 60:
-            time_str = "Just now"
-        elif time_ago.total_seconds() < 3600:
-            mins = int(time_ago.total_seconds() / 60)
-            time_str = f"{mins} minute{'s' if mins != 1 else ''} ago"
-        else:
-            hours = int(time_ago.total_seconds() / 3600)
-            time_str = f"{hours} hour{'s' if hours != 1 else ''} ago"
-        
-        # Priority emoji
-        priority_emoji = "🔴" if priority == "urgent" else "🟡" if priority == "high" else "📧"
-        
-        # Build message
-        message = f"{priority_emoji} *New Important Email*\n\n"
-        message += f"*From:* {sender_email}\n"
-        message += f"*Subject:* {subject}\n"
-        message += f"*Received:* {time_str}\n"
-        
-        if priority in ['high', 'urgent']:
-            message += f"*Priority:* {priority.upper()}\n"
-        
-        if requires_response:
-            message += f"\n⚠️ *Requires Response*"
-        
-        # Create action buttons (list of rows, each row is list of buttons)
-        buttons = [
-            [
-                {"text": "📖 Mark as Read", "callback_data": f"email_read:{email['id']}"},
-                {"text": "🗑️ Archive", "callback_data": f"email_archive:{email['id']}"}
-            ]
-        ]
-        
-        # Metadata
-        metadata = {
-            'message_id': email['message_id'],
-            'subject': subject,
-            'sender': sender_email,
-            'received_at': email_date.isoformat(),
-            'priority': priority,
-            'requires_response': requires_response
-        }
-        
-        # Send via notification manager
-        await self.notification_manager.send_notification(
-            user_id=self.user_id,
-            notification_type='email',
-            notification_subtype='important_email',
-            message_text=message,
-            buttons=buttons,
-            message_data=metadata
-        )
-        
-        logger.info(f"✅ Sent email notification: {subject}")
+        Args:
+            email: Email data from database
+            
+        Returns:
+            Queue ID if successful, None otherwise
+        """
+        try:
+            # Transform database row to format expected by unified_engine
+            email_data = {
+                'message_id': email['message_id'],
+                'thread_id': email.get('thread_id'),
+                'subject': email.get('subject_line', 'No subject'),
+                'sender_email': email.get('sender_email', 'Unknown'),
+                'sender_name': email.get('sender_name'),
+                'snippet': email.get('snippet', ''),
+                'body': email.get('body', ''),
+                'received_at': email.get('email_date'),
+                'priority_level': email.get('priority_level', 'normal'),
+                'requires_response': email.get('requires_response', False),
+            }
+            
+            # If no body, we can still try with snippet
+            if not email_data['body'] and email_data['snippet']:
+                email_data['body'] = email_data['snippet']
+                logger.warning(f"⚠️ No body for email {email['message_id']}, using snippet")
+            
+            # Process through unified engine - this handles:
+            # 1. AI draft generation
+            # 2. Storage in unified_proactive_queue
+            # 3. Sending Telegram notification with action buttons
+            queue_id = await self.unified_engine.process_email(email_data)
+            
+            return queue_id
+            
+        except Exception as e:
+            logger.error(f"Failed to process email proactively: {e}")
+            return None
     
     async def send_daily_summary(self) -> bool:
         """
@@ -189,12 +204,13 @@ class EmailNotificationHandler:
             # Get today's email stats
             query = """
             SELECT 
-                COUNT(*) FILTER (WHERE is_read = false) as unread_count,
-                COUNT(*) FILTER (WHERE is_important = true AND is_read = false) as important_count,
+                COUNT(*) FILTER (WHERE category = 'inbox') as inbox_count,
+                COUNT(*) FILTER (WHERE priority_level IN ('high', 'urgent')) as important_count,
+                COUNT(*) FILTER (WHERE requires_response = true) as needs_response,
                 COUNT(*) as total_today
-            FROM gmail_messages
+            FROM google_gmail_analysis
             WHERE user_id = $1
-            AND DATE(received_date) = CURRENT_DATE
+            AND DATE(email_date) = CURRENT_DATE
             """
             
             result = await self.db.fetch_one(query, self.user_id)
@@ -202,22 +218,26 @@ class EmailNotificationHandler:
             if not result:
                 return False
             
-            unread = result['unread_count']
-            important = result['important_count']
-            total = result['total_today']
+            inbox = result['inbox_count'] or 0
+            important = result['important_count'] or 0
+            needs_response = result['needs_response'] or 0
+            total = result['total_today'] or 0
             
             # Build summary message
             message = f"📬 *Daily Email Summary*\n\n"
             message += f"*Received Today:* {total} email{'s' if total != 1 else ''}\n"
-            message += f"*Unread:* {unread}\n"
+            message += f"*Inbox:* {inbox}\n"
             
             if important > 0:
-                message += f"*Important Unread:* {important} ⚠️\n"
+                message += f"*Important:* {important} ⚠️\n"
             
-            if unread == 0:
-                message += "\n✅ Inbox Zero! Great job!"
-            elif important > 0:
-                message += f"\n_You have {important} important email{'s' if important != 1 else ''} waiting._"
+            if needs_response > 0:
+                message += f"*Needs Response:* {needs_response} 📝\n"
+            
+            if needs_response == 0 and important == 0:
+                message += "\n✅ Nothing urgent today!"
+            elif needs_response > 0:
+                message += f"\n_You have {needs_response} email{'s' if needs_response != 1 else ''} waiting for a reply._"
             
             # Send summary
             await self.notification_manager.send_notification(
@@ -237,7 +257,10 @@ class EmailNotificationHandler:
     
     async def mark_as_read(self, email_db_id: int) -> bool:
         """
-        Mark email as read (called from callback handler)
+        Mark email as read in database (called from callback handler)
+        
+        Note: This doesn't mark it read in Gmail - that would require
+        an API call. This just updates our local tracking.
         
         Args:
             email_db_id: Database ID of email
@@ -245,19 +268,26 @@ class EmailNotificationHandler:
         Returns:
             True if successful
         """
-        query = """
-        UPDATE gmail_messages
-        SET is_read = true, read_at = NOW()
-        WHERE id = $1 AND user_id = $2
-        """
-        
-        await self.db.execute(query, email_db_id, self.user_id)
-        logger.info(f"Marked email {email_db_id} as read")
-        return True
+        try:
+            query = """
+            UPDATE google_gmail_analysis
+            SET requires_response = false
+            WHERE id = $1 AND user_id = $2
+            """
+            
+            await self.db.execute(query, email_db_id, self.user_id)
+            logger.info(f"Marked email {email_db_id} as read")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to mark email as read: {e}")
+            return False
     
     async def archive_email(self, email_db_id: int) -> bool:
         """
-        Archive email (called from callback handler)
+        Archive email in database (called from callback handler)
+        
+        Note: This doesn't archive in Gmail - that would require
+        an API call. This just updates our local tracking.
         
         Args:
             email_db_id: Database ID of email
@@ -265,12 +295,16 @@ class EmailNotificationHandler:
         Returns:
             True if successful
         """
-        query = """
-        UPDATE gmail_messages
-        SET archived = true, archived_at = NOW()
-        WHERE id = $1 AND user_id = $2
-        """
-        
-        await self.db.execute(query, email_db_id, self.user_id)
-        logger.info(f"Archived email {email_db_id}")
-        return True
+        try:
+            query = """
+            UPDATE google_gmail_analysis
+            SET category = 'archived', requires_response = false
+            WHERE id = $1 AND user_id = $2
+            """
+            
+            await self.db.execute(query, email_db_id, self.user_id)
+            logger.info(f"Archived email {email_db_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to archive email: {e}")
+            return False
