@@ -496,7 +496,7 @@ class BlueskyEngagementDetector:
             
             result = await telegram_manager.send_notification(
                 user_id=user_id,
-                notification_type='engagement',
+                notification_type='bluesky',
                 notification_subtype='opportunity',
                 message_text=message,
                 buttons=buttons,

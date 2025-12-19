@@ -334,13 +334,15 @@ class AnalyticsNotificationHandler:
         result = await self.db.fetch_one(query, self.user_id, date_offset)
         stats['notifications_sent'] = result['count'] if result else 0
         
-        # Tasks completed - using status column instead of completed_at
+        # Tasks completed - telegram_reminders doesn't have status column
+        # TODO: Add status column to telegram_reminders if task tracking is needed
+        # For now, count reminders that were triggered (have sent_at)
         query = """
         SELECT COUNT(*) as count
         FROM telegram_reminders
         WHERE user_id = $1
-        AND status = 'completed'
-        AND DATE(updated_at) = CURRENT_DATE - $2::integer
+        AND sent_at IS NOT NULL
+        AND DATE(sent_at) = CURRENT_DATE - $2
         """
         try:
             result = await self.db.fetch_one(query, self.user_id, date_offset)
@@ -392,13 +394,13 @@ class AnalyticsNotificationHandler:
         stats = {}
         
         # Personal Activity
-        # Tasks completed this week
+        # Tasks completed this week - count reminders that were triggered
         query = """
         SELECT COUNT(*) as count
         FROM telegram_reminders
         WHERE user_id = $1
-        AND status = 'completed'
-        AND updated_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND sent_at IS NOT NULL
+        AND sent_at >= DATE_TRUNC('week', CURRENT_DATE)
         """
         try:
             result = await self.db.fetch_one(query, self.user_id)
