@@ -98,7 +98,7 @@ class UnifiedProactiveEngine:
     
     def __init__(self):
         self.user_id = "b7c60682-4815-4d9d-8ebe-66c6cd24eff9"
-        self.default_model = "anthropic/claude-sonnet-4-20250514"
+        self.default_model = None  # Auto-select from OpenRouter preferred models
         
         # Personality mapping for different contexts
         self.personalities = {
