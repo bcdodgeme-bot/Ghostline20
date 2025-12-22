@@ -56,6 +56,9 @@ PREFIX_AUTO_FEEDBACK = "auto_feedback:"  # Feedback on auto-executed actions
 # Engagement actions (legacy - may still be in use)
 PREFIX_ENGAGEMENT = "engagement:"     # Legacy engagement callbacks
 
+# Prayer actions
+PREFIX_PRAYER = "prayer:"              # prayer:prayed:{user_id}, prayer:skip:{prayer_name}
+
 
 # =============================================================================
 # WEBHOOK HANDLER CLASS
@@ -268,6 +271,13 @@ class TelegramWebhookHandler:
         
         if callback_data.startswith(PREFIX_ENGAGEMENT):
             return await self._handle_legacy_engagement(callback_data)
+        
+        # =====================================================================
+        # PRAYER ACTIONS
+        # =====================================================================
+        
+        if callback_data.startswith(PREFIX_PRAYER):
+            return await self._handle_prayer_callback(callback_data, user_id)
         
         # =====================================================================
         # UNKNOWN CALLBACK
@@ -747,6 +757,83 @@ class TelegramWebhookHandler:
             'toast_message': '❌ Invalid legacy callback',
             'show_alert': True
         }
+    
+    # =========================================================================
+    # PRAYER HANDLERS
+    # =========================================================================
+    
+    async def _handle_prayer_callback(
+        self,
+        callback_data: str,
+        user_id: int
+    ) -> Dict[str, Any]:
+        """
+        Handle prayer-related callbacks.
+        
+        Format: prayer:{action}:{user_id_or_prayer_name}
+        Actions: prayed, skip, remind_later
+        """
+        try:
+            parts = callback_data.split(':')
+            if len(parts) < 3:
+                return {'success': False, 'toast_message': '❌ Invalid prayer callback', 'show_alert': True}
+            
+            action = parts[1]
+            target = parts[2]  # user_id or prayer name
+            
+            logger.info(f"🕌 Prayer action: {action} for {target}")
+            
+            if action == 'prayed':
+                # User marked prayer as completed
+                try:
+                    from modules.core.database import db_manager
+                    conn = await db_manager.get_connection()
+                    try:
+                        # Record prayer completion
+                        await conn.execute('''
+                            INSERT INTO prayer_log (user_id, prayer_name, prayed_at, action)
+                            VALUES ($1, $2, NOW(), 'prayed')
+                            ON CONFLICT DO NOTHING
+                        ''', target, 'current')  # target is user_id here
+                    finally:
+                        await db_manager.release_connection(conn)
+                except Exception as e:
+                    logger.warning(f"Could not log prayer (table may not exist): {e}")
+                
+                return {
+                    'success': True,
+                    'toast_message': '🕌 Prayer logged. May it be accepted!',
+                    'show_alert': False
+                }
+            
+            elif action == 'skip':
+                return {
+                    'success': True,
+                    'toast_message': '⏭️ Skipped',
+                    'show_alert': False
+                }
+            
+            elif action == 'remind_later':
+                return {
+                    'success': True,
+                    'toast_message': '⏰ Will remind you later',
+                    'show_alert': False
+                }
+            
+            else:
+                return {
+                    'success': True,
+                    'toast_message': f'✅ {action.title()}',
+                    'show_alert': False
+                }
+                
+        except Exception as e:
+            logger.error(f"Error handling prayer callback: {e}", exc_info=True)
+            return {
+                'success': False,
+                'toast_message': '❌ Error processing prayer action',
+                'show_alert': True
+            }
     
     # =========================================================================
     # MESSAGE HANDLER

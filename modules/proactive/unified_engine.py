@@ -171,6 +171,8 @@ class UnifiedProactiveEngine:
                 source_metadata={
                     'sender_email': email_data.get('sender_email'),
                     'sender_name': email_data.get('sender_name'),
+                    'account_email': email_data.get('account_email'),  # Which Gmail account received this
+                    'to_account': email_data.get('account_email'),  # Alias for clarity
                     'received_at': email_data.get('received_at'),
                     'priority': email_data.get('priority_level', 'normal'),
                     'requires_response': email_data.get('requires_response', False),
@@ -703,19 +705,31 @@ Write the post now:"""
         """Build email notification with AI draft reply"""
         meta = item.source_metadata or {}
         sender = meta.get('sender_name') or meta.get('sender_email', 'Unknown')
+        sender_email = meta.get('sender_email', '')
         priority = meta.get('priority', 'normal')
+        to_account = meta.get('to_account') or meta.get('account_email', '')
         
         priority_emoji = "🔴" if priority == "urgent" else "🟡" if priority == "high" else "📧"
         
-        message = f"{priority_emoji} *New Email - Reply Ready*\n\n"
-        message += f"*From:* {self._escape_markdown(sender)}\n"
+        message = f"{priority_emoji} *New Email \\- Reply Ready*\n\n"
+        
+        # Show which account received it (if known)
+        if to_account:
+            message += f"*To:* {self._escape_markdown(to_account)}\n"
+        
+        message += f"*From:* {self._escape_markdown(sender)}"
+        # Show email address if different from name
+        if sender_email and sender_email != sender:
+            message += f" \\({self._escape_markdown(sender_email)}\\)"
+        message += "\n"
+        
         message += f"*Subject:* {self._escape_markdown(item.source_title)}\n"
         message += "\n━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         message += "📝 *Your Draft Reply:*\n"
         message += f"```\n{item.draft_text[:800]}\n```"
         
         if len(item.draft_text) > 800:
-            message += "\n_(truncated for preview)_"
+            message += "\n_\\(truncated for preview\\)_"
         
         buttons = [
             [
@@ -912,8 +926,13 @@ Write the post now:"""
                 result = await self._execute_create_tasks(row)
             elif action == 'copy':
                 result = await self._execute_copy(row)
-            elif action in ['skip', 'ignore', 'done']:
+            elif action == 'edit':
+                # Edit just acknowledges - user edits in chat or external app
+                result = {'success': True, 'message': 'Edit mode - modify and resend', 'action': 'edit'}
+            elif action in ['skip', 'done']:
                 result = await self._execute_skip(row, action)
+            elif action == 'ignore':
+                result = await self._execute_ignore(row)
             else:
                 result = {'success': False, 'message': f'Unknown action: {action}'}
             
@@ -964,6 +983,173 @@ Write the post now:"""
             'message': 'Copied! Paste into Slack.',
             'action': 'copy'
         }
+    
+    async def _execute_send_email(self, row: Dict, edited_text: Optional[str] = None) -> Dict[str, Any]:
+        """Send email reply via Gmail API"""
+        try:
+            from modules.integrations.google_workspace.gmail_client import get_gmail_client
+            
+            # Get the reply text
+            reply_text = edited_text or row['draft_text']
+            if not reply_text:
+                return {'success': False, 'message': 'No reply text to send'}
+            
+            # Get metadata
+            metadata = row.get('source_metadata') or {}
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+            
+            thread_id = metadata.get('thread_id')
+            sender_email = metadata.get('sender_email')
+            subject = row.get('source_title', 'Re: No subject')
+            
+            if not sender_email:
+                return {'success': False, 'message': 'No recipient email found'}
+            
+            # Ensure subject has Re: prefix
+            if not subject.lower().startswith('re:'):
+                subject = f"Re: {subject}"
+            
+            # Get Gmail client
+            gmail_client = get_gmail_client(self.user_id)
+            
+            # Send the reply
+            result = await gmail_client.send_reply(
+                to_email=sender_email,
+                subject=subject,
+                body=reply_text,
+                thread_id=thread_id,
+                message_id=row.get('source_id')
+            )
+            
+            if result.get('success'):
+                logger.info(f"✅ Email reply sent to {sender_email}")
+                return {
+                    'success': True,
+                    'message': f'Reply sent to {sender_email}',
+                    'sent_message_id': result.get('message_id')
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': result.get('error', 'Failed to send email')
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to send email reply: {e}")
+            return {'success': False, 'message': str(e)}
+    
+    async def _execute_bluesky_post(self, row: Dict) -> Dict[str, Any]:
+        """Post to Bluesky (for trends - creates original post, not reply)"""
+        try:
+            from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
+            
+            # Get the post text (secondary draft is for Bluesky post)
+            post_text = row.get('draft_secondary')
+            if not post_text:
+                return {'success': False, 'message': 'No Bluesky post text available'}
+            
+            # Get metadata for account selection
+            metadata = row.get('source_metadata') or {}
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+            
+            # Default to personal account for trends
+            account_id = metadata.get('bluesky_account', 'personal')
+            
+            # Get Bluesky client
+            bluesky_client = get_bluesky_multi_client()
+            
+            # Post to Bluesky
+            result = await bluesky_client.create_post(
+                account_id=account_id,
+                text=post_text
+            )
+            
+            if result.get('success'):
+                logger.info(f"✅ Posted to Bluesky: {result.get('uri')}")
+                return {
+                    'success': True,
+                    'message': f'Posted to Bluesky ({account_id})',
+                    'posted_uri': result.get('uri')
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': result.get('error', 'Failed to post to Bluesky')
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to post to Bluesky: {e}")
+            return {'success': False, 'message': str(e)}
+    
+    async def _execute_ignore(self, row: Dict) -> Dict[str, Any]:
+        """
+        Mark as ignored and track for sender learning.
+        After 10 ignores from same sender, auto-ignore future emails.
+        """
+        try:
+            # Get sender from metadata
+            metadata = row.get('source_metadata') or {}
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+            
+            sender_email = metadata.get('sender_email')
+            
+            if sender_email:
+                conn = await db_manager.get_connection()
+                try:
+                    # Increment ignore count for this sender
+                    await conn.execute('''
+                        INSERT INTO email_sender_stats (user_id, sender_email, ignore_count, last_ignored_at)
+                        VALUES ($1, $2, 1, NOW())
+                        ON CONFLICT (user_id, sender_email) 
+                        DO UPDATE SET 
+                            ignore_count = email_sender_stats.ignore_count + 1,
+                            last_ignored_at = NOW()
+                    ''', self.user_id, sender_email)
+                    
+                    # Check if we've hit the threshold
+                    ignore_count = await conn.fetchval('''
+                        SELECT ignore_count FROM email_sender_stats
+                        WHERE user_id = $1 AND sender_email = $2
+                    ''', self.user_id, sender_email)
+                    
+                    if ignore_count and ignore_count >= 10:
+                        # Add to permanent ignore list
+                        await conn.execute('''
+                            INSERT INTO email_ignore_list (user_id, sender_email, reason, created_at)
+                            VALUES ($1, $2, 'auto_ignored_after_10', NOW())
+                            ON CONFLICT (user_id, sender_email) DO NOTHING
+                        ''', self.user_id, sender_email)
+                        
+                        logger.info(f"🚫 Auto-ignored sender after 10 ignores: {sender_email}")
+                        return {
+                            'success': True,
+                            'message': f'Ignored. {sender_email} now auto-ignored (10+ ignores)',
+                            'action': 'ignore',
+                            'auto_ignored': True
+                        }
+                finally:
+                    await db_manager.release_connection(conn)
+            
+            return {
+                'success': True,
+                'message': 'Ignored',
+                'action': 'ignore'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error tracking ignore: {e}")
+            # Still mark as success - the ignore worked even if tracking failed
+            return {
+                'success': True,
+                'message': 'Ignored',
+                'action': 'ignore'
+            }
     
     # =========================================================================
     # HELPER METHODS
