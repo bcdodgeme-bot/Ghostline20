@@ -118,7 +118,7 @@ class RSSDatabase:
                     key_topics, word_count, relevance_score, processed,
                     created_at, updated_at, search_vector
                 ) VALUES (
-                    $1, $2, $3, $4, $5,
+                    $1, $2::text, $3::text, $4, $5::text,
                     $6, $7, $8, $9,
                     NOW(), NOW(),
                     setweight(to_tsvector('english', COALESCE($2::text, '')), 'A') ||
