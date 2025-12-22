@@ -22,6 +22,7 @@ import logging
 import json
 import gzip
 import base64
+import uuid
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import time
@@ -29,6 +30,15 @@ import time
 from ...core.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+
+def is_valid_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID"""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError):
+        return False
 
 class AudioCacheManager:
     """
@@ -145,12 +155,18 @@ class AudioCacheManager:
         Check if audio exists in cache and return metadata
         
         Args:
-            message_id: Message identifier to check
+            message_id: Message identifier to check (must be a valid UUID)
             
         Returns:
             Dictionary with cache metadata or None if not cached
         """
         try:
+            # Validate that message_id is a valid UUID
+            if not is_valid_uuid(message_id):
+                logger.warning(f"⚠️ Invalid UUID format for cache check: {message_id}")
+                self.cache_misses += 1
+                return None
+            
             query = """
             SELECT 
                 audio_file_size,
@@ -193,12 +209,17 @@ class AudioCacheManager:
         Retrieve actual audio data from cache
         
         Args:
-            message_id: Message identifier
+            message_id: Message identifier (must be a valid UUID)
             
         Returns:
-            Dictionary with audio data and metadata
+            Dictionary with audio data and metadata, or None if not found
         """
         try:
+            # Validate that message_id is a valid UUID
+            if not is_valid_uuid(message_id):
+                logger.warning(f"⚠️ Invalid UUID format for audio request: {message_id}")
+                return None
+            
             query = """
             SELECT 
                 audio_file_path,
@@ -247,6 +268,14 @@ class AudioCacheManager:
         Delete cached audio for a specific message
         """
         try:
+            # Validate that message_id is a valid UUID
+            if not is_valid_uuid(message_id):
+                logger.warning(f"⚠️ Invalid UUID format for delete: {message_id}")
+                return {
+                    'success': False,
+                    'error': f'Invalid message ID format: {message_id}'
+                }
+            
             query = """
             UPDATE conversation_messages 
             SET 

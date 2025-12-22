@@ -495,12 +495,13 @@ Format as a ready-to-expand outline:"""
 3. Include a perspective or insight, not just facts
 4. No hashtags unless absolutely necessary
 5. Sound like a real person, not a bot
+6. CRITICAL: Output ONLY the post text itself - NO introductions, NO "Here's a post:", NO explanations
 
-Write the post now:"""
+Output the post text and nothing else:"""
 
             response = await openrouter.chat_completion(
                 messages=[
-                    {"role": "system", "content": "You write engaging, authentic social media posts. You're witty but substantive."},
+                    {"role": "system", "content": "You write engaging, authentic social media posts. Output ONLY the post text with no preamble, introduction, or explanation. Never start with 'Here's' or similar phrases."},
                     {"role": "user", "content": prompt}
                 ],
                 model=self.default_model,
@@ -509,6 +510,30 @@ Write the post now:"""
             )
             
             post = response['choices'][0]['message']['content'].strip()
+            
+            # Strip common AI preambles
+            preambles_to_remove = [
+                "Here's a Bluesky post for that trending topic:",
+                "Here's a Bluesky post:",
+                "Here's a post:",
+                "Here is a Bluesky post:",
+                "Here is a post:",
+                "Here's my take:",
+                "Here's a thought:",
+                "Post:",
+            ]
+            for preamble in preambles_to_remove:
+                if post.startswith(preamble):
+                    post = post[len(preamble):].strip()
+                # Also check with newline
+                if post.startswith(preamble + "\n"):
+                    post = post[len(preamble)+1:].strip()
+            
+            # Remove surrounding quotes if present
+            if post.startswith('"') and post.endswith('"'):
+                post = post[1:-1].strip()
+            if post.startswith("'") and post.endswith("'"):
+                post = post[1:-1].strip()
             
             # Ensure under 280 chars
             if len(post) > 280:
