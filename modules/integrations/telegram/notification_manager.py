@@ -112,21 +112,15 @@ class NotificationManager:
             }
         
         # Get chat_id from preferences
-        prefs = await self.db_manager.get_user_preferences(user_id)
-        if not prefs or not prefs.get('telegram_chat_id'):
-            # Fallback to environment variable
-            if self._default_chat_id:
-                chat_id = self._default_chat_id
-                logger.warning(f"Using default chat_id from env for user {user_id}")
-            else:
-                logger.error(f"No telegram_chat_id for user {user_id}")
-                return {
-                    "success": False,
-                    "error": "No chat_id configured",
-                    "blocked_by": "configuration"
-                }
-        else:
-            chat_id = str(prefs['telegram_chat_id'])
+        # Get chat_id - use environment variable for single-user system
+        chat_id = self._default_chat_id
+        if not chat_id:
+            logger.error(f"No TELEGRAM_CHAT_ID configured in environment")
+            return {
+                "success": False,
+                "error": "No chat_id configured",
+                "blocked_by": "configuration"
+            }
         
         # All checks passed - send notification
         try:
