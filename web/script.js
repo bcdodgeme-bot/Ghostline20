@@ -378,79 +378,97 @@ class SyntaxPrimeChat {
     }
     
     async playVoiceMessage(messageId, speakerButton) {
-        if (!this.voiceEnabled) return;
-        
-        // FIXED: Validate messageId before making API call
-        if (!messageId || messageId === 'undefined' || messageId === 'null') {
-            console.warn('⚠️ Invalid messageId for voice playback:', messageId);
-            this.showToast('❌ Cannot play audio - missing message ID', 'error');
-            return;
-        }
-        
-        try {
-            // Stop any currently playing audio
-            if (this.currentAudio) {
-                this.currentAudio.pause();
-                this.currentAudio = null;
-                this.clearPlayingStates();
+            if (!this.voiceEnabled) return;
+            
+            // FIXED: Validate messageId before making API call
+            if (!messageId || messageId === 'undefined' || messageId === 'null') {
+                console.warn('⚠️ Invalid messageId for voice playback:', messageId);
+                this.showToast('❌ Cannot play audio - missing message ID', 'error');
+                return;
             }
             
-            // Set loading state
-            speakerButton.classList.add('loading');
-            speakerButton.innerHTML = '🔄';
-            
-            // Check cache first
-            let audioUrl = this.audioCache.get(messageId);
-            
-            if (!audioUrl) {
-                // Try to fetch from API
-                const response = await this.apiCall(`/api/voice/audio/${messageId}`, 'GET');
-                if (response && response.audio_url) {
-                    audioUrl = response.audio_url;
-                    this.audioCache.set(messageId, audioUrl);
+            try {
+                // Stop any currently playing audio
+                if (this.currentAudio) {
+                    this.currentAudio.pause();
+                    this.currentAudio = null;
+                    this.clearPlayingStates();
                 }
-            }
-            
-            if (!audioUrl) {
-                throw new Error('Audio not available');
-            }
-            
-            // Create and play audio
-            const audio = new Audio(audioUrl);
-            this.currentAudio = audio;
-            
-            // Set playing state
-            speakerButton.classList.remove('loading');
-            speakerButton.classList.add('playing');
-            speakerButton.innerHTML = '🔊';
-            
-            // Add waveform animation
-            this.showWaveformAnimation(speakerButton);
-            
-            // Audio event handlers
-            audio.onended = () => {
-                this.clearPlayingStates();
-                this.hideWaveformAnimation(speakerButton);
+                
+                // Set loading state
+                speakerButton.classList.add('loading');
+                speakerButton.innerHTML = '🔄';
+                
+                // Check local cache first
+                let audioUrl = this.audioCache.get(messageId);
+                
+                if (!audioUrl) {
+                    // FIXED: Call /synthesize first - it handles caching internally
+                    // Get message text from the DOM
+                    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+                    const messageText = messageElement ? messageElement.getAttribute('data-raw-markdown') : null;
+                    
+                    if (!messageText) {
+                        throw new Error('Could not find message text for audio synthesis');
+                    }
+                    
+                    console.log(`🎤 Requesting audio synthesis for message ${messageId}`);
+                    
+                    // Call synthesize endpoint (returns cached audio if exists, generates if not)
+                    const response = await this.apiCall('/api/voice/synthesize', 'POST', {
+                        text: messageText,
+                        message_id: messageId,
+                        personality_id: this.currentPersonality || 'syntaxprime'
+                    });
+                    
+                    if (response && response.success && response.audio_url) {
+                        audioUrl = response.audio_url;
+                        this.audioCache.set(messageId, audioUrl);
+                        console.log(`✅ Audio ready for message ${messageId} (cached: ${response.cached})`);
+                    } else {
+                        throw new Error(response?.error || 'Audio synthesis failed');
+                    }
+                }
+                
+                // Create and play audio - audioUrl is the direct endpoint path
+                const fullAudioUrl = audioUrl.startsWith('http') ? audioUrl : `${this.apiBase}${audioUrl}`;
+                const audio = new Audio(fullAudioUrl);
+                this.currentAudio = audio;
+                
+                // Set playing state
+                speakerButton.classList.remove('loading');
+                speakerButton.classList.add('playing');
                 speakerButton.innerHTML = '🔊';
-            };
-            
-            audio.onerror = () => {
-                console.error('Audio playback failed');
-                this.clearPlayingStates();
-                this.hideWaveformAnimation(speakerButton);
-                speakerButton.innerHTML = '🔊';
+                
+                // Add waveform animation
+                this.showWaveformAnimation(speakerButton);
+                
+                // Audio event handlers
+                audio.onended = () => {
+                    this.clearPlayingStates();
+                    this.hideWaveformAnimation(speakerButton);
+                    speakerButton.innerHTML = '🔊';
+                };
+                
+                audio.onerror = (e) => {
+                    console.error('Audio playback failed:', e);
+                    this.clearPlayingStates();
+                    this.hideWaveformAnimation(speakerButton);
+                    speakerButton.innerHTML = '🔊';
+                    speakerButton.classList.remove('loading', 'playing');
+                    this.showToast('❌ Audio playback failed', 'error');
+                };
+                
+                await audio.play();
+                console.log(`🔊 Playing voice for message ${messageId}`);
+                
+            } catch (error) {
+                console.error('Voice playback failed:', error);
                 speakerButton.classList.remove('loading', 'playing');
-            };
-            
-            await audio.play();
-            console.log(`🔊 Playing voice for message ${messageId}`);
-            
-        } catch (error) {
-            console.error('Voice playback failed:', error);
-            speakerButton.classList.remove('loading', 'playing');
-            speakerButton.innerHTML = '🔊';
+                speakerButton.innerHTML = '🔊';
+                this.showToast(`❌ ${error.message || 'Voice playback failed'}`, 'error');
+            }
         }
-    }
     
     clearPlayingStates() {
         const playingButtons = document.querySelectorAll('.speaker-button.playing');

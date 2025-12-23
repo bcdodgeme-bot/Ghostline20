@@ -9,6 +9,8 @@ Key Features:
 - Multiple aspect ratios for different content types
 - Direct base64 response (no polling required)
 - Rate limiting and error handling
+
+FIXED: 2025-12-23 - Handle dict response format from Gemini API
 """
 
 import os
@@ -229,6 +231,13 @@ class OpenRouterImageClient:
             image_base64 = self._extract_image_from_response(data)
             
             if not image_base64:
+                # Log the response structure for debugging
+                logger.error(f"No image in response. Structure: {list(data.keys())}")
+                if 'choices' in data and data['choices']:
+                    msg = data['choices'][0].get('message', {})
+                    logger.error(f"Message keys: {list(msg.keys())}")
+                    if 'images' in msg:
+                        logger.error(f"Images type: {type(msg['images'])}, content: {str(msg['images'])[:200]}")
                 raise Exception("No image data in response")
             
             generation_time = time.time() - start_time
@@ -273,23 +282,47 @@ class OpenRouterImageClient:
             }
     
     def _extract_image_from_response(self, response_data: Dict) -> Optional[str]:
-        """Extract base64 image data from OpenRouter response"""
+        """
+        Extract base64 image data from OpenRouter response.
+        
+        FIXED: Handle both string and dict formats from Gemini API.
+        The API sometimes returns:
+        - String: "data:image/png;base64,XXXXX"
+        - Dict: {"url": "data:image/png;base64,XXXXX"} or {"b64_json": "XXXXX"}
+        """
         try:
             choices = response_data.get('choices', [])
             if not choices:
+                logger.warning("No choices in response")
                 return None
             
             message = choices[0].get('message', {})
             
-            # Check for images array (new format)
+            # Check for images array (primary format)
             images = message.get('images', [])
             if images:
-                # Images come as data URLs: data:image/png;base64,XXXXX
                 image_data = images[0]
-                if image_data.startswith('data:'):
-                    # Extract base64 portion after the comma
-                    return image_data.split(',', 1)[1] if ',' in image_data else image_data
-                return image_data
+                
+                # FIXED: Handle dict format (new API response)
+                if isinstance(image_data, dict):
+                    logger.debug(f"Image data is dict with keys: {list(image_data.keys())}")
+                    # Try common dict keys for image data
+                    image_data = (
+                        image_data.get('url') or
+                        image_data.get('b64_json') or
+                        image_data.get('data') or
+                        image_data.get('base64') or
+                        image_data.get('image_url', {}).get('url') or
+                        ''
+                    )
+                
+                # Now image_data should be a string
+                if isinstance(image_data, str) and image_data:
+                    if image_data.startswith('data:'):
+                        # Extract base64 portion after the comma
+                        return image_data.split(',', 1)[1] if ',' in image_data else image_data
+                    # Already base64 without data: prefix
+                    return image_data
             
             # Check content for embedded image (alternative format)
             content = message.get('content', '')
@@ -304,14 +337,25 @@ class OpenRouterImageClient:
                 for item in content:
                     if isinstance(item, dict) and item.get('type') == 'image':
                         image_data = item.get('data', item.get('image_url', {}).get('url', ''))
-                        if image_data.startswith('data:'):
-                            return image_data.split(',', 1)[1] if ',' in image_data else image_data
-                        return image_data
+                        
+                        # FIXED: Handle dict format here too
+                        if isinstance(image_data, dict):
+                            image_data = (
+                                image_data.get('url') or
+                                image_data.get('b64_json') or
+                                image_data.get('data') or
+                                ''
+                            )
+                        
+                        if isinstance(image_data, str) and image_data:
+                            if image_data.startswith('data:'):
+                                return image_data.split(',', 1)[1] if ',' in image_data else image_data
+                            return image_data
             
             return None
             
         except Exception as e:
-            logger.error(f"Failed to extract image from response: {e}")
+            logger.error(f"Failed to extract image from response: {e}", exc_info=True)
             return None
     
     def _get_resolution_from_aspect_ratio(self, aspect_ratio: str) -> str:
