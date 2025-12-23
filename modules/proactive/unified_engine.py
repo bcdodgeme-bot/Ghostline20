@@ -655,6 +655,9 @@ Output the post text and nothing else:"""
                     WHERE id = $1
                 ''', queue_id, telegram_result.get('message_id'), telegram_result.get('chat_id'))
             
+            # Create chat thread with full content (so web chat shows same info as Telegram)
+            await self._create_chat_thread(item, queue_id_str)
+            
             return queue_id_str
             
         except Exception as e:
@@ -916,6 +919,221 @@ Output the post text and nothing else:"""
         ]
         
         return message, buttons
+    
+    async def _create_chat_thread(self, item: ProactiveItem, queue_id: str):
+        """
+        Create a chat thread with the full proactive content.
+        
+        This ensures the web chat interface shows the same rich content
+        (blog outlines, draft replies, etc.) that Telegram receives.
+        """
+        try:
+            import httpx
+            
+            # Map source types to thread titles
+            thread_titles = {
+                SourceType.EMAIL: 'Email Drafts',
+                SourceType.MEETING: 'Meeting Summaries',
+                SourceType.TREND: 'Content Opportunities',
+                SourceType.CALENDAR: 'Calendar Alerts',
+                SourceType.CLICKUP: 'Task Updates',
+                SourceType.BLUESKY: 'Bluesky Drafts',
+                SourceType.RSS: 'RSS Insights',
+            }
+            
+            thread_title = thread_titles.get(item.source_type, 'Proactive Notifications')
+            
+            # Build full message with all draft content
+            message = self._build_chat_thread_message(item)
+            
+            # Call the thread creation endpoint
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    "http://localhost:8000/ai/thread/from-notification",
+                    json={
+                        "notification_type": item.source_type.value,
+                        "thread_title": thread_title,
+                        "initial_message": message,
+                        "message_data": {
+                            "queue_id": queue_id,
+                            "source_type": item.source_type.value,
+                            "content_type": item.content_type.value,
+                            "has_draft": bool(item.draft_text),
+                            "has_secondary": bool(item.draft_secondary),
+                        }
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"📌 Chat thread {'created' if result.get('created') else 'updated'}: {thread_title}")
+                else:
+                    logger.warning(f"⚠️ Chat thread creation failed: {response.status_code}")
+                    
+        except Exception as e:
+            # Don't fail the whole notification if thread creation fails
+            logger.warning(f"⚠️ Failed to create chat thread: {e}")
+    
+    def _build_chat_thread_message(self, item: ProactiveItem) -> str:
+        """
+        Build the full message content for chat thread.
+        
+        Unlike Telegram (which has length limits), chat threads can show
+        the complete draft content.
+        """
+        meta = item.source_metadata or {}
+        
+        if item.source_type == SourceType.EMAIL:
+            return self._build_email_chat_message(item, meta)
+        elif item.source_type == SourceType.MEETING:
+            return self._build_meeting_chat_message(item, meta)
+        elif item.source_type == SourceType.TREND:
+            return self._build_trend_chat_message(item, meta)
+        else:
+            return self._build_generic_chat_message(item, meta)
+    
+    def _build_email_chat_message(self, item: ProactiveItem, meta: Dict) -> str:
+        """Build email notification message for chat thread"""
+        sender = meta.get('sender_name') or meta.get('sender_email', 'Unknown')
+        sender_email = meta.get('sender_email', '')
+        to_account = meta.get('to_account') or meta.get('account_email', '')
+        priority = meta.get('priority', 'normal')
+        
+        priority_indicator = "🔴 URGENT" if priority == "urgent" else "🟡 High Priority" if priority == "high" else ""
+        
+        message = f"📧 **New Email - Reply Ready**\n\n"
+        
+        if priority_indicator:
+            message += f"{priority_indicator}\n\n"
+        
+        if to_account:
+            message += f"**To:** {to_account}\n"
+        message += f"**From:** {sender}"
+        if sender_email and sender_email != sender:
+            message += f" ({sender_email})"
+        message += f"\n**Subject:** {item.source_title}\n"
+        
+        message += "\n---\n\n"
+        message += "**📝 Your Draft Reply:**\n\n"
+        message += item.draft_text  # Full draft, no truncation
+        
+        message += "\n\n---\n\n"
+        message += "**Suggested Actions:**\n"
+        message += "• Send this reply\n"
+        message += "• Edit and customize\n"
+        message += "• Ignore this email\n"
+        
+        return message
+    
+    def _build_meeting_chat_message(self, item: ProactiveItem, meta: Dict) -> str:
+        """Build meeting summary message for chat thread"""
+        structured = item.draft_structured or {}
+        duration = meta.get('duration_minutes', 0)
+        attendees = meta.get('attendees', [])
+        
+        message = f"🎙️ **Meeting Summary Ready**\n\n"
+        message += f"**{item.source_title}**\n"
+        message += f"📅 {meta.get('start_time', 'Unknown date')}"
+        if duration:
+            message += f" | ⏱️ {duration} min"
+        message += "\n"
+        
+        if attendees:
+            message += f"👥 {', '.join(attendees[:5])}"
+            if len(attendees) > 5:
+                message += f" +{len(attendees) - 5} more"
+            message += "\n"
+        
+        message += "\n---\n\n"
+        message += "**📋 Summary:**\n\n"
+        message += item.draft_text  # Full summary
+        
+        # Action items from structured data
+        action_items = structured.get('action_items', [])
+        if action_items:
+            message += "\n\n---\n\n"
+            message += "**✅ Action Items:**\n\n"
+            for i, action in enumerate(action_items, 1):
+                if isinstance(action, dict):
+                    message += f"{i}. {action.get('text', str(action))}\n"
+                else:
+                    message += f"{i}. {action}\n"
+        
+        # Key points
+        key_points = structured.get('key_points', [])
+        if key_points:
+            message += "\n\n---\n\n"
+            message += "**🔑 Key Points:**\n\n"
+            for point in key_points:
+                message += f"• {point}\n"
+        
+        message += "\n\n---\n\n"
+        message += "**Suggested Actions:**\n"
+        message += "• Create tasks in ClickUp\n"
+        message += "• Copy summary\n"
+        message += "• View recording\n"
+        
+        return message
+    
+    def _build_trend_chat_message(self, item: ProactiveItem, meta: Dict) -> str:
+        """Build trend/content opportunity message for chat thread with FULL blog outline"""
+        trend_ctx = item.trend_context or {}
+        
+        score = meta.get('trend_score', 0)
+        momentum = meta.get('momentum', 'STABLE')
+        urgency = meta.get('urgency', 'medium')
+        
+        urgency_emoji = "🔴" if urgency == "high" else "🟡" if urgency == "medium" else "🟢"
+        momentum_emoji = "🚀" if momentum == "BREAKOUT" else "📈" if momentum == "RISING" else "➡️"
+        
+        message = f"📊 **Content Opportunity**\n\n"
+        message += f"**{item.source_title}**\n"
+        message += f"Score: {score}/100 {urgency_emoji} | {momentum_emoji} {momentum}\n"
+        
+        if item.business_context:
+            message += f"Business: {item.business_context}\n"
+        
+        message += "\n---\n\n"
+        
+        # FULL Blog outline - this is the key fix!
+        message += "**📝 Blog Outline:**\n\n"
+        message += item.draft_text  # Full outline, no truncation!
+        
+        # Bluesky post (secondary content)
+        if item.draft_secondary:
+            message += "\n\n---\n\n"
+            message += "**🦋 Bluesky Post:**\n\n"
+            message += item.draft_secondary
+        
+        # RSS context that informed this
+        if item.rss_context:
+            message += "\n\n---\n\n"
+            message += "**📚 Based on RSS Insights:**\n\n"
+            for ctx in item.rss_context[:3]:
+                title = ctx.get('title', 'Untitled')
+                insight = ctx.get('insight', '')[:150]
+                message += f"• **{title}**\n"
+                if insight:
+                    message += f"  {insight}...\n"
+        
+        message += "\n\n---\n\n"
+        message += "**Suggested Actions:**\n"
+        message += "• Generate full blog post\n"
+        message += "• Post to Bluesky\n"
+        message += "• Research more\n"
+        message += "• Skip this trend\n"
+        
+        return message
+    
+    def _build_generic_chat_message(self, item: ProactiveItem, meta: Dict) -> str:
+        """Build generic message for chat thread"""
+        message = f"📌 **{item.source_title}**\n\n"
+        message += item.draft_text
+        
+        if item.draft_secondary:
+            message += f"\n\n---\n\n{item.draft_secondary}"
+        
+        return message
     
     # =========================================================================
     # ACTION HANDLERS

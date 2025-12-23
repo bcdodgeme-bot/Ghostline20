@@ -45,8 +45,8 @@ from io import StringIO
 from .pattern_fatigue import get_pattern_fatigue_tracker, handle_duplicate_complaint, handle_time_joke_complaint
 
 # Google Trends integration imports - 9/27/25
-from ..integrations.google_trends.opportunity_detector import OpportunityDetector
-from ..integrations.google_trends.opportunity_training import OpportunityTraining
+from ..integrations.google_trends.opportunity_detector import OpportunityDetector, get_opportunity_detector
+from ..integrations.google_trends.opportunity_training import OpportunityTraining, get_opportunity_training
 from ..integrations.google_trends.integration_info import check_module_health
 
 logger = logging.getLogger(__name__)
@@ -1970,7 +1970,7 @@ def detect_trends_command(message: str) -> tuple[bool, str]:
 async def process_training_feedback(message: str, user_id: str) -> str:
     """Process Good Match/Bad Match training feedback"""
     try:
-        training = OpportunityTraining()
+        training = get_opportunity_training()
         message_lower = message.lower()
         
         if 'good match' in message_lower:
@@ -2037,7 +2037,7 @@ Help improve trend opportunity detection with feedback:
 async def check_for_trend_opportunities(user_id: str) -> Optional[str]:
     """Check for proactive trend opportunities and return notification message"""
     try:
-        detector = OpportunityDetector(database_url)
+        detector = get_opportunity_detector()
         
         # Get current trending opportunities
         opportunities = await detector.detect_current_opportunities(hours_lookback=24)
@@ -2092,7 +2092,7 @@ async def process_trends_command(message: str, user_id: str) -> str:
             return await process_training_feedback(message, user_id)
         
         elif cmd_type == 'view_opportunities':
-            detector = OpportunityDetector(database_url)
+            detector = get_opportunity_detector()
             opportunities = await detector.detect_current_opportunities(hours_lookback=24)
             
             if not opportunities:
@@ -2120,7 +2120,7 @@ No trending opportunities found at this time.
         
         elif cmd_type == 'scan_trends':
             # Force a new scan
-            detector = OpportunityDetector(database_url)
+            detector = get_opportunity_detector()
             scan_result = await detector.force_scan_update()
             
             return f"""🔍 **Trends Scan Complete**

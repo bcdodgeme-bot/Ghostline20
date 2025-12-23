@@ -542,12 +542,20 @@ class CallbackHandler:
                     return {"success": False, "ack_text": "❌ Generation failed"}
                 
                 draft_text = draft_result['draft_text']
+                account_id = opportunity['detected_by_account']
+                
+                # Store draft in database for later posting
+                await conn.execute('''
+                    UPDATE bluesky_engagement_opportunities
+                    SET draft_text = $2, updated_at = NOW()
+                    WHERE id = $1
+                ''', UUID(opportunity_id), draft_text)
                 
                 # Build draft notification message - ESCAPE USER CONTENT
                 post_preview = html.escape(str(opportunity['post_text'] or '')[:100])
                 escaped_draft = html.escape(str(draft_text or ''))
                 escaped_handle = html.escape(str(opportunity['author_handle'] or ''))
-                escaped_account = html.escape(str(opportunity['detected_by_account'] or ''))
+                escaped_account = html.escape(str(account_id or ''))
                 
                 message_text = f"💬 <b>Draft Reply</b> (@{escaped_account})\n\n"
                 message_text += f"<b>Replying to:</b> @{escaped_handle}\n"
@@ -556,9 +564,10 @@ class CallbackHandler:
                 message_text += f"<i>{len(draft_text)} characters</i>"
                 
                 # Buttons for draft approval - USE LIST FORMAT
+                # FIXED: Include account_id in callback data
                 buttons = [
                     [
-                        {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}"},
+                        {'text': '✅ Post Reply', 'callback_data': f"bluesky:post_reply:{opportunity_id}:{account_id}"},
                         {'text': '⏭️ Skip', 'callback_data': f"bluesky:ignore:{opportunity_id}"}
                     ]
                 ]
@@ -579,6 +588,146 @@ class CallbackHandler:
                     reply_markup=None
                 )
                 return {"success": False, "ack_text": "❌ Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'post_reply':
+            # Post the reply to Bluesky
+            opportunity_id = notification_id
+            # Account comes from params (4th part of callback data)
+            account_id = params[0] if params else None
+            conn = None
+            
+            try:
+                conn = await db_manager.get_connection()
+                
+                # Fetch opportunity with stored draft
+                opportunity = await conn.fetchrow('''
+                    SELECT 
+                        id, post_uri, post_cid, author_did, detected_by_account,
+                        draft_text, author_handle
+                    FROM bluesky_engagement_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not opportunity:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "❌ Opportunity not found",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "Not found"}
+                
+                draft_text = opportunity['draft_text']
+                if not draft_text:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "❌ No draft found - please generate draft first",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "No draft"}
+                
+                # Use account from callback, fallback to detected_by_account
+                posting_account = account_id or opportunity['detected_by_account']
+                post_uri = opportunity['post_uri']
+                
+                # Get Bluesky client and fetch parent post for CID
+                from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
+                multi_client = get_bluesky_multi_client()
+                
+                # Build reply reference
+                # For Bluesky, we need parent and root refs with URI and CID
+                reply_to = None
+                if post_uri:
+                    try:
+                        # Fetch the parent post to get its CID
+                        import requests
+                        
+                        # Ensure authenticated
+                        if posting_account not in multi_client.sessions:
+                            await multi_client.authenticate_account(posting_account)
+                        
+                        # Get post thread to find CID
+                        thread_url = f"{multi_client.api_base}/xrpc/app.bsky.feed.getPostThread"
+                        response = requests.get(
+                            thread_url,
+                            headers=multi_client.get_auth_headers(posting_account),
+                            params={"uri": post_uri, "depth": 0},
+                            timeout=10
+                        )
+                        
+                        if response.ok:
+                            thread_data = response.json()
+                            post_data = thread_data.get('thread', {}).get('post', {})
+                            parent_cid = post_data.get('cid')
+                            
+                            if parent_cid:
+                                # Check if this post has a root (is itself a reply)
+                                reply_info = post_data.get('record', {}).get('reply', {})
+                                if reply_info.get('root'):
+                                    # This is a reply, use its root as our root
+                                    root_ref = reply_info['root']
+                                else:
+                                    # This is a top-level post, it IS the root
+                                    root_ref = {"uri": post_uri, "cid": parent_cid}
+                                
+                                reply_to = {
+                                    "root": root_ref,
+                                    "parent": {"uri": post_uri, "cid": parent_cid}
+                                }
+                                logger.info(f"Built reply reference: parent={post_uri[:50]}...")
+                        else:
+                            logger.warning(f"Could not fetch parent post for threading: {response.status_code}")
+                    except Exception as e:
+                        logger.warning(f"Could not build reply reference: {e}")
+                
+                # Post the reply
+                result = await multi_client.create_post(
+                    account_id=posting_account,
+                    text=draft_text,
+                    reply_to=reply_to
+                )
+                
+                if result.get('success'):
+                    # Mark as responded
+                    await conn.execute('''
+                        UPDATE bluesky_engagement_opportunities
+                        SET user_response = 'replied', 
+                            response_post_uri = $2,
+                            updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(opportunity_id), result.get('uri'))
+                    
+                    escaped_account = html.escape(str(posting_account or ''))
+                    threading_status = "as reply" if reply_to else "as new post (threading unavailable)"
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"✅ Posted {threading_status} via @{escaped_account}!",
+                        reply_markup=None
+                    )
+                    
+                    logger.info(f"✅ Posted reply to {posting_account}: {draft_text[:50]}...")
+                    return {"success": True, "ack_text": "Posted!"}
+                else:
+                    error_msg = html.escape(str(result.get('error', 'Unknown error')))
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"❌ Failed to post: {error_msg}",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "Post failed"}
+                
+            except Exception as e:
+                logger.error(f"Post reply failed: {e}", exc_info=True)
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Error: {html.escape(str(e))}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "Error"}
             
             finally:
                 if conn:
@@ -694,12 +843,20 @@ class CallbackHandler:
                     return {"success": False, "ack_text": "❌ Generation failed"}
                 
                 draft_text = draft_result['draft_text']
+                account_id = opportunity['detected_by_account']
+                
+                # Store draft in database for later posting
+                await conn.execute('''
+                    UPDATE bluesky_engagement_opportunities
+                    SET draft_text = $2, updated_at = NOW()
+                    WHERE id = $1
+                ''', UUID(opportunity_id), draft_text)
                 
                 # Build draft notification message - ESCAPE USER CONTENT
                 post_preview = html.escape(str(opportunity['post_text'] or '')[:100])
                 escaped_draft = html.escape(str(draft_text or ''))
                 escaped_handle = html.escape(str(opportunity['author_handle'] or ''))
-                escaped_account = html.escape(str(opportunity['detected_by_account'] or ''))
+                escaped_account = html.escape(str(account_id or ''))
                 
                 message = f"💬 <b>Draft Reply</b> (@{escaped_account})\n\n"
                 message += f"<b>Replying to:</b> @{escaped_handle}\n"
@@ -708,10 +865,11 @@ class CallbackHandler:
                 message += f"<i>{len(draft_text)} characters</i>"
                 
                 # Buttons for draft approval - USE LIST FORMAT
+                # FIXED: Include account_id in callback data
                 buttons = [
                     [
-                        {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}"},
-                        {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}"}
+                        {'text': '✅ Post Reply', 'callback_data': f"engagement:post_reply:{opportunity_id}:{account_id}"},
+                        {'text': '✏️ Edit', 'callback_data': f"engagement:edit_reply:{opportunity_id}:{account_id}"}
                     ],
                     [
                         {'text': '❌ Dismiss', 'callback_data': f"engagement:skip:{opportunity_id}"}
@@ -817,6 +975,142 @@ class CallbackHandler:
             except Exception as e:
                 logger.error(f"Skip failed: {e}")
                 return {"success": False, "ack_text": "❌ Error"}
+            
+            finally:
+                if conn:
+                    await db_manager.release_connection(conn)
+        
+        elif action == 'post_reply':
+            # Post the reply to Bluesky
+            opportunity_id = notification_id
+            # Account comes from params (4th part of callback data)
+            account_id = params[0] if params else None
+            conn = None
+            
+            try:
+                conn = await db_manager.get_connection()
+                
+                # Fetch opportunity with stored draft
+                opportunity = await conn.fetchrow('''
+                    SELECT 
+                        id, post_uri, post_cid, author_did, detected_by_account,
+                        draft_text, author_handle
+                    FROM bluesky_engagement_opportunities
+                    WHERE id = $1
+                ''', UUID(opportunity_id))
+                
+                if not opportunity:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "❌ Opportunity not found",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "Not found"}
+                
+                draft_text = opportunity['draft_text']
+                if not draft_text:
+                    await self.bot_client.edit_message(
+                        message_id,
+                        "❌ No draft found - please generate draft first",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "No draft"}
+                
+                # Use account from callback, fallback to detected_by_account
+                posting_account = account_id or opportunity['detected_by_account']
+                post_uri = opportunity['post_uri']
+                
+                # Get Bluesky client and fetch parent post for CID
+                from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
+                multi_client = get_bluesky_multi_client()
+                
+                # Build reply reference
+                reply_to = None
+                if post_uri:
+                    try:
+                        import requests
+                        
+                        # Ensure authenticated
+                        if posting_account not in multi_client.sessions:
+                            await multi_client.authenticate_account(posting_account)
+                        
+                        # Get post thread to find CID
+                        thread_url = f"{multi_client.api_base}/xrpc/app.bsky.feed.getPostThread"
+                        response = requests.get(
+                            thread_url,
+                            headers=multi_client.get_auth_headers(posting_account),
+                            params={"uri": post_uri, "depth": 0},
+                            timeout=10
+                        )
+                        
+                        if response.ok:
+                            thread_data = response.json()
+                            post_data = thread_data.get('thread', {}).get('post', {})
+                            parent_cid = post_data.get('cid')
+                            
+                            if parent_cid:
+                                # Check if this post has a root (is itself a reply)
+                                reply_info = post_data.get('record', {}).get('reply', {})
+                                if reply_info.get('root'):
+                                    root_ref = reply_info['root']
+                                else:
+                                    root_ref = {"uri": post_uri, "cid": parent_cid}
+                                
+                                reply_to = {
+                                    "root": root_ref,
+                                    "parent": {"uri": post_uri, "cid": parent_cid}
+                                }
+                                logger.info(f"Built reply reference: parent={post_uri[:50]}...")
+                        else:
+                            logger.warning(f"Could not fetch parent post for threading: {response.status_code}")
+                    except Exception as e:
+                        logger.warning(f"Could not build reply reference: {e}")
+                
+                # Post the reply
+                result = await multi_client.create_post(
+                    account_id=posting_account,
+                    text=draft_text,
+                    reply_to=reply_to
+                )
+                
+                if result.get('success'):
+                    # Mark as responded
+                    await conn.execute('''
+                        UPDATE bluesky_engagement_opportunities
+                        SET user_response = 'replied', 
+                            response_post_uri = $2,
+                            updated_at = NOW()
+                        WHERE id = $1
+                    ''', UUID(opportunity_id), result.get('uri'))
+                    
+                    escaped_account = html.escape(str(posting_account or ''))
+                    threading_status = "as reply" if reply_to else "as new post (threading unavailable)"
+                    
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"✅ Posted {threading_status} via @{escaped_account}!",
+                        reply_markup=None
+                    )
+                    
+                    logger.info(f"✅ Posted reply to {posting_account}: {draft_text[:50]}...")
+                    return {"success": True, "ack_text": "Posted!"}
+                else:
+                    error_msg = html.escape(str(result.get('error', 'Unknown error')))
+                    await self.bot_client.edit_message(
+                        message_id,
+                        f"❌ Failed to post: {error_msg}",
+                        reply_markup=None
+                    )
+                    return {"success": False, "ack_text": "Post failed"}
+                
+            except Exception as e:
+                logger.error(f"Post reply failed: {e}", exc_info=True)
+                await self.bot_client.edit_message(
+                    message_id,
+                    f"❌ Error: {html.escape(str(e))}",
+                    reply_markup=None
+                )
+                return {"success": False, "ack_text": "Error"}
             
             finally:
                 if conn:
