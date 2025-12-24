@@ -1051,6 +1051,15 @@ Output the post text and nothing else:"""
                 result = await self._execute_skip(row, action)
             elif action == 'ignore':
                 result = await self._execute_ignore(row)
+            elif action == 'blog':
+                # Blog action - user will continue in web chat
+                result = {'success': True, 'message': 'Blog started - continue in web chat', 'action': 'blog'}
+            elif action == 'research':
+                # Research action - user will continue in web chat
+                result = {'success': True, 'message': 'Research started - continue in web chat', 'action': 'research'}
+            elif action == 'action':
+                # Generic action acknowledgment
+                result = {'success': True, 'message': 'Action noted', 'action': 'action'}
             else:
                 result = {'success': False, 'message': f'Unknown action: {action}'}
             
