@@ -280,6 +280,32 @@ class TelegramWebhookHandler:
             return await self._handle_prayer_callback(callback_data, user_id)
         
         # =====================================================================
+        # BARE ACTION FALLBACK (for malformed buttons without prefix)
+        # =====================================================================
+        
+        bare_actions = ['blog', 'research', 'skip', 'post', 'send', 'edit', 'ignore', 'copy', 'tasks', 'done', 'action']
+        if callback_data in bare_actions:
+            logger.warning(f"⚠️ Received bare action without prefix: '{callback_data}' - check button creation code")
+            action_messages = {
+                'blog': '📝 Open chat to start blog',
+                'research': '🔍 Research mode - open chat',
+                'skip': '⏭️ Skipped',
+                'post': '🦋 Open chat to post',
+                'send': '✅ Open chat to send',
+                'edit': '✏️ Open chat to edit',
+                'ignore': '🔕 Ignored',
+                'copy': '📋 Copied',
+                'tasks': '📝 Open chat for tasks',
+                'done': '✅ Done',
+                'action': '✅ Noted',
+            }
+            return {
+                'success': True,
+                'toast_message': action_messages.get(callback_data, '✅ Noted'),
+                'show_alert': False
+            }
+        
+        # =====================================================================
         # UNKNOWN CALLBACK
         # =====================================================================
         
