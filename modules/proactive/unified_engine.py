@@ -350,8 +350,8 @@ class UnifiedProactiveEngine:
             if include_rss_context:
                 rss_context = await self._get_rss_context(keyword, business_area)
             
-            # Generate blog outline WITH RSS context
-            blog_outline = await self._generate_blog_outline(
+            # Generate blog post WITH RSS context
+            blog_post = await self._generate_blog_post(
                 keyword,
                 business_area,
                 trend_data,
@@ -368,13 +368,13 @@ class UnifiedProactiveEngine:
             
             # Create WordPress draft if available
             wordpress_edit_link = None
-            if WORDPRESS_AVAILABLE and blog_outline:
+            if WORDPRESS_AVAILABLE and blog_post:
                 try:
                     wp_client = get_wordpress_client()
                     
-                    # Extract title from blog outline (first # heading)
+                    # Extract title from blog post (first # heading)
                     blog_title = f"Blog: {keyword}"  # Default
-                    for line in blog_outline.split('\n'):
+                    for line in blog_post.split('\n'):
                         line = line.strip()
                         if line.startswith('# '):
                             blog_title = line[2:].strip()
@@ -384,7 +384,7 @@ class UnifiedProactiveEngine:
                     wp_result = await wp_client.create_draft_for_business(
                         business_area=business_area,
                         title=blog_title,
-                        content=blog_outline,
+                        content=blog_post,
                         focus_keyword=keyword
                     )
                     
@@ -411,7 +411,7 @@ class UnifiedProactiveEngine:
                     'wordpress_edit_link': wordpress_edit_link,  # Include in metadata
                 },
                 content_type=ContentType.BLOG_OUTLINE,
-                draft_text=blog_outline,
+                draft_text=blog_post,
                 draft_title=f"Blog: {keyword}",
                 draft_secondary=bluesky_post,  # Bluesky post as secondary content
                 rss_context=rss_context,
@@ -486,26 +486,26 @@ Write the reply now (no explanations, just the reply text):"""
             logger.error(f"❌ Failed to generate email reply: {e}")
             return f"[Draft generation failed: {e}]"
     
-    async def _generate_blog_outline(
+    async def _generate_blog_post(
         self,
         keyword: str,
         business_area: str,
         trend_data: Dict[str, Any],
         rss_context: List[Dict]
     ) -> str:
-        """Generate a blog outline with RSS context"""
+        """Generate a full blog post with RSS context"""
         try:
             openrouter = await get_openrouter_client()
             
             # Format RSS context
             rss_text = ""
             if rss_context:
-                rss_text = "\n\n**Related Industry Insights (from RSS feeds):**\n"
+                rss_text = "\n\n**Related Industry Insights (use these to add depth):**\n"
                 for i, article in enumerate(rss_context[:5], 1):
                     rss_text += f"{i}. {article.get('title', 'Untitled')}\n"
                     rss_text += f"   Key insight: {article.get('insight', '')[:150]}\n"
             
-            prompt = f"""Create a blog post outline for this trending topic.
+            prompt = f"""Write a complete blog post for this trending topic.
 
 **Trending Keyword:** {keyword}
 **Business Area:** {business_area}
@@ -513,15 +513,18 @@ Write the reply now (no explanations, just the reply text):"""
 **Momentum:** {trend_data.get('trend_momentum', 'STABLE')}
 {rss_text}
 
-**Instructions:**
-1. Create a compelling title
-2. Write a hook/intro paragraph
-3. Outline 3-5 main sections with bullet points
-4. Include a call-to-action
-5. Incorporate insights from the RSS articles where relevant
-6. Make it actionable and valuable
+**Requirements:**
+1. Write a compelling, SEO-friendly title (use the keyword naturally)
+2. Write a strong hook in the first paragraph that draws readers in
+3. Write 600-1000 words of substantive content
+4. Use subheadings (## format) to break up sections
+5. Include practical insights, tips, or analysis - not fluff
+6. Incorporate relevant insights from the RSS articles naturally
+7. End with a clear call-to-action or thought-provoking conclusion
+8. Write in a conversational but authoritative tone
+9. Make it ready for light editing, not a rough draft
 
-Format as a ready-to-expand outline:"""
+Write the complete blog post now:"""
 
             response = await openrouter.chat_completion(
                 messages=[
@@ -529,17 +532,17 @@ Format as a ready-to-expand outline:"""
                     {"role": "user", "content": prompt}
                 ],
                 model=self.default_model,
-                max_tokens=1500,
+                max_tokens=2500,
                 temperature=0.7
             )
             
-            outline = response['choices'][0]['message']['content'].strip()
-            logger.info(f"✅ Generated blog outline ({len(outline)} chars)")
-            return outline
+            post = response['choices'][0]['message']['content'].strip()
+            logger.info(f"✅ Generated blog post ({len(post)} chars)")
+            return post
             
         except Exception as e:
-            logger.error(f"❌ Failed to generate blog outline: {e}")
-            return f"[Blog outline generation failed: {e}]"
+            logger.error(f"❌ Failed to generate blog post: {e}")
+            return f"[Blog post generation failed: {e}]"
     
     async def _generate_trend_bluesky_post(
         self,

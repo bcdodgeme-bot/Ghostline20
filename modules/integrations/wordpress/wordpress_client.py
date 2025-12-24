@@ -29,32 +29,39 @@ class WordPressMultiClient:
         self.sites = self._load_site_config()
         self.sessions = {}  # Cache for aiohttp sessions
         
+        # Business areas that should NOT create WordPress drafts (notifications only)
+        self.skip_wordpress = {'amcf'}
+        
         # Map business areas to WordPress sites
         self.business_to_site = {
-            # Personal blog
+            # Personal blog (bcdodge.me)
+            'bcdodge': 'personal',
             'personal': 'personal',
             'technology': 'personal',
             'ai': 'personal',
             'productivity': 'personal',
             
-            # Rose & Angel (nonprofit consulting)
+            # Rose & Angel (roseandangel.com)
+            'roseandangel': 'rose_angel',
             'rose_angel': 'rose_angel',
             'nonprofit': 'rose_angel',
             'consulting': 'rose_angel',
             
-            # TV Signals (streaming/entertainment)
-            'binge_tv': 'binge_tv',
+            # TV Signals (tvsignals.com)
             'tvsignals': 'binge_tv',
+            'binge_tv': 'binge_tv',
             'streaming': 'binge_tv',
             'entertainment': 'binge_tv',
             'tv': 'binge_tv',
             
-            # Meals n Feelz (food nonprofit)
+            # Meals n Feelz (mealsnfeelz.org)
+            'mealsnfeelz': 'meals_feelz',
             'meals_feelz': 'meals_feelz',
-            'food': 'meals_feelz',
+            'fidya': 'meals_feelz',
             'charity': 'meals_feelz',
             
-            # Damn it Carl (creative)
+            # Damn it Carl (damnitcarl.com)
+            'damnitcarl': 'damn_it_carl',
             'damn_it_carl': 'damn_it_carl',
             'creative': 'damn_it_carl',
             'burnout': 'damn_it_carl',
@@ -246,12 +253,28 @@ class WordPressMultiClient:
         Returns:
             Dict with success status and post details
         """
+        # Normalize business area
+        normalized = business_area.lower().replace(' ', '_').replace('-', '_')
+        
+        # Check if this business area should skip WordPress (notifications only)
+        if normalized in self.skip_wordpress:
+            logger.info(f"⏭️ Skipping WordPress draft for '{business_area}' (notifications only)")
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": f"Business area '{business_area}' is configured for notifications only"
+            }
+        
         site_id = self.get_site_for_business(business_area)
         
         if not site_id:
-            # Default to personal blog for unknown business areas
-            site_id = 'personal'
-            logger.warning(f"Unknown business area '{business_area}', defaulting to personal blog")
+            # Unknown business area - skip instead of defaulting to personal
+            logger.warning(f"⚠️ Unknown business area '{business_area}', skipping WordPress draft")
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": f"Unknown business area '{business_area}' - no WordPress site mapped"
+            }
         
         if not self.is_site_configured(site_id):
             return {
