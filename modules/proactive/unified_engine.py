@@ -324,7 +324,7 @@ class UnifiedProactiveEngine:
         include_rss_context: bool = True
     ) -> Optional[str]:
         """
-        Process a trending topic and generate blog outline + Bluesky post.
+        Process a trending topic and generate blog post + Bluesky post.
         
         Args:
             trend_data: Trend information (keyword, score, business_area, etc.)
@@ -339,10 +339,15 @@ class UnifiedProactiveEngine:
             
             logger.info(f"📊 Processing trend: {keyword} ({business_area})")
             
-            # Check if already processed
+            # Check if already processed by ID
             trend_id = str(trend_data.get('id', ''))
             if await self._is_already_processed('trend', trend_id):
-                logger.info("   Already processed, skipping")
+                logger.info("   Already processed (by ID), skipping")
+                return None
+            
+            # Check if this keyword was already processed recently (24 hours)
+            if await self._is_trend_keyword_processed(keyword, business_area):
+                logger.info(f"   Keyword '{keyword}' already processed in last 24h, skipping")
                 return None
             
             # Get RSS context
@@ -350,7 +355,7 @@ class UnifiedProactiveEngine:
             if include_rss_context:
                 rss_context = await self._get_rss_context(keyword, business_area)
             
-            # Generate blog post WITH RSS context
+            # Generate full blog post WITH RSS context
             blog_post = await self._generate_blog_post(
                 keyword,
                 business_area,
@@ -391,6 +396,8 @@ class UnifiedProactiveEngine:
                     if wp_result.get('success'):
                         wordpress_edit_link = wp_result.get('edit_link')
                         logger.info(f"📝 WordPress draft created: {wp_result.get('site_id')} - {blog_title[:50]}")
+                    elif wp_result.get('skipped'):
+                        logger.info(f"⏭️ WordPress draft skipped: {wp_result.get('reason')}")
                     else:
                         logger.warning(f"⚠️ WordPress draft failed: {wp_result.get('error')}")
                         
@@ -1333,6 +1340,37 @@ Output the post text and nothing else:"""
                 SELECT COUNT(*) FROM unified_proactive_queue
                 WHERE source_type = $1 AND source_id = $2
             ''', source_type, source_id)
+            return count > 0
+        finally:
+            await db_manager.release_connection(conn)
+    
+    async def _is_trend_keyword_processed(self, keyword: str, business_area: str, hours: int = 24) -> bool:
+        """
+        Check if this trend keyword was already processed recently.
+        
+        This prevents duplicate blog posts for the same keyword even when
+        the trend gets a new ID each time it's detected.
+        
+        Args:
+            keyword: The trending keyword
+            business_area: Business area (damnitcarl, tvsignals, etc.)
+            hours: Look back period in hours (default 24)
+            
+        Returns:
+            True if keyword was processed in the time window, False otherwise
+        """
+        if not keyword:
+            return False
+        
+        conn = await db_manager.get_connection()
+        try:
+            count = await conn.fetchval('''
+                SELECT COUNT(*) FROM unified_proactive_queue
+                WHERE source_type = 'trend'
+                AND trend_context->>'keyword' = $1
+                AND business_context = $2
+                AND created_at > NOW() - INTERVAL '1 hour' * $3
+            ''', keyword, business_area, hours)
             return count > 0
         finally:
             await db_manager.release_connection(conn)
