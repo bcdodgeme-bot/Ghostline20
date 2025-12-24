@@ -65,7 +65,7 @@ class AudioCacheManager:
         Cache audio data in database with metadata
         
         Args:
-            message_id: Unique message identifier
+            message_id: Unique message identifier (UUID or any string)
             audio_data: Raw MP3 audio bytes
             metadata: Voice synthesis metadata (personality, voice, etc.)
             
@@ -93,35 +93,42 @@ class AudioCacheManager:
             # Encode for database storage
             encoded_data = base64.b64encode(storage_data).decode('utf-8')
             
-            # Add storage metadata
-            metadata.update({
-                'original_size': len(audio_data),
-                'stored_size': len(storage_data),
-                'encoding': 'base64',
-                'mime_type': 'audio/mpeg',
-                'cached_at': datetime.now().isoformat()
-            })
+            # Extract metadata fields
+            personality_id = metadata.get('personality_id', 'syntaxprime')
+            voice_id = metadata.get('voice_id', 'unknown')
+            text_length = metadata.get('text_length', 0)
             
-            metadata_json = json.dumps(metadata)
-            
-            # Update conversation_messages with audio data
+            # Insert into voice_synthesis_cache table (works with any message_id format)
             query = """
-            UPDATE conversation_messages 
-            SET 
-                audio_file_path = $1,
-                audio_file_size = $2,
-                voice_synthesis_metadata = $3::jsonb,
-                audio_generated_at = NOW()
-            WHERE id = $4::uuid
+            INSERT INTO voice_synthesis_cache (
+                message_id,
+                text_content,
+                voice_id,
+                personality,
+                audio_data,
+                audio_format,
+                file_size_bytes,
+                created_at,
+                accessed_at,
+                access_count
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), 1)
+            ON CONFLICT (message_id) DO UPDATE SET
+                audio_data = EXCLUDED.audio_data,
+                file_size_bytes = EXCLUDED.file_size_bytes,
+                accessed_at = NOW(),
+                access_count = voice_synthesis_cache.access_count + 1
             RETURNING id;
             """
             
             result = await db_manager.fetch_one(
                 query,
-                encoded_data,  # Store base64 encoded audio in audio_file_path
-                len(audio_data),  # Original file size
-                metadata_json,
-                message_id
+                message_id,  # VARCHAR - accepts any string format
+                f"[Audio for message, length: {text_length}]",  # text_content placeholder
+                voice_id,
+                personality_id,
+                encoded_data,  # base64 encoded audio
+                'mp3',
+                len(audio_data)  # Original file size
             )
             
             if result:
@@ -140,7 +147,7 @@ class AudioCacheManager:
             else:
                 return {
                     'success': False,
-                    'error': f'Message {message_id} not found in database'
+                    'error': f'Failed to cache audio for message {message_id}'
                 }
         
         except Exception as e:
@@ -155,45 +162,41 @@ class AudioCacheManager:
         Check if audio exists in cache and return metadata
         
         Args:
-            message_id: Message identifier to check (must be a valid UUID)
+            message_id: Message identifier to check (any string format)
             
         Returns:
             Dictionary with cache metadata or None if not cached
         """
         try:
-            # Validate that message_id is a valid UUID
-            if not is_valid_uuid(message_id):
-                logger.warning(f"⚠️ Invalid UUID format for cache check: {message_id}")
-                self.cache_misses += 1
-                return None
-            
             query = """
             SELECT 
-                audio_file_size,
-                voice_synthesis_metadata,
-                audio_generated_at
-            FROM conversation_messages 
-            WHERE id = $1::uuid 
-                AND audio_file_path IS NOT NULL
-                AND audio_file_size > 0;
+                file_size_bytes,
+                voice_id,
+                personality,
+                created_at,
+                access_count
+            FROM voice_synthesis_cache 
+            WHERE message_id = $1
+                AND audio_data IS NOT NULL;
             """
             
             result = await db_manager.fetch_one(query, message_id)
             
             if result:
-                # Parse metadata
-                metadata = result['voice_synthesis_metadata']
-                if isinstance(metadata, str):
-                    metadata = json.loads(metadata)
-                
                 self.cache_hits += 1
                 
+                # Update access tracking
+                await db_manager.execute(
+                    "UPDATE voice_synthesis_cache SET accessed_at = NOW(), access_count = access_count + 1 WHERE message_id = $1",
+                    message_id
+                )
+                
                 return {
-                    'file_size': result['audio_file_size'],
-                    'metadata': metadata,
-                    'generated_at': result['audio_generated_at'].isoformat() if result['audio_generated_at'] else None,
-                    'voice_used': metadata.get('voice_id', 'unknown'),
-                    'personality': metadata.get('personality_id', 'unknown')
+                    'file_size': result['file_size_bytes'],
+                    'voice_used': result['voice_id'],
+                    'personality': result['personality'],
+                    'generated_at': result['created_at'].isoformat() if result['created_at'] else None,
+                    'access_count': result['access_count']
                 }
             else:
                 self.cache_misses += 1
@@ -209,25 +212,22 @@ class AudioCacheManager:
         Retrieve actual audio data from cache
         
         Args:
-            message_id: Message identifier (must be a valid UUID)
+            message_id: Message identifier (any string format)
             
         Returns:
             Dictionary with audio data and metadata, or None if not found
         """
         try:
-            # Validate that message_id is a valid UUID
-            if not is_valid_uuid(message_id):
-                logger.warning(f"⚠️ Invalid UUID format for audio request: {message_id}")
-                return None
-            
             query = """
             SELECT 
-                audio_file_path,
-                audio_file_size,
-                voice_synthesis_metadata
-            FROM conversation_messages 
-            WHERE id = $1::uuid 
-                AND audio_file_path IS NOT NULL;
+                audio_data,
+                file_size_bytes,
+                voice_id,
+                personality,
+                audio_format
+            FROM voice_synthesis_cache 
+            WHERE message_id = $1
+                AND audio_data IS NOT NULL;
             """
             
             result = await db_manager.fetch_one(query, message_id)
@@ -236,27 +236,30 @@ class AudioCacheManager:
                 return None
             
             # Decode audio data
-            encoded_data = result['audio_file_path']
+            encoded_data = result['audio_data']
             storage_data = base64.b64decode(encoded_data.encode('utf-8'))
             
-            # Parse metadata
-            metadata = result['voice_synthesis_metadata']
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
-            
-            # Decompress if needed
-            if metadata.get('compressed', False):
+            # Decompress (we always compress when caching)
+            try:
                 audio_data = gzip.decompress(storage_data)
-            else:
+            except gzip.BadGzipFile:
+                # Not compressed, use as-is
                 audio_data = storage_data
             
             logger.info(f"🎵 Retrieved cached audio for message {message_id} ({len(audio_data)} bytes)")
             
+            # Update access tracking
+            await db_manager.execute(
+                "UPDATE voice_synthesis_cache SET accessed_at = NOW(), access_count = access_count + 1 WHERE message_id = $1",
+                message_id
+            )
+            
             return {
                 'data': audio_data,
                 'size': len(audio_data),
-                'metadata': metadata,
-                'mime_type': metadata.get('mime_type', 'audio/mpeg')
+                'mime_type': 'audio/mpeg',
+                'voice_id': result['voice_id'],
+                'personality': result['personality']
             }
         
         except Exception as e:
@@ -268,23 +271,9 @@ class AudioCacheManager:
         Delete cached audio for a specific message
         """
         try:
-            # Validate that message_id is a valid UUID
-            if not is_valid_uuid(message_id):
-                logger.warning(f"⚠️ Invalid UUID format for delete: {message_id}")
-                return {
-                    'success': False,
-                    'error': f'Invalid message ID format: {message_id}'
-                }
-            
             query = """
-            UPDATE conversation_messages 
-            SET 
-                audio_file_path = NULL,
-                audio_file_size = NULL,
-                voice_synthesis_metadata = '{}'::jsonb,
-                audio_generated_at = NULL
-            WHERE id = $1::uuid 
-                AND audio_file_path IS NOT NULL
+            DELETE FROM voice_synthesis_cache 
+            WHERE message_id = $1
             RETURNING id;
             """
             
@@ -318,24 +307,17 @@ class AudioCacheManager:
             
             # Get files to be deleted (for size calculation)
             query_select = """
-            SELECT COUNT(*) as file_count, SUM(audio_file_size) as total_size
-            FROM conversation_messages 
-            WHERE audio_generated_at < $1 
-                AND audio_file_path IS NOT NULL;
+            SELECT COUNT(*) as file_count, COALESCE(SUM(file_size_bytes), 0) as total_size
+            FROM voice_synthesis_cache 
+            WHERE created_at < $1;
             """
             
             stats = await db_manager.fetch_one(query_select, cutoff_date)
             
             # Delete old audio files
             query_delete = """
-            UPDATE conversation_messages 
-            SET 
-                audio_file_path = NULL,
-                audio_file_size = NULL,
-                voice_synthesis_metadata = '{}'::jsonb,
-                audio_generated_at = NULL
-            WHERE audio_generated_at < $1 
-                AND audio_file_path IS NOT NULL;
+            DELETE FROM voice_synthesis_cache 
+            WHERE created_at < $1;
             """
             
             await db_manager.execute(query_delete, cutoff_date)
@@ -368,28 +350,25 @@ class AudioCacheManager:
             query_stats = """
             SELECT 
                 COUNT(*) as total_files,
-                COALESCE(SUM(audio_file_size), 0) as total_size_bytes,
-                COALESCE(AVG(audio_file_size), 0) as avg_file_size,
-                MIN(audio_generated_at) as oldest_audio,
-                MAX(audio_generated_at) as newest_audio
-            FROM conversation_messages 
-            WHERE audio_file_path IS NOT NULL 
-                AND audio_file_size > 0;
+                COALESCE(SUM(file_size_bytes), 0) as total_size_bytes,
+                COALESCE(AVG(file_size_bytes), 0) as avg_file_size,
+                MIN(created_at) as oldest_audio,
+                MAX(created_at) as newest_audio
+            FROM voice_synthesis_cache 
+            WHERE audio_data IS NOT NULL;
             """
             
             stats = await db_manager.fetch_one(query_stats)
             
-            # Personality breakdown - FIXED: Using PostgreSQL JSONB syntax
+            # Personality breakdown
             query_personality = """
             SELECT 
-                voice_synthesis_metadata->>'personality_id' as personality_id,
+                personality as personality_id,
                 COUNT(*) as audio_count,
-                COALESCE(SUM(audio_file_size), 0) as total_size
-            FROM conversation_messages 
-            WHERE voice_synthesis_metadata IS NOT NULL 
-                AND voice_synthesis_metadata != '{}'::jsonb
-                AND audio_file_path IS NOT NULL
-            GROUP BY voice_synthesis_metadata->>'personality_id'
+                COALESCE(SUM(file_size_bytes), 0) as total_size
+            FROM voice_synthesis_cache 
+            WHERE audio_data IS NOT NULL
+            GROUP BY personality
             ORDER BY audio_count DESC;
             """
             
@@ -398,9 +377,8 @@ class AudioCacheManager:
             # Recent activity (last 24 hours)
             query_recent = """
             SELECT COUNT(*) as recent_generations
-            FROM conversation_messages 
-            WHERE audio_generated_at >= NOW() - INTERVAL '24 hours'
-                AND audio_file_path IS NOT NULL;
+            FROM voice_synthesis_cache 
+            WHERE created_at >= NOW() - INTERVAL '24 hours';
             """
             
             recent = await db_manager.fetch_one(query_recent)
@@ -441,18 +419,16 @@ class AudioCacheManager:
         Get daily audio generation statistics
         """
         try:
-            # Last 7 days of activity - FIXED: Using PostgreSQL JSONB syntax
+            # Last 7 days of activity
             query = """
             SELECT 
-                DATE(audio_generated_at) as generation_date,
+                DATE(created_at) as generation_date,
                 COUNT(*) as daily_generations,
-                COALESCE(SUM(audio_file_size), 0) as daily_size_bytes,
-                AVG((voice_synthesis_metadata->>'generation_time_ms')::int) as avg_generation_time_ms
-            FROM conversation_messages 
-            WHERE audio_generated_at >= NOW() - INTERVAL '7 days'
-                AND audio_file_path IS NOT NULL
-                AND voice_synthesis_metadata IS NOT NULL
-            GROUP BY DATE(audio_generated_at)
+                COALESCE(SUM(file_size_bytes), 0) as daily_size_bytes
+            FROM voice_synthesis_cache 
+            WHERE created_at >= NOW() - INTERVAL '7 days'
+                AND audio_data IS NOT NULL
+            GROUP BY DATE(created_at)
             ORDER BY generation_date DESC;
             """
             
@@ -463,8 +439,7 @@ class AudioCacheManager:
                     {
                         'date': stat['generation_date'].isoformat() if stat['generation_date'] else None,
                         'generations': stat['daily_generations'],
-                        'size_mb': round((stat['daily_size_bytes'] or 0) / (1024 * 1024), 2),
-                        'avg_generation_time_ms': stat['avg_generation_time_ms']
+                        'size_mb': round((stat['daily_size_bytes'] or 0) / (1024 * 1024), 2)
                     }
                     for stat in daily_stats
                 ],
@@ -483,23 +458,17 @@ class AudioCacheManager:
         Get detailed statistics by personality
         """
         try:
-            # FIXED: Using PostgreSQL JSONB syntax (was using SQLite json_extract)
             query = """
             SELECT 
-                voice_synthesis_metadata->>'personality_id' as personality_id,
-                voice_synthesis_metadata->>'voice_id' as voice_id,
+                personality as personality_id,
+                voice_id,
                 COUNT(*) as usage_count,
-                COALESCE(SUM(audio_file_size), 0) as total_size_bytes,
-                COALESCE(AVG(audio_file_size), 0) as avg_file_size,
-                AVG((voice_synthesis_metadata->>'generation_time_ms')::int) as avg_generation_time_ms,
-                MAX(audio_generated_at) as last_used
-            FROM conversation_messages 
-            WHERE voice_synthesis_metadata IS NOT NULL 
-                AND voice_synthesis_metadata != '{}'::jsonb
-                AND audio_file_path IS NOT NULL
-            GROUP BY 
-                voice_synthesis_metadata->>'personality_id',
-                voice_synthesis_metadata->>'voice_id'
+                COALESCE(SUM(file_size_bytes), 0) as total_size_bytes,
+                COALESCE(AVG(file_size_bytes), 0) as avg_file_size,
+                MAX(created_at) as last_used
+            FROM voice_synthesis_cache 
+            WHERE audio_data IS NOT NULL
+            GROUP BY personality, voice_id
             ORDER BY usage_count DESC;
             """
             
@@ -513,7 +482,6 @@ class AudioCacheManager:
                         'total_usage': 0,
                         'total_size_mb': 0.0,
                         'voices_used': {},
-                        'avg_generation_time_ms': 0,
                         'last_used': None
                     }
                 
@@ -522,7 +490,6 @@ class AudioCacheManager:
                     'usage_count': stat['usage_count'],
                     'size_mb': round((stat['total_size_bytes'] or 0) / (1024 * 1024), 2),
                     'avg_file_size': stat['avg_file_size'],
-                    'avg_generation_time_ms': stat['avg_generation_time_ms'],
                     'last_used': stat['last_used'].isoformat() if stat['last_used'] else None
                 }
                 
@@ -574,7 +541,7 @@ class AudioCacheManager:
         """
         try:
             # Test database connectivity
-            query = "SELECT COUNT(*) as count FROM conversation_messages WHERE audio_file_path IS NOT NULL;"
+            query = "SELECT COUNT(*) as count FROM voice_synthesis_cache WHERE audio_data IS NOT NULL;"
             result = await db_manager.fetch_one(query)
             
             cached_files = result['count'] if result else 0
