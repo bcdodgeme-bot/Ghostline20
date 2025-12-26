@@ -3,6 +3,7 @@ SYNTAX PRIME V2 - MEMORY QUERY LAYER
 Created: 2024-10-26
 Updated: 2025 - Fixed SQL injection vulnerabilities (INTERVAL string formatting)
 Updated: 2025-12-18 - Added notification thread filtering to prevent conversation loops
+Updated: 2025-12-26 - Fixed UUID case-sensitivity bug causing every message to load COMPREHENSIVE context
 
 PURPOSE:
 Transform Syntax from conversation-window memory to database-driven memory.
@@ -119,7 +120,8 @@ async def detect_context_level(user_id: str, thread_id: Optional[str]) -> str:
         # Calculate gaps
         hours_gap = (now - last_time).total_seconds() / 3600
         is_new_day = last_time.date() < now.date()
-        is_new_thread = not thread_id or str(last_msg['thread_id']) != str(thread_id)
+        # BUGFIX 2025-12-26: Normalize UUIDs to lowercase - iOS sends uppercase, DB returns lowercase
+        is_new_thread = not thread_id or str(last_msg['thread_id']).lower() != str(thread_id).lower()
         
         logger.info(f"⏰ Context detection: {hours_gap:.1f}h gap, new_day={is_new_day}, new_thread={is_new_thread}")
         
