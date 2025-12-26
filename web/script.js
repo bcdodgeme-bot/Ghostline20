@@ -22,6 +22,10 @@ class SyntaxPrimeChat {
         this.submitCooldown = 1000;
         this.messageDuplicationWindow = 5000;
         
+        // Screen lock recovery system
+        this.pendingRequest = null;  // Tracks in-flight request for recovery
+        this.wasHiddenDuringRequest = false;
+        
         // Google Trends Training System
         this.trendsEnabled = false;
         this.pendingOpportunities = [];
@@ -67,6 +71,7 @@ class SyntaxPrimeChat {
     // === Initialization ===
     init() {
         this.setupEventListeners();
+        this.setupVisibilityListener();  // Screen lock recovery
         this.loadPersonalities();
         this.loadConversations();
         this.loadBookmarks();
@@ -81,6 +86,105 @@ class SyntaxPrimeChat {
         document.getElementById('messageInput').focus();
         
         this.debugDatetimeContext();
+    }
+    
+    // === Screen Lock Recovery System ===
+    setupVisibilityListener() {
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Screen is being locked/tab hidden
+                if (this.isSubmitting && this.pendingRequest) {
+                    console.log('📱 Screen hidden during active request - marking for recovery');
+                    this.wasHiddenDuringRequest = true;
+                }
+            } else {
+                // Screen unlocked/tab visible again
+                console.log('📱 Screen visible again');
+                if (this.wasHiddenDuringRequest && this.pendingRequest) {
+                    console.log('🔄 Detected interrupted request - attempting recovery');
+                    this.handleInterruptedRequest();
+                }
+                this.wasHiddenDuringRequest = false;
+            }
+        });
+    }
+    
+    handleInterruptedRequest() {
+        // Check if we still have a pending request that may have been interrupted
+        if (!this.pendingRequest) return;
+        
+        const { message, messageId, startTime } = this.pendingRequest;
+        const elapsed = Date.now() - startTime;
+        
+        // If request has been pending for more than 30 seconds, likely interrupted
+        if (elapsed > 30000 && this.isSubmitting) {
+            console.log('⚠️ Request likely interrupted by screen lock');
+            
+            // Hide typing indicator if still showing
+            this.hideTypingIndicator();
+            
+            // Show recovery message with retry option
+            this.showInterruptedRequestRecovery(message);
+            
+            // Reset submission state
+            this.isSubmitting = false;
+            this.setInputState(true);
+            this.pendingRequest = null;
+        }
+    }
+    
+    showInterruptedRequestRecovery(originalMessage) {
+        const messagesContainer = document.getElementById('chatMessages');
+        
+        // Create recovery message
+        const recoveryDiv = document.createElement('div');
+        recoveryDiv.className = 'message system recovery-message';
+        recoveryDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-bubble" style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3);">
+                    <div class="message-text">
+                        <p style="margin: 0 0 8px 0;">⚠️ Connection interrupted (screen locked during request)</p>
+                        <button class="retry-button" style="
+                            background: var(--accent);
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 14px;
+                        ">🔄 Retry Message</button>
+                        <button class="dismiss-button" style="
+                            background: transparent;
+                            color: var(--text-secondary);
+                            border: 1px solid var(--border);
+                            padding: 8px 16px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 14px;
+                            margin-left: 8px;
+                        ">Dismiss</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add retry handler
+        const retryBtn = recoveryDiv.querySelector('.retry-button');
+        retryBtn.addEventListener('click', () => {
+            recoveryDiv.remove();
+            // Re-populate input and trigger send
+            document.getElementById('messageInput').value = originalMessage;
+            this.sendMessage();
+        });
+        
+        // Add dismiss handler
+        const dismissBtn = recoveryDiv.querySelector('.dismiss-button');
+        dismissBtn.addEventListener('click', () => {
+            recoveryDiv.remove();
+        });
+        
+        messagesContainer.appendChild(recoveryDiv);
+        recoveryDiv.scrollIntoView({ behavior: 'smooth' });
     }
     
     // === Random Greeting System ===
@@ -1191,6 +1295,13 @@ class SyntaxPrimeChat {
         this.isSubmitting = true;
         this.lastSubmitTime = Date.now();
         
+        // Track pending request for screen lock recovery
+        this.pendingRequest = {
+            message: message,
+            messageId: messageId,
+            startTime: Date.now()
+        };
+        
         // Disable input while sending
         this.setInputState(false);
         
@@ -1254,6 +1365,9 @@ class SyntaxPrimeChat {
             // Update thread ID
             this.currentThreadId = response.thread_id;
             
+            // Clear pending request - success!
+            this.pendingRequest = null;
+            
             // Hide typing indicator
             this.hideTypingIndicator();
             
@@ -1279,12 +1393,29 @@ class SyntaxPrimeChat {
         } catch (error) {
             console.error(`❌ Chat error (ID: ${messageId}):`, error);
             this.hideTypingIndicator();
-            this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
+            
+            // Check if this might be a screen lock interruption
+            const isAbortError = error.name === 'AbortError' ||
+                                 error.message.includes('aborted') ||
+                                 error.message.includes('Failed to fetch');
+            
+            if (isAbortError && this.wasHiddenDuringRequest) {
+                // Don't show generic error - let visibility handler deal with it
+                console.log('🔄 Request aborted during screen lock - recovery will handle');
+            } else {
+                // Regular error - show message
+                this.addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
+                this.pendingRequest = null;  // Clear on regular error
+            }
         } finally {
-            // Always reset submission state
-            console.log(`🔓 Resetting isSubmitting = false (ID: ${messageId})`);
-            this.isSubmitting = false;
-            this.setInputState(true);
+            // Always reset submission state (unless waiting for recovery)
+            if (!this.wasHiddenDuringRequest || !this.pendingRequest) {
+                console.log(`🔓 Resetting isSubmitting = false (ID: ${messageId})`);
+                this.isSubmitting = false;
+                this.setInputState(true);
+            } else {
+                console.log(`⏳ Keeping submission state for potential recovery (ID: ${messageId})`);
+            }
         }
     }
     
