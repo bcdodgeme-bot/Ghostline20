@@ -586,8 +586,8 @@ body {
 
 /* Adjust chat messages height when video is visible */
 .chat-container.has-gesture-video .chat-messages {
-    max-height: calc(100vh - 350px - 70px - 140px - 48px);
-    /* viewport - video - header - input area - video padding */
+    flex: 1;
+    min-height: 0;
 }
 
 /* === Simplified Welcome Message === */
