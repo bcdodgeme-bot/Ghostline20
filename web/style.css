@@ -561,8 +561,8 @@ body {
 }
 
 .gesture-video-wrapper {
-    width: 350px;
-    height: 350px;
+    width: 200px;
+    height: 2000px;
     border-radius: var(--radius-xl);
     overflow: hidden;
     box-shadow: var(--shadow-glow), var(--shadow-lg);
