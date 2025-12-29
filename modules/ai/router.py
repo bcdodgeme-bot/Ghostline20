@@ -100,7 +100,7 @@ async def chat_with_ai(
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     user_id: str = Depends(get_current_user_id),
-    _internal_image_attachments: Optional[List[Dict]] = None  # Internal use only - for iOS/JSON endpoint
+    internal_image_attachments: Optional[List[Dict]] = None  # Internal use only - for iOS/JSON endpoint
 ):
     """
     Main chat endpoint with file upload support
@@ -111,7 +111,7 @@ async def chat_with_ai(
     image_attachments = []  # Initialize here so it's always available
     
     # Check for pre-built image attachments (from iOS/JSON endpoint)
-    if _internal_image_attachments:
+    if internal_image_attachments:
         image_attachments = _internal_image_attachments
         logger.info(f"📱 iOS: Using {len(image_attachments)} pre-built image attachments")
         file_context = "\n\n📸 **Image attached from iOS device**\n"
