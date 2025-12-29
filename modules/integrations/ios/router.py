@@ -9,15 +9,24 @@ Endpoints:
 - POST /ios/ack-notification/{id}  - Acknowledge notification delivery
 - POST /ios/context                - Receive location/health context
 - GET  /ios/health                 - Module health check
+- GET  /ios/devices                - List registered devices
+- GET  /ios/stats                  - Notification statistics
+- POST /ios/cleanup                - Cleanup old notifications
+- POST /ios/calendar               - Sync calendar events from iOS (NEW)
+- POST /ios/reminders              - Sync reminders from iOS (NEW)
+- POST /ios/contacts               - Sync contacts from iOS (NEW)
+- POST /ios/music                  - Update music context from iOS (NEW)
 
 Authentication:
 - All endpoints require X-iOS-Key header matching IOS_API_KEY env var
+
+Updated: 2025-12-29 - Added calendar, reminders, contacts, music sync endpoints
 """
 
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -73,7 +82,7 @@ router = APIRouter(
 
 
 # =============================================================================
-# PYDANTIC MODELS
+# PYDANTIC MODELS - EXISTING
 # =============================================================================
 
 class DeviceRegistration(BaseModel):
@@ -149,6 +158,109 @@ class HealthResponse(BaseModel):
 
 
 # =============================================================================
+# PYDANTIC MODELS - NEW (Calendar, Reminders, Contacts, Music)
+# =============================================================================
+
+class CalendarEventItem(BaseModel):
+    """Single calendar event from iOS"""
+    event_id: str = Field(..., description="iOS EventKit identifier")
+    title: str = Field(..., description="Event title")
+    start_time: str = Field(..., description="ISO datetime string")
+    end_time: str = Field(..., description="ISO datetime string")
+    location: Optional[str] = Field(None, description="Event location")
+    notes: Optional[str] = Field(None, description="Event notes")
+    is_all_day: bool = Field(default=False, description="All-day event flag")
+    calendar_name: Optional[str] = Field(None, description="Source calendar name")
+
+
+class CalendarSyncRequest(BaseModel):
+    """Request model for calendar sync"""
+    device_identifier: str = Field(..., description="iOS device identifier")
+    events: List[CalendarEventItem] = Field(..., description="Calendar events to sync")
+
+
+class CalendarSyncResponse(BaseModel):
+    """Response model for calendar sync"""
+    success: bool
+    synced: int = 0
+    failed: int = 0
+    message: str
+
+
+class ReminderItem(BaseModel):
+    """Single reminder from iOS"""
+    reminder_id: str = Field(..., description="iOS Reminders identifier")
+    title: str = Field(..., description="Reminder title")
+    notes: Optional[str] = Field(None, description="Reminder notes")
+    due_date: Optional[str] = Field(None, description="ISO datetime string")
+    is_completed: bool = Field(default=False, description="Completion status")
+    completed_at: Optional[str] = Field(None, description="ISO datetime when completed")
+    priority: int = Field(default=0, description="Priority 0-9")
+    list_name: Optional[str] = Field(None, description="Source list name")
+
+
+class RemindersSyncRequest(BaseModel):
+    """Request model for reminders sync"""
+    device_identifier: str = Field(..., description="iOS device identifier")
+    reminders: List[ReminderItem] = Field(..., description="Reminders to sync")
+
+
+class RemindersSyncResponse(BaseModel):
+    """Response model for reminders sync"""
+    success: bool
+    synced: int = 0
+    failed: int = 0
+    message: str
+
+
+class ContactItem(BaseModel):
+    """Single contact from iOS"""
+    contact_id: str = Field(..., description="iOS Contacts identifier")
+    given_name: Optional[str] = Field(None, description="First name")
+    family_name: Optional[str] = Field(None, description="Last name")
+    nickname: Optional[str] = Field(None, description="Nickname")
+    organization: Optional[str] = Field(None, description="Company/organization")
+    job_title: Optional[str] = Field(None, description="Job title")
+    primary_email: Optional[str] = Field(None, description="Primary email address")
+    primary_phone: Optional[str] = Field(None, description="Primary phone number")
+    birthday: Optional[str] = Field(None, description="ISO date string (YYYY-MM-DD)")
+    notes: Optional[str] = Field(None, description="Contact notes")
+
+
+class ContactsSyncRequest(BaseModel):
+    """Request model for contacts sync"""
+    device_identifier: str = Field(..., description="iOS device identifier")
+    contacts: List[ContactItem] = Field(..., description="Contacts to sync")
+
+
+class ContactsSyncResponse(BaseModel):
+    """Response model for contacts sync"""
+    success: bool
+    synced: int = 0
+    failed: int = 0
+    message: str
+
+
+class MusicContextRequest(BaseModel):
+    """Request model for music context update"""
+    device_identifier: str = Field(..., description="iOS device identifier")
+    track_title: str = Field(..., description="Current track title")
+    artist: Optional[str] = Field(None, description="Artist name")
+    album: Optional[str] = Field(None, description="Album name")
+    genre: Optional[str] = Field(None, description="Music genre")
+    duration_seconds: Optional[int] = Field(None, description="Track duration in seconds")
+    is_playing: bool = Field(default=True, description="Whether currently playing")
+    mood_hint: Optional[str] = Field(None, description="AI-detected mood hint")
+
+
+class MusicContextResponse(BaseModel):
+    """Response model for music context update"""
+    success: bool
+    message: str
+    track_title: Optional[str] = None
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
@@ -176,7 +288,7 @@ def parse_json_field(value: Any, default: Any = None) -> Any:
 
 
 # =============================================================================
-# ENDPOINTS
+# ENDPOINTS - EXISTING
 # =============================================================================
 
 @router.get(
@@ -550,4 +662,259 @@ async def cleanup_notifications(
         
     except Exception as e:
         logger.error(f"❌ Cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# NEW ENDPOINTS - iOS DATA SYNC (Calendar, Reminders, Contacts, Music)
+# =============================================================================
+
+@router.post(
+    "/calendar",
+    response_model=CalendarSyncResponse,
+    summary="Sync calendar events",
+    description="Receive calendar events from iOS device"
+)
+async def sync_calendar(request: CalendarSyncRequest):
+    """
+    Sync calendar events from iOS device.
+    
+    iOS app sends calendar events periodically or on-demand.
+    Uses UPSERT to handle new and updated events.
+    
+    This data is used by the AI for:
+    - Context-aware responses ("You have a meeting in 30 minutes")
+    - Scheduling suggestions
+    - Daily briefings
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        # Update last_seen for this device
+        await db.update_last_seen(request.device_identifier)
+        
+        # Convert Pydantic models to dicts
+        events_data = [event.model_dump() for event in request.events]
+        
+        # Sync to database
+        result = await db.sync_calendar_events(
+            device_identifier=request.device_identifier,
+            events=events_data,
+            user_id=DEFAULT_USER_ID
+        )
+        
+        synced = result.get('synced', 0)
+        failed = result.get('failed', 0)
+        
+        logger.info(f"📅 Calendar sync from {request.device_identifier}: {synced} synced, {failed} failed")
+        
+        return CalendarSyncResponse(
+            success=True,
+            synced=synced,
+            failed=failed,
+            message=f"Synced {synced} calendar events" + (f", {failed} failed" if failed > 0 else "")
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Calendar sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/reminders",
+    response_model=RemindersSyncResponse,
+    summary="Sync reminders",
+    description="Receive reminders from iOS device"
+)
+async def sync_reminders(request: RemindersSyncRequest):
+    """
+    Sync reminders from iOS device.
+    
+    iOS app sends reminders periodically or on-demand.
+    Uses UPSERT to handle new and updated reminders.
+    
+    This data is used by the AI for:
+    - Task awareness ("Don't forget to pick up groceries")
+    - Priority management
+    - Proactive reminders
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        # Update last_seen for this device
+        await db.update_last_seen(request.device_identifier)
+        
+        # Convert Pydantic models to dicts
+        reminders_data = [reminder.model_dump() for reminder in request.reminders]
+        
+        # Sync to database
+        result = await db.sync_reminders(
+            device_identifier=request.device_identifier,
+            reminders=reminders_data,
+            user_id=DEFAULT_USER_ID
+        )
+        
+        synced = result.get('synced', 0)
+        failed = result.get('failed', 0)
+        
+        logger.info(f"✅ Reminders sync from {request.device_identifier}: {synced} synced, {failed} failed")
+        
+        return RemindersSyncResponse(
+            success=True,
+            synced=synced,
+            failed=failed,
+            message=f"Synced {synced} reminders" + (f", {failed} failed" if failed > 0 else "")
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Reminders sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/contacts",
+    response_model=ContactsSyncResponse,
+    summary="Sync contacts",
+    description="Receive contacts from iOS device"
+)
+async def sync_contacts(request: ContactsSyncRequest):
+    """
+    Sync contacts from iOS device.
+    
+    iOS app sends contacts on first sync or when changes detected.
+    Uses UPSERT to handle new and updated contacts.
+    
+    This data is used by the AI for:
+    - Name recognition in conversations
+    - Contact lookups ("What's John's phone number?")
+    - Birthday reminders
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        # Update last_seen for this device
+        await db.update_last_seen(request.device_identifier)
+        
+        # Convert Pydantic models to dicts
+        contacts_data = [contact.model_dump() for contact in request.contacts]
+        
+        # Sync to database
+        result = await db.sync_contacts(
+            device_identifier=request.device_identifier,
+            contacts=contacts_data,
+            user_id=DEFAULT_USER_ID
+        )
+        
+        synced = result.get('synced', 0)
+        failed = result.get('failed', 0)
+        
+        logger.info(f"👥 Contacts sync from {request.device_identifier}: {synced} synced, {failed} failed")
+        
+        return ContactsSyncResponse(
+            success=True,
+            synced=synced,
+            failed=failed,
+            message=f"Synced {synced} contacts" + (f", {failed} failed" if failed > 0 else "")
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Contacts sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/music",
+    response_model=MusicContextResponse,
+    summary="Update music context",
+    description="Receive currently playing music from iOS device"
+)
+async def update_music_context(request: MusicContextRequest):
+    """
+    Update currently playing music from iOS device.
+    
+    iOS app sends this when music playback changes.
+    Uses UPSERT - one row per user/device.
+    
+    This data is used by the AI for:
+    - Mood-aware responses
+    - Music recommendations
+    - Context awareness ("I see you're listening to jazz...")
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        # Update last_seen for this device
+        await db.update_last_seen(request.device_identifier)
+        
+        if request.is_playing:
+            # Update music context
+            success = await db.update_music_context(
+                device_identifier=request.device_identifier,
+                track_title=request.track_title,
+                artist=request.artist,
+                album=request.album,
+                genre=request.genre,
+                duration_seconds=request.duration_seconds,
+                is_playing=request.is_playing,
+                mood_hint=request.mood_hint,
+                user_id=DEFAULT_USER_ID
+            )
+            
+            if success:
+                logger.debug(f"🎵 Music updated: {request.track_title} by {request.artist}")
+                return MusicContextResponse(
+                    success=True,
+                    message="Music context updated",
+                    track_title=request.track_title
+                )
+            else:
+                return MusicContextResponse(
+                    success=False,
+                    message="Failed to update music context"
+                )
+        else:
+            # Music stopped - clear context
+            await db.clear_music_context(
+                device_identifier=request.device_identifier,
+                user_id=DEFAULT_USER_ID
+            )
+            
+            logger.debug(f"🎵 Music stopped for {request.device_identifier}")
+            return MusicContextResponse(
+                success=True,
+                message="Music playback stopped"
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Music context update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete(
+    "/music",
+    summary="Clear music context",
+    description="Clear music context when playback stops"
+)
+async def clear_music_context(
+    device_identifier: str = Query(..., description="iOS device identifier")
+):
+    """
+    Clear music context when playback stops.
+    Alternative to POST with is_playing=False.
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        await db.clear_music_context(
+            device_identifier=device_identifier,
+            user_id=DEFAULT_USER_ID
+        )
+        
+        return {
+            'success': True,
+            'message': 'Music context cleared'
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to clear music context: {e}")
         raise HTTPException(status_code=500, detail=str(e))

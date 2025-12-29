@@ -57,6 +57,7 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = Field(None, description="Conversation thread ID")
     include_knowledge: bool = Field(default=True, description="Include knowledge base search")
     stream: bool = Field(default=False, description="Stream response")
+    image_base64: Optional[str] = Field(None, description="Base64-encoded image data from iOS/mobile")
 
 class ChatResponse(BaseModel):
     response: str
@@ -98,7 +99,8 @@ async def chat_with_ai(
     include_knowledge: bool = Form(default=True),
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    _internal_image_attachments: Optional[List[Dict]] = None  # Internal use only - for iOS/JSON endpoint
 ):
     """
     Main chat endpoint with file upload support
@@ -106,6 +108,13 @@ async def chat_with_ai(
     """
     # Process uploaded files if any
     file_context = ""
+    image_attachments = []  # Initialize here so it's always available
+    
+    # Check for pre-built image attachments (from iOS/JSON endpoint)
+    if _internal_image_attachments:
+        image_attachments = _internal_image_attachments
+        logger.info(f"📱 iOS: Using {len(image_attachments)} pre-built image attachments")
+        file_context = "\n\n📸 **Image attached from iOS device**\n"
     
     # Import file processing function at the top to avoid scope issues
     from .chat import process_uploaded_files
@@ -120,7 +129,7 @@ async def chat_with_ai(
         for idx, file in enumerate(files):
             logger.info(f"🔍 FILE DEBUG [{idx}]: filename={file.filename}, content_type={file.content_type}, size={file.size if hasattr(file, 'size') else 'unknown'}")
     
-    if files and len(files) > 0:
+    if files and len(files) > 0 and not _internal_image_attachments:
         logger.info(f"📎 Processing {len(files)} uploaded files")
         
         try:
@@ -129,7 +138,7 @@ async def chat_with_ai(
             
             # Add file context to the message
             file_context = "\n\n**Uploaded Files:**\n"
-            image_attachments = []  # Store base64 image data for vision
+            # Note: image_attachments already initialized above
             
             for file_info in processed_files:
                 file_context += f"\n📎 **{file_info['filename']}**\n"
@@ -1065,8 +1074,38 @@ async def chat_with_ai_json(
     """
     JSON-based chat endpoint for iOS and API clients.
     Same as /chat but accepts JSON body instead of form data.
-    Does not support file uploads.
+    Supports image attachments via base64-encoded image_base64 field.
     """
+    import base64
+    
+    # Build image attachments from base64 if provided
+    image_attachments = None
+    if request.image_base64:
+        try:
+            # Validate and clean the base64 string
+            image_data = request.image_base64
+            
+            # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+            if ',' in image_data:
+                image_data = image_data.split(',', 1)[1]
+            
+            # Validate it's valid base64
+            base64.b64decode(image_data)
+            
+            # Build image attachment for vision API
+            image_attachments = [{
+                'filename': 'ios_attachment.jpg',
+                'type': '.jpg',
+                'base64': image_data,
+                'media_type': 'image/jpeg'
+            }]
+            logger.info(f"📱 iOS: Decoded base64 image ({len(image_data)} chars)")
+            
+        except Exception as e:
+            logger.error(f"❌ iOS: Failed to decode base64 image: {e}")
+            # Continue without image rather than failing
+            image_attachments = None
+    
     # Delegate to the form-based endpoint with extracted values
     return await chat_with_ai(
         message=request.message,
@@ -1075,7 +1114,8 @@ async def chat_with_ai_json(
         include_knowledge=request.include_knowledge,
         files=[],
         request=None,
-        user_id=user_id
+        user_id=user_id,
+        _internal_image_attachments=image_attachments
     )
 
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
