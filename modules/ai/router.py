@@ -112,7 +112,7 @@ async def chat_with_ai(
     
     # Check for pre-built image attachments (from iOS/JSON endpoint)
     if internal_image_attachments:
-        image_attachments = _internal_image_attachments
+        image_attachments = internal_image_attachments
         logger.info(f"📱 iOS: Using {len(image_attachments)} pre-built image attachments")
         file_context = "\n\n📸 **Image attached from iOS device**\n"
     
@@ -129,7 +129,7 @@ async def chat_with_ai(
         for idx, file in enumerate(files):
             logger.info(f"🔍 FILE DEBUG [{idx}]: filename={file.filename}, content_type={file.content_type}, size={file.size if hasattr(file, 'size') else 'unknown'}")
     
-    if files and len(files) > 0 and not _internal_image_attachments:
+    if files and len(files) > 0 and not internal_image_attachments:
         logger.info(f"📎 Processing {len(files)} uploaded files")
         
         try:
@@ -1115,7 +1115,7 @@ async def chat_with_ai_json(
         files=[],
         request=None,
         user_id=user_id,
-        _internal_image_attachments=image_attachments
+        internal_image_attachments=image_attachments
     )
 
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
