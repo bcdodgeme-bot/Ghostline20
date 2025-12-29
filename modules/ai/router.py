@@ -14,6 +14,7 @@ __all__ = [
     # Request/Response models
     'ChatRequest',
     'ChatResponse',
+    'GestureInfo',
     'FeedbackRequest',
     'FeedbackResponse',
     'CreateThreadRequest',
@@ -59,6 +60,12 @@ class ChatRequest(BaseModel):
     stream: bool = Field(default=False, description="Stream response")
     image_base64: Optional[str] = Field(None, description="Base64-encoded image data from iOS/mobile")
 
+class GestureInfo(BaseModel):
+    """Gesture animation info for avatar videos"""
+    detected: Optional[str] = None  # gesture key: "glasses", "laughing", etc.
+    video: Optional[str] = None     # video filename
+    video_url: Optional[str] = None # full URL path to video
+
 class ChatResponse(BaseModel):
     response: str
     thread_id: str
@@ -68,6 +75,7 @@ class ChatResponse(BaseModel):
     response_time_ms: int
     knowledge_sources: List[Dict] = []
     conversation_context: Dict = {}
+    gesture: Optional[GestureInfo] = None  # Avatar gesture animation
 
 class FeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Message ID to rate")
@@ -999,6 +1007,18 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
         # Build response
         logger.info("📦 DEBUG: Building final response object...")
         
+        # Detect gesture for avatar animation
+        from .chat import detect_gesture
+        gesture_info = None
+        gesture_result = detect_gesture(final_response)
+        if gesture_result:
+            gesture_info = GestureInfo(
+                detected=gesture_result['gesture'],
+                video=gesture_result['video'],
+                video_url=f"/static/gestures/{gesture_result['video']}"
+            )
+            logger.info(f"🎭 Gesture detected: {gesture_result['gesture']}")
+        
         try:
             chat_response = ChatResponse(
                 response=final_response,
@@ -1021,7 +1041,8 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     'message_count': context_info.get('total_messages', 0) + 1,
                     'has_knowledge': len(knowledge_sources) > 0,
                     'integration_processing_order': 'weather->bluesky->rss->scraper->prayer->google_trends->voice->image->health->ai'
-                }
+                },
+                gesture=gesture_info
             )
             
             logger.info(f"✅ CHAT SUCCESS: Response generated in {response_time_ms}ms")

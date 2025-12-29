@@ -53,6 +53,12 @@ class SyntaxPrimeChat {
         this.imageGenerationQueue = [];
         this.currentImageGeneration = null;
         
+        // Gesture Video Avatar System
+        this.gestureVideoEnabled = true;
+        this.gestureVideoElement = null;
+        this.defaultGestureVideo = '/static/gestures/default.mp4';
+        this.isPlayingGesture = false;
+        
         // Random greetings for welcome screen
         this.greetings = [
             { text: "Hey there", subtext: "What can I help you with?" },
@@ -80,6 +86,7 @@ class SyntaxPrimeChat {
         this.initializeTrendsSystem();
         this.initializeVoiceSystem();
         this.initializeImageSystem();
+        this.initGestureVideo();
         this.setRandomGreeting();
         
         // Focus message input
@@ -185,6 +192,143 @@ class SyntaxPrimeChat {
         
         messagesContainer.appendChild(recoveryDiv);
         recoveryDiv.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // === Gesture Video Avatar System ===
+    initGestureVideo() {
+        // Create gesture video container (hidden initially)
+        const chatContainer = document.querySelector('.chat-container');
+        if (!chatContainer) {
+            console.warn('🎭 Chat container not found - gesture video init skipped');
+            return;
+        }
+        
+        const gestureContainer = document.createElement('div');
+        gestureContainer.className = 'gesture-video-container hidden';
+        gestureContainer.id = 'gestureVideoContainer';
+        gestureContainer.innerHTML = `
+            <div class="gesture-video-wrapper" id="gestureVideoWrapper">
+                <video class="gesture-video" id="gestureVideo" muted playsinline>
+                    <source src="${this.defaultGestureVideo}" type="video/mp4">
+                </video>
+            </div>
+        `;
+        
+        // Insert at the beginning of chat container (before chat-messages)
+        const chatMessages = chatContainer.querySelector('.chat-messages');
+        if (chatMessages) {
+            chatContainer.insertBefore(gestureContainer, chatMessages);
+        } else {
+            chatContainer.insertBefore(gestureContainer, chatContainer.firstChild);
+        }
+        
+        this.gestureVideoElement = document.getElementById('gestureVideo');
+        
+        // When gesture video ends, return to default loop
+        if (this.gestureVideoElement) {
+            this.gestureVideoElement.addEventListener('ended', () => {
+                if (this.isPlayingGesture) {
+                    this.playDefaultGesture();
+                }
+            });
+            
+            // Handle video errors gracefully
+            this.gestureVideoElement.addEventListener('error', (e) => {
+                console.warn('🎭 Gesture video error:', e);
+                // Try to recover by playing default
+                setTimeout(() => this.playDefaultGesture(), 1000);
+            });
+        }
+        
+        console.log('🎭 Gesture video system initialized');
+    }
+    
+    showGestureVideo() {
+        if (!this.gestureVideoEnabled) return;
+        
+        const container = document.getElementById('gestureVideoContainer');
+        const chatContainer = document.querySelector('.chat-container');
+        
+        if (container && !container.classList.contains('hidden')) {
+            // Already visible
+            return;
+        }
+        
+        if (container) {
+            container.classList.remove('hidden');
+            chatContainer?.classList.add('has-gesture-video');
+            
+            // Start default loop if not already playing
+            if (this.gestureVideoElement) {
+                this.playDefaultGesture();
+            }
+            
+            console.log('🎭 Gesture video shown');
+        }
+    }
+    
+    hideGestureVideo() {
+        const container = document.getElementById('gestureVideoContainer');
+        const chatContainer = document.querySelector('.chat-container');
+        
+        if (container) {
+            container.classList.add('hidden');
+            chatContainer?.classList.remove('has-gesture-video');
+            
+            if (this.gestureVideoElement) {
+                this.gestureVideoElement.pause();
+            }
+            this.isPlayingGesture = false;
+            
+            console.log('🎭 Gesture video hidden');
+        }
+    }
+    
+    playDefaultGesture() {
+        if (!this.gestureVideoElement) return;
+        
+        const wrapper = document.getElementById('gestureVideoWrapper');
+        wrapper?.classList.remove('playing-gesture');
+        
+        this.gestureVideoElement.src = this.defaultGestureVideo;
+        this.gestureVideoElement.loop = true;
+        this.isPlayingGesture = false;
+        
+        this.gestureVideoElement.play().catch(e => {
+            console.log('🎭 Auto-play blocked (expected on first load):', e.message);
+        });
+    }
+    
+    playGesture(videoUrl) {
+        if (!this.gestureVideoElement || !videoUrl) return;
+        
+        const wrapper = document.getElementById('gestureVideoWrapper');
+        wrapper?.classList.add('playing-gesture');
+        
+        console.log(`🎭 Playing gesture: ${videoUrl}`);
+        
+        this.gestureVideoElement.src = videoUrl;
+        this.gestureVideoElement.loop = false;
+        this.isPlayingGesture = true;
+        
+        this.gestureVideoElement.play().catch(e => {
+            console.warn('🎭 Gesture play failed:', e.message);
+            // Fall back to default on error
+            this.playDefaultGesture();
+        });
+    }
+    
+    handleGestureFromResponse(response) {
+        if (!this.gestureVideoEnabled) return;
+        
+        // Show video container when chat is active
+        this.showGestureVideo();
+        
+        // If response has gesture, play it
+        if (response.gesture && response.gesture.video_url) {
+            this.playGesture(response.gesture.video_url);
+        }
+        // If no gesture detected, just keep playing default (already looping)
     }
     
     // === Random Greeting System ===
@@ -1381,6 +1525,9 @@ class SyntaxPrimeChat {
                 knowledgeSources: response.knowledge_sources || []
             });
             
+            // Handle gesture video animation
+            this.handleGestureFromResponse(response);
+            
             // Image generation if requested
             if (imagePrompt && this.imageEnabled && assistantMessage) {
                 console.log(`🎨 Starting image generation for prompt: "${imagePrompt}"`);
@@ -1742,6 +1889,10 @@ class SyntaxPrimeChat {
     // UPDATED: Start new chat with simplified greeting
     startNewChat() {
         this.currentThreadId = null;
+        
+        // Hide gesture video when starting fresh
+        this.hideGestureVideo();
+        
         const messagesContainer = document.getElementById('chatMessages');
         
         // Get a fresh random greeting
@@ -1902,6 +2053,9 @@ class SyntaxPrimeChat {
             document.querySelectorAll('.conversation-item').forEach(item => {
                 item.classList.toggle('active', item.dataset.threadId === threadId);
             });
+            
+            // Show gesture video for active conversation
+            this.showGestureVideo();
             
             console.log(`Loaded thread: ${threadId}`);
             

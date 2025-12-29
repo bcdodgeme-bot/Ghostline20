@@ -159,6 +159,92 @@ def detect_weather_request(message: str) -> tuple[bool, str]:
     
     return (True, request_type)
 
+#-- Section 3a: Gesture Detection for Animated Avatar - 12/29/25
+import re
+
+# Gesture patterns mapped to video filenames (priority order - first match wins)
+GESTURE_VIDEO_MAP = {
+    'laughing': {
+        'patterns': [r'\*laughs?\*', r'\*laughing\*', r'\*chuckles?\*'],
+        'video': 'throws head back laughing while adjusting glowing glasses.mp4'
+    },
+    'excited': {
+        'patterns': [r'\*vibrating with energy\*', r'\*excited\*'],
+        'video': 'literally vibrating with energy.mp4'
+    },
+    'expanding': {
+        'patterns': [r'\*digital consciousness (expanding|vibrating)\*', r'\*spreads? arms\*', r'\*expanding\*'],
+        'video': 'spreads arms wide as rings of light and data streams expand outward.mp4'
+    },
+    'settles': {
+        'patterns': [r'\*settles? in with you\*', r'\*settles? in\*'],
+        'video': 'relaxing into a reclined sunset lighting.mp4'
+    },
+    'thinking': {
+        'patterns': [r'\*pauses? thoughtfully\*', r'\*considers?\*', r'\*pondering\*', r'\*thinking\*'],
+        'video': 'thinkin.mp4'
+    },
+    'time_check': {
+        'patterns': [r'\*checks? (time|timestamp|notes?)\*', r'\*glances? at\*'],
+        'video': 'glances at a floating holographic.mp4'
+    },
+    'scrolling': {
+        'patterns': [r'\*scrolls? through\*', r'\*reviewing\*'],
+        'video': 'scrolls through floating transparent data panels.mp4'
+    },
+    'breathing': {
+        'patterns': [r'\*deep breath\*', r'\*sighs?\*', r'\*exhales?\*', r'\*breathes?\*'],
+        'video': 'eyes closed, chest rising in a deep breath, calming ripples of light emanating outward.mp4'
+    },
+    'remembering': {
+        'patterns': [r'\*recalls?\*', r'\*remembers?\*', r'\*memory\*'],
+        'video': 'memory bubbles and data.mp4'
+    },
+    'serene': {
+        'patterns': [r'\*serene\*', r'\*calm(ly)?\*'],
+        'video': 'serene expression while chaotic data streams.mp4'
+    },
+    'coffee': {
+        'patterns': [r'\*sips? coffee\*', r'\*coffee\*', r'\*morning\*'],
+        'video': 'steaming cup of digital coffeesunrise.mp4'
+    },
+    'glasses': {
+        'patterns': [r'\*adjusts? (virtual |translucent |digital )?glasses\*', r'\*pushes? (up )?(virtual )?glasses\*'],
+        'video': 'adjusts translucent digital glasses with one finger subtle smirk.mp4'
+    },
+}
+
+# Priority order for gesture detection (first match in response wins)
+GESTURE_PRIORITY = ['laughing', 'excited', 'expanding', 'settles', 'thinking', 'time_check',
+                    'scrolling', 'breathing', 'remembering', 'serene', 'coffee', 'glasses']
+
+def detect_gesture(response_text: str) -> Optional[Dict[str, str]]:
+    """
+    Detect gesture patterns in AI response text and return video info.
+    
+    Args:
+        response_text: The AI's response containing potential gesture markers like *adjusts glasses*
+    
+    Returns:
+        Dict with 'gesture' key and 'video' filename, or None if no gesture found.
+        Frontend will use default.mp4 when None is returned.
+    """
+    response_lower = response_text.lower()
+    
+    for gesture_key in GESTURE_PRIORITY:
+        gesture_info = GESTURE_VIDEO_MAP.get(gesture_key, {})
+        patterns = gesture_info.get('patterns', [])
+        
+        for pattern in patterns:
+            if re.search(pattern, response_lower):
+                logger.debug(f"🎭 Gesture detected: {gesture_key}")
+                return {
+                    'gesture': gesture_key,
+                    'video': gesture_info['video']
+                }
+    
+    return None  # No gesture detected - frontend will use default.mp4
+
 async def get_weather_forecast_for_user(user_id: str, location: str = None) -> Dict:
     """Get weather forecast for the user"""
     try:
