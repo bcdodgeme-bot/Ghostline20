@@ -86,14 +86,9 @@ def get_current_datetime_context() -> dict:
     Get comprehensive current date/time context for AI personalities
     Returns properly formatted date/time info in multiple formats
     """
-    now = datetime.now()
-    
-    # Get user's timezone (defaulting to EST if not available)
-    try:
-        user_timezone = pytz.timezone('America/New_York')  # Default to Eastern
-        now_user_tz = now.astimezone(user_timezone)
-    except Exception:
-        now_user_tz = now
+    # Get current time directly in user's timezone
+    user_timezone = pytz.timezone('America/New_York')
+    now_user_tz = datetime.now(user_timezone)
     
     return {
         "current_date": now_user_tz.strftime("%Y-%m-%d"),  # 2025-09-26

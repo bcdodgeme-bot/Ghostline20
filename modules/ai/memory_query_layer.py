@@ -47,8 +47,8 @@ CONTEXT_CONFIG = {
     'hours_gap_threshold': 8,       # Hours before comprehensive context
     
     'limits': {
-        'hot_conversations': 800,    # Recent messages always available
-        'warm_conversations': 1300,  # Comprehensive context
+        'hot_conversations': 300,    # Recent messages always available
+        'warm_conversations': 500,  # Comprehensive context
         'cold_conversations': 250,   # Semantic search results
         'meetings': 14,              # From last 14 days
         'emails': 50,                # Unread/important
@@ -174,7 +174,7 @@ async def query_conversations(
                                       to prevent regenerating the same content (default: False)
     """
     try:
-        where_clauses = ["cm.user_id = $1"]
+        where_clauses = ["cm.user_id = $1", "cm.role = 'user'"]
         params: List[Any] = [user_id]
         param_count = 1
         
@@ -290,7 +290,7 @@ async def query_emails(
     FIXED 2025-12-29: Now includes 'body' field so AI can actually read email content!
     """
     try:
-        where_clauses = ["user_id = $1"]
+        where_clauses = ["user_id = $1", "cm.role = 'user'"]
         params: List[Any] = [user_id]
         param_count = 1
         
@@ -499,7 +499,7 @@ async def query_tasks(
     Query clickup_tasks for active tasks
     """
     try:
-        where_clauses = ["user_id = $1"]
+        where_clauses = ["user_id = $1", "cm.role = 'user'"]
         params: List[Any] = [user_id]
         param_count = 1
         
@@ -1047,6 +1047,9 @@ def format_calendar_context(events: List[Dict]) -> str:
     if not events:
         return ""
     
+    # Import timezone converter
+    from modules.ai.chat import convert_utc_to_user_timezone
+    
     lines = [
         "\n" + "="*80,
         "📆 UPCOMING EVENTS (Google Calendar)",
@@ -1060,17 +1063,20 @@ def format_calendar_context(events: List[Dict]) -> str:
     for event in events:
         start = event.get('start_time')
         if start:
+            start = convert_utc_to_user_timezone(start)
             date_key = start.strftime('%Y-%m-%d (%A)')
             if date_key not in by_date:
                 by_date[date_key] = []
+            # Store converted time with event
+            event['_converted_start'] = start
             by_date[date_key].append(event)
     
     for date_key, date_events in sorted(by_date.items()):
         lines.append(f"\n📅 {date_key}:")
         for event in date_events:
             summary = event.get('summary', 'Untitled')
-            start = event.get('start_time')
-            time_str = start.strftime('%H:%M') if start else 'TBD'
+            start = event.get('_converted_start')
+            time_str = start.strftime('%I:%M %p').lstrip('0') if start else 'TBD'
             lines.append(f"   • {time_str} - {summary}")
             
             if event.get('location'):
