@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 CONTEXT_CONFIG = {
-    'hot_cache_days': 30,           # Always loaded (recent discussions)
-    'warm_cache_days': 60,          # Loaded on new day/thread
-    'cold_cache_days': 150,         # Query-based (everything in V2)
+    'hot_cache_days': 20,           # Always loaded (recent discussions)
+    'warm_cache_days': 50,          # Loaded on new day/thread
+    'cold_cache_days': 365,         # Query-based (everything in V2)
     'hours_gap_threshold': 8,       # Hours before comprehensive context
     
     'limits': {
