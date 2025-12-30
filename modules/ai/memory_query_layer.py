@@ -68,7 +68,7 @@ CONTEXT_CONFIG = {
 # These are AI-generated notification threads, NOT user conversations.
 # Including them in memory context causes the AI to regenerate the same content.
 
-#EXCLUDED_THREAD_PATTERNS = [
+EXCLUDED_THREAD_PATTERNS = [
 #    'Bluesky Draft:%',           # AI-generated Bluesky drafts
 #    'Trending Opportunities',     # Trend notifications
 #    'Intelligence Briefings',     # Proactive intelligence
@@ -80,7 +80,7 @@ CONTEXT_CONFIG = {
 #    'Reminders',                  # General reminders
 #    'Engagement Opportunities',   # Bluesky engagement
 #    'Analytics Reports',          # Analytics notifications
-#]
+]
 
 
 # ============================================================================
