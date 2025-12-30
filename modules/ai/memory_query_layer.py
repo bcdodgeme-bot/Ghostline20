@@ -290,7 +290,7 @@ async def query_emails(
     FIXED 2025-12-29: Now includes 'body' field so AI can actually read email content!
     """
     try:
-        where_clauses = ["user_id = $1", "cm.role = 'user'"]
+        where_clauses = ["user_id = $1"]
         params: List[Any] = [user_id]
         param_count = 1
         
@@ -499,7 +499,7 @@ async def query_tasks(
     Query clickup_tasks for active tasks
     """
     try:
-        where_clauses = ["user_id = $1", "cm.role = 'user'"]
+        where_clauses = ["user_id = $1"]
         params: List[Any] = [user_id]
         param_count = 1
         
@@ -1155,8 +1155,12 @@ def format_weather_context(weather: Dict) -> str:
     if not weather:
         return ""
     
-    temp = weather.get('temperature', 'N/A')
-    feels = weather.get('temperature_apparent', temp)
+    # Convert Celsius to Fahrenheit
+    temp_c = weather.get('temperature', 0) or 0
+    feels_c = weather.get('temperature_apparent', temp_c) or temp_c
+    temp_f = temp_c * 9/5 + 32
+    feels_f = feels_c * 9/5 + 32
+    
     desc = weather.get('weather_description', 'Unknown')
     uv = weather.get('uv_index', 0)
     uv_risk = weather.get('uv_risk_level', 'low')
@@ -1166,7 +1170,7 @@ def format_weather_context(weather: Dict) -> str:
         "\n" + "="*80,
         "⛅ CURRENT WEATHER",
         "="*80,
-        f"Temperature: {temp}°F (feels like {feels}°F)",
+        f"Temperature: {temp_f:.0f}°F (feels like {feels_f:.0f}°F)",
         f"Conditions: {desc}",
         f"UV Index: {uv} ({uv_risk} risk)",
         f"Headache Risk: {headache}",
