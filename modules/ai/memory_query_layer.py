@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 CONTEXT_CONFIG = {
-    'hot_cache_days': 60,           # Always loaded (recent discussions)
-    'warm_cache_days': 90,          # Loaded on new day/thread
+    'hot_cache_days': 30,           # Always loaded (recent discussions)
+    'warm_cache_days': 60,          # Loaded on new day/thread
     'cold_cache_days': 150,         # Query-based (everything in V2)
     'hours_gap_threshold': 8,       # Hours before comprehensive context
     
@@ -68,19 +68,19 @@ CONTEXT_CONFIG = {
 # These are AI-generated notification threads, NOT user conversations.
 # Including them in memory context causes the AI to regenerate the same content.
 
-EXCLUDED_THREAD_PATTERNS = [
-    'Bluesky Draft:%',           # AI-generated Bluesky drafts
-    'Trending Opportunities',     # Trend notifications
-    'Intelligence Briefings',     # Proactive intelligence
-    'Weather Alerts',             # Weather notifications
-    'Prayer Times',               # Prayer reminders
-    'Meeting Summaries',          # Fathom meeting summaries
-    'Email Notifications',        # Email alerts
-    'Calendar Alerts',            # Calendar reminders
-    'Reminders',                  # General reminders
-    'Engagement Opportunities',   # Bluesky engagement
-    'Analytics Reports',          # Analytics notifications
-]
+#EXCLUDED_THREAD_PATTERNS = [
+#    'Bluesky Draft:%',           # AI-generated Bluesky drafts
+#    'Trending Opportunities',     # Trend notifications
+#    'Intelligence Briefings',     # Proactive intelligence
+#    'Weather Alerts',             # Weather notifications
+#    'Prayer Times',               # Prayer reminders
+#    'Meeting Summaries',          # Fathom meeting summaries
+#    'Email Notifications',        # Email alerts
+#    'Calendar Alerts',            # Calendar reminders
+#    'Reminders',                  # General reminders
+#    'Engagement Opportunities',   # Bluesky engagement
+#    'Analytics Reports',          # Analytics notifications
+#]
 
 
 # ============================================================================
@@ -174,7 +174,7 @@ async def query_conversations(
                                       to prevent regenerating the same content (default: False)
     """
     try:
-        where_clauses = ["cm.user_id = $1", "cm.role = 'user'"]
+        where_clauses = ["cm.user_id = $1"]
         params: List[Any] = [user_id]
         param_count = 1
         
