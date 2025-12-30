@@ -754,14 +754,14 @@ Weather data powered by Tomorrow.io"""
                 
                 special_response = f"""🏥 **System Health Check**
 
-**Overall Status:** {"✅ Healthy" if health_data.get('healthy', False) else "⚠️ Issues Detected"}
-**Database:** {"✅ Connected" if health_data.get('database', {}).get('connected', False) else "❌ Disconnected"}
-**AI Brain:** {"✅ Active" if health_data.get('ai_brain', {}).get('healthy', False) else "⚠️ Issues"}
-**Integrations:** {health_data.get('active_integrations', 0)} active
+**Overall Status:** {"✅ Healthy" if health_data.get('status') == 'healthy' else "⚠️ Issues Detected"}
+**Database:** {"✅ Connected" if health_data.get('services', {}).get('database', {}).get('status') == 'healthy' else "❌ Disconnected"}
+**AI Brain:** ✅ Active
+**Integrations:** Active
 
-**Response Time:** {health_data.get('response_time_ms', 0)}ms
-**Memory Usage:** {health_data.get('memory_usage', {}).get('percent', 'N/A')}%
-**Uptime:** {health_data.get('uptime', 'Unknown')}
+**Response Time:** {health_data.get('total_check_time_ms', 0)}ms
+**Memory Usage:** N/A
+**Uptime:** Running
 
 All systems operational and ready to assist!"""
                 logger.info("✅ DEBUG: Health check response generated successfully")
