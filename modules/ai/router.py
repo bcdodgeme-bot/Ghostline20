@@ -1227,7 +1227,7 @@ async def chat_with_ai_json(
             # Get filename or generate one
             filename = request.attachment_filename or f"attachment.{request.attachment_mime_type.split('/')[-1]}"
             
-            logger.info(f"📱 iOS: Processing attachment - filename={filename}, mime_type={request.attachment_mime_type}, size={len(attachment_bytes)} bytes")
+            logger.info(f"📱 iOS: Processing attachment (new fields) - filename={filename}, mime_type={request.attachment_mime_type}, size={len(attachment_bytes)} bytes")
             
             # Route based on MIME type
             if is_image_mime_type(request.attachment_mime_type):
@@ -1254,8 +1254,56 @@ async def chat_with_ai_json(
             logger.error(traceback.format_exc())
             # Continue without attachment rather than failing
     
-    # Priority 2: Legacy image_base64 field (backward compatibility - assumes JPEG)
-    elif request.image_base64:
+    # Priority 2: HYBRID CASE - iOS sends data in image_base64 but metadata in new fields
+    # This happens when iOS uses imageBase64 for all attachments but adds filename/mimeType separately
+    elif request.image_base64 and request.attachment_mime_type:
+        try:
+            logger.info(f"📱 iOS: Detected HYBRID mode - data in imageBase64, metadata in new fields")
+            
+            image_data = request.image_base64
+            
+            # Remove data URL prefix if present
+            if ',' in image_data:
+                image_data = image_data.split(',', 1)[1]
+            
+            # Decode base64 to bytes
+            attachment_bytes = base64.b64decode(image_data)
+            
+            # Get filename from new field or generate one
+            filename = request.attachment_filename or f"attachment.{request.attachment_mime_type.split('/')[-1]}"
+            
+            logger.info(f"📱 iOS (hybrid): Processing - filename={filename}, mime_type={request.attachment_mime_type}, size={len(attachment_bytes)} bytes")
+            
+            # Route based on MIME type from the new field
+            if is_image_mime_type(request.attachment_mime_type):
+                # This is an IMAGE - use image_url format for vision model
+                image_attachments = [{
+                    'filename': filename,
+                    'type': f".{request.attachment_mime_type.split('/')[-1]}",
+                    'base64': image_data,
+                    'media_type': request.attachment_mime_type
+                }]
+                logger.info(f"📸 iOS (hybrid): Prepared IMAGE attachment ({len(image_data)} chars)")
+            else:
+                # This is a DOCUMENT - extract text content
+                logger.info(f"📄 iOS (hybrid): Extracting text from document: {filename}")
+                extracted_text = await extract_document_text(attachment_bytes, request.attachment_mime_type, filename)
+                
+                if extracted_text:
+                    document_text_context = f"\n\n📎 **Attached Document: {filename}**\n\n{extracted_text}\n"
+                    logger.info(f"📄 iOS (hybrid): Extracted {len(extracted_text)} chars from document")
+                else:
+                    logger.warning(f"⚠️ iOS (hybrid): No text extracted from document")
+                
+        except Exception as e:
+            logger.error(f"❌ iOS (hybrid): Failed to process attachment: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Continue without attachment rather than failing
+    
+    # Priority 3: Legacy image_base64 field only (backward compatibility - assumes JPEG)
+    # Only triggers when NO new metadata fields are present
+    elif request.image_base64 and not request.attachment_mime_type:
         try:
             image_data = request.image_base64
             
