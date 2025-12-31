@@ -58,7 +58,12 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = Field(None, description="Conversation thread ID")
     include_knowledge: bool = Field(default=True, description="Include knowledge base search")
     stream: bool = Field(default=False, description="Stream response")
+    # Legacy single-image support (iOS backward compatibility)
     image_base64: Optional[str] = Field(None, description="Base64-encoded image data from iOS/mobile")
+    # New universal attachment fields (supports images AND documents)
+    attachment_data: Optional[str] = Field(None, description="Base64-encoded attachment data")
+    attachment_filename: Optional[str] = Field(None, description="Original filename of attachment")
+    attachment_mime_type: Optional[str] = Field(None, description="MIME type of attachment (e.g., image/jpeg, application/pdf)")
 
 class GestureInfo(BaseModel):
     """Gesture animation info for avatar videos"""
@@ -108,7 +113,8 @@ async def chat_with_ai(
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     user_id: str = Depends(get_current_user_id),
-    internal_image_attachments: Optional[List[Dict]] = None  # Internal use only - for iOS/JSON endpoint
+    internal_image_attachments: Optional[List[Dict]] = None,  # Internal use - for iOS images
+    internal_document_attachments: Optional[List[Dict]] = None  # Internal use - for iOS documents (PDFs, etc.)
 ):
     """
     Main chat endpoint with file upload support
@@ -117,12 +123,19 @@ async def chat_with_ai(
     # Process uploaded files if any
     file_context = ""
     image_attachments = []  # Initialize here so it's always available
+    document_attachments = []  # NEW: For PDFs and other documents
     
     # Check for pre-built image attachments (from iOS/JSON endpoint)
     if internal_image_attachments:
         image_attachments = internal_image_attachments
         logger.info(f"📱 iOS: Using {len(image_attachments)} pre-built image attachments")
         file_context = "\n\n📸 **Image attached from iOS device**\n"
+    
+    # Check for pre-built document attachments (from iOS/JSON endpoint)
+    if internal_document_attachments:
+        document_attachments = internal_document_attachments
+        logger.info(f"📱 iOS: Using {len(document_attachments)} pre-built document attachments")
+        file_context += "\n\n📄 **Document attached from iOS device**\n"
     
     # Import file processing function at the top to avoid scope issues
     from .chat import process_uploaded_files
@@ -865,10 +878,13 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 logger.info(f"✅ DEBUG: AI messages array built: {len(ai_messages)} total messages")
                 
                 # Add current message
-                # Add user message with vision support if images are present
-                if 'image_attachments' in locals() and len(image_attachments) > 0:
-                    # Vision-enabled message format (array of content blocks)
-                    logger.info(f"📸 Building vision message with {len(image_attachments)} images")
+                # Add user message with vision/document support if attachments are present
+                has_images = 'image_attachments' in locals() and len(image_attachments) > 0
+                has_documents = 'document_attachments' in locals() and len(document_attachments) > 0
+                
+                if has_images or has_documents:
+                    # Multi-modal message format (array of content blocks)
+                    logger.info(f"📎 Building multi-modal message with {len(image_attachments) if has_images else 0} images and {len(document_attachments) if has_documents else 0} documents")
                     
                     content_blocks = [
                         {
@@ -877,29 +893,46 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                         }
                     ]
                     
-                    # DEBUG: Log what's actually in image_attachments
-                    logger.info(f"🔍 DEBUG: image_attachments contents:")
-                    for idx, img in enumerate(image_attachments):
-                        logger.info(f"🔍 DEBUG [{idx}]: filename={img.get('filename')}, type={img.get('type')}, media_type={img.get('media_type')}")
+                    # Add images using image_url format
+                    if has_images:
+                        logger.info(f"🔍 DEBUG: image_attachments contents:")
+                        for idx, img in enumerate(image_attachments):
+                            logger.info(f"🔍 DEBUG [{idx}]: filename={img.get('filename')}, type={img.get('type')}, media_type={img.get('media_type')}")
+                        
+                        for img in image_attachments:
+                            content_blocks.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{img['media_type']};base64,{img['base64']}"
+                                }
+                            })
+                            logger.info(f"📸 Added image to request: {img['filename']}")
                     
-                    # Add each image as a content block
-                    for img in image_attachments:
-                        content_blocks.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{img['media_type']};base64,{img['base64']}"
-                            }
-                        })
-                        logger.info(f"📸 Added to vision request: {img['filename']}")
+                    # Add documents using document format (for PDFs, docx, xlsx, etc.)
+                    if has_documents:
+                        logger.info(f"🔍 DEBUG: document_attachments contents:")
+                        for idx, doc in enumerate(document_attachments):
+                            logger.info(f"🔍 DEBUG [{idx}]: filename={doc.get('filename')}, media_type={doc.get('media_type')}")
+                        
+                        for doc in document_attachments:
+                            content_blocks.append({
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": doc['media_type'],
+                                    "data": doc['base64']
+                                }
+                            })
+                            logger.info(f"📄 Added document to request: {doc['filename']}")
                     
                     ai_messages.append({
                         "role": "user",
-                        "content": content_blocks  # Array format for vision
+                        "content": content_blocks  # Array format for multi-modal
                     })
                     
-                    # Force vision-capable model
+                    # Force vision-capable model for images/documents
                     model_override = "anthropic/claude-3.5-sonnet"
-                    logger.info(f"📸 Using vision model: {model_override}")
+                    logger.info(f"📎 Using multi-modal model: {model_override}")
                 else:
                     # Text-only message (original format)
                     ai_messages.append({
@@ -909,26 +942,6 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     model_override = None
                 
                 # Get AI response (ONLY ONCE, AFTER message is added)
-                logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
-                try:
-                    ai_response = await openrouter_client.chat_completion(
-                        messages=ai_messages,
-                        model=model_override,
-                        max_tokens=4000,
-                        temperature=0.7
-                    )
-                    logger.info("✅ DEBUG: OpenRouter response received")
-                except Exception as e:
-                    logger.error(f"❌ DEBUG: OpenRouter call failed: {e}")
-                    raise
-                
-                # Force vision-capable model if images are present
-                model_override = None
-                if 'image_attachments' in locals() and len(image_attachments) > 0:
-                    model_override = "anthropic/claude-3.5-sonnet"  # Force Claude for vision
-                    logger.info(f"📸 Using vision model: {model_override}")
-                
-                # Get AI response
                 logger.info("🤖 DEBUG: Calling OpenRouter for AI response...")
                 try:
                     ai_response = await openrouter_client.chat_completion(
@@ -1095,37 +1108,90 @@ async def chat_with_ai_json(
     """
     JSON-based chat endpoint for iOS and API clients.
     Same as /chat but accepts JSON body instead of form data.
-    Supports image attachments via base64-encoded image_base64 field.
+    Supports attachments via:
+    - image_base64 (legacy, for backward compatibility - assumes JPEG)
+    - attachment_data + attachment_filename + attachment_mime_type (new universal format)
+    
+    For images (image/*): sends as image_url content block
+    For documents (application/pdf, application/*, etc.): sends as document content block
     """
     import base64
     
-    # Build image attachments from base64 if provided
+    # Build attachments from request fields
     image_attachments = None
-    if request.image_base64:
+    document_attachments = None
+    
+    # Helper function to determine if MIME type is an image
+    def is_image_mime_type(mime_type: str) -> bool:
+        if not mime_type:
+            return False
+        return mime_type.startswith('image/')
+    
+    # Priority 1: New universal attachment fields (attachment_data + attachment_mime_type)
+    if request.attachment_data and request.attachment_mime_type:
         try:
             # Validate and clean the base64 string
-            image_data = request.image_base64
+            attachment_data = request.attachment_data
             
             # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+            if ',' in attachment_data:
+                attachment_data = attachment_data.split(',', 1)[1]
+            
+            # Validate it's valid base64
+            base64.b64decode(attachment_data)
+            
+            # Get filename or generate one
+            filename = request.attachment_filename or f"attachment.{request.attachment_mime_type.split('/')[-1]}"
+            
+            logger.info(f"📱 iOS: Processing attachment - filename={filename}, mime_type={request.attachment_mime_type}")
+            
+            # Route based on MIME type
+            if is_image_mime_type(request.attachment_mime_type):
+                # This is an IMAGE - use image_url format
+                image_attachments = [{
+                    'filename': filename,
+                    'type': f".{request.attachment_mime_type.split('/')[-1]}",
+                    'base64': attachment_data,
+                    'media_type': request.attachment_mime_type
+                }]
+                logger.info(f"📸 iOS: Prepared IMAGE attachment ({len(attachment_data)} chars)")
+            else:
+                # This is a DOCUMENT (PDF, docx, xlsx, etc.) - use document format
+                document_attachments = [{
+                    'filename': filename,
+                    'base64': attachment_data,
+                    'media_type': request.attachment_mime_type
+                }]
+                logger.info(f"📄 iOS: Prepared DOCUMENT attachment ({len(attachment_data)} chars) - type: {request.attachment_mime_type}")
+                
+        except Exception as e:
+            logger.error(f"❌ iOS: Failed to process attachment: {e}")
+            # Continue without attachment rather than failing
+    
+    # Priority 2: Legacy image_base64 field (backward compatibility - assumes JPEG)
+    elif request.image_base64:
+        try:
+            image_data = request.image_base64
+            
+            # Remove data URL prefix if present
             if ',' in image_data:
                 image_data = image_data.split(',', 1)[1]
             
             # Validate it's valid base64
             base64.b64decode(image_data)
             
-            # Build image attachment for vision API
+            # Build image attachment (legacy format assumes JPEG)
             image_attachments = [{
                 'filename': 'ios_attachment.jpg',
                 'type': '.jpg',
                 'base64': image_data,
                 'media_type': 'image/jpeg'
             }]
-            logger.info(f"📱 iOS: Decoded base64 image ({len(image_data)} chars)")
+            logger.info(f"📱 iOS (legacy): Decoded base64 image ({len(image_data)} chars)")
             
         except Exception as e:
             logger.error(f"❌ iOS: Failed to decode base64 image: {e}")
             # Continue without image rather than failing
-            image_attachments = None
     
     # Delegate to the form-based endpoint with extracted values
     return await chat_with_ai(
@@ -1136,7 +1202,8 @@ async def chat_with_ai_json(
         files=[],
         request=None,
         user_id=user_id,
-        internal_image_attachments=image_attachments
+        internal_image_attachments=image_attachments,
+        internal_document_attachments=document_attachments
     )
 
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
