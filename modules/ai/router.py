@@ -54,16 +54,21 @@ logger = logging.getLogger(__name__)
 #-- Request/Response Models
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message")
-    personality_id: str = Field(default='syntaxprime', description="AI personality to use")
-    thread_id: Optional[str] = Field(None, description="Conversation thread ID")
-    include_knowledge: bool = Field(default=True, description="Include knowledge base search")
+    personality_id: str = Field(default='syntaxprime', alias='personalityId', description="AI personality to use")
+    thread_id: Optional[str] = Field(None, alias='threadId', description="Conversation thread ID")
+    include_knowledge: bool = Field(default=True, alias='includeKnowledge', description="Include knowledge base search")
     stream: bool = Field(default=False, description="Stream response")
     # Legacy single-image support (iOS backward compatibility)
-    image_base64: Optional[str] = Field(None, description="Base64-encoded image data from iOS/mobile")
+    image_base64: Optional[str] = Field(None, alias='imageBase64', description="Base64-encoded image data from iOS/mobile")
     # New universal attachment fields (supports images AND documents)
-    attachment_data: Optional[str] = Field(None, description="Base64-encoded attachment data")
-    attachment_filename: Optional[str] = Field(None, description="Original filename of attachment")
-    attachment_mime_type: Optional[str] = Field(None, description="MIME type of attachment (e.g., image/jpeg, application/pdf)")
+    # Accept both snake_case and camelCase for iOS compatibility
+    attachment_data: Optional[str] = Field(None, alias='attachmentData', description="Base64-encoded attachment data")
+    attachment_filename: Optional[str] = Field(None, alias='attachmentFilename', description="Original filename of attachment")
+    attachment_mime_type: Optional[str] = Field(None, alias='attachmentMimeType', description="MIME type of attachment (e.g., image/jpeg, application/pdf)")
+    
+    class Config:
+        # Allow both snake_case and camelCase field names
+        populate_by_name = True
 
 class GestureInfo(BaseModel):
     """Gesture animation info for avatar videos"""
@@ -1098,6 +1103,14 @@ async def chat_with_ai_json(
     import tempfile
     import os
     from pathlib import Path
+    
+    # DEBUG: Log what fields we received from iOS
+    logger.info(f"📱 iOS /chat-json request received:")
+    logger.info(f"   message length: {len(request.message)}")
+    logger.info(f"   attachment_data: {'present (' + str(len(request.attachment_data)) + ' chars)' if request.attachment_data else 'None'}")
+    logger.info(f"   attachment_filename: {request.attachment_filename}")
+    logger.info(f"   attachment_mime_type: {request.attachment_mime_type}")
+    logger.info(f"   image_base64: {'present (' + str(len(request.image_base64)) + ' chars)' if request.image_base64 else 'None'}")
     
     # Build attachments from request fields
     image_attachments = None
