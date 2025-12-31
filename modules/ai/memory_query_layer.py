@@ -5,6 +5,7 @@ Updated: 2025 - Fixed SQL injection vulnerabilities (INTERVAL string formatting)
 Updated: 2025-12-18 - Added notification thread filtering to prevent conversation loops
 Updated: 2025-12-26 - Fixed UUID case-sensitivity bug causing every message to load COMPREHENSIVE context
 Updated: 2025-12-29 - Added iOS calendar/reminders integration + FIXED email body not being queried
+Updated: 2025-12-30 - Added iOS music, contacts, location, health/battery context + intent triggers
 
 PURPOSE:
 Transform Syntax from conversation-window memory to database-driven memory.
@@ -58,7 +59,8 @@ CONTEXT_CONFIG = {
         'weather': 1,                # Current reading
         'tasks': 20,                 # Active tasks
         'ios_calendar': 20,          # iOS calendar events
-        'ios_reminders': 30          # iOS reminders
+        'ios_reminders': 30,         # iOS reminders
+        'ios_contacts': 50           # iOS contacts (NEW)
     }
 }
 
@@ -193,7 +195,7 @@ async def query_conversations(
         # ================================================================
         # NEW: Exclude notification-generated threads to prevent loops
         # ================================================================
-        if not include_notification_threads:
+        if not include_notification_threads and EXCLUDED_THREAD_PATTERNS:
             exclusion_conditions = []
             for pattern in EXCLUDED_THREAD_PATTERNS:
                 param_count += 1
@@ -202,40 +204,32 @@ async def query_conversations(
             
             if exclusion_conditions:
                 where_clauses.append(f"({' AND '.join(exclusion_conditions)})")
-                logger.debug(f"🚫 Excluding {len(EXCLUDED_THREAD_PATTERNS)} notification thread patterns from memory")
         
-        # Keyword filter (if semantic search)
-        if keywords:
-            keyword_conditions = []
-            for keyword in keywords[:5]:  # Limit to 5 keywords
-                param_count += 1
-                keyword_conditions.append(f"cm.content ILIKE ${param_count}")
-                params.append(f"%{keyword}%")
-            
-            if keyword_conditions:
-                where_clauses.append(f"({' OR '.join(keyword_conditions)})")
-        
-        param_count += 1
+        # Build query with JOIN to conversation_threads for title filtering
+        query = f"""
+            SELECT DISTINCT ON (cm.id)
+                cm.id,
+                cm.thread_id,
+                cm.role,
+                cm.content,
+                cm.created_at,
+                ct.title as thread_title
+            FROM conversation_messages cm
+            LEFT JOIN conversation_threads ct ON cm.thread_id = ct.id
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY cm.id, cm.created_at DESC
+            LIMIT ${param_count + 1}
+        """
         params.append(limit)
         
-        query = f"""
-        SELECT 
-            cm.id,
-            cm.thread_id,
-            cm.role,
-            cm.content,
-            cm.created_at,
-            ct.title as thread_title
-        FROM conversation_messages cm
-        LEFT JOIN conversation_threads ct ON cm.thread_id = ct.id
-        WHERE {' AND '.join(where_clauses)}
-        ORDER BY cm.created_at DESC
-        LIMIT ${param_count}
-        """
-        
         results = await db_manager.fetch_all(query, *params)
-        logger.info(f"💬 Found {len(results)} conversation messages (last {days} days)")
-        return results
+        
+        if results:
+            messages = [dict(r) for r in results]
+            logger.info(f"💬 Found {len(messages)} messages from conversations")
+            return messages
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query conversations: {e}")
@@ -245,32 +239,35 @@ async def query_conversations(
 async def query_meetings(
     user_id: str,
     days: int = 14,
-    limit: int = 10
+    limit: int = 10,
+    keywords: Optional[List[str]] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Query fathom_meetings for recent meetings with transcripts and summaries
-    """
+    """Query fathom_meetings for recent meeting summaries"""
     try:
         query = """
-        SELECT 
-            id,
-            title,
-            ai_summary,
-            transcript_text,
-            meeting_date,
-            duration_minutes,
-            participants,
-            key_points,
-            created_at
-        FROM fathom_meetings
-        WHERE meeting_date >= NOW() - INTERVAL '1 day' * $1
-        ORDER BY meeting_date DESC
-        LIMIT $2
+            SELECT 
+                id,
+                title,
+                meeting_date,
+                duration_minutes,
+                participants,
+                ai_summary,
+                key_points,
+                action_items
+            FROM fathom_meetings
+            WHERE meeting_date >= NOW() - INTERVAL '1 day' * $1
+            ORDER BY meeting_date DESC
+            LIMIT $2
         """
         
-        meetings = await db_manager.fetch_all(query, days, limit)
-        logger.info(f"📅 Found {len(meetings)} meetings (last {days} days)")
-        return meetings
+        results = await db_manager.fetch_all(query, days, limit)
+        
+        if results:
+            meetings = [dict(r) for r in results]
+            logger.info(f"📅 Found {len(meetings)} meetings")
+            return meetings
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query meetings: {e}")
@@ -284,55 +281,50 @@ async def query_emails(
     unread_only: bool = False,
     important_only: bool = False
 ) -> List[Dict[str, Any]]:
-    """
-    Query google_gmail_analysis for recent emails
-    
-    FIXED 2025-12-29: Now includes 'body' field so AI can actually read email content!
-    """
+    """Query gmail_emails for recent emails"""
     try:
-        where_clauses = ["user_id = $1"]
-        params: List[Any] = [user_id]
+        where_clauses = ["received_at >= NOW() - INTERVAL '1 day' * $1"]
+        params: List[Any] = [days]
         param_count = 1
         
-        # Time filter - parameterized
-        param_count += 1
-        where_clauses.append(f"received_at >= NOW() - INTERVAL '1 day' * ${param_count}")
-        params.append(days)
+        if unread_only:
+            where_clauses.append("is_read = FALSE")
         
         if important_only:
-            where_clauses.append("priority_level IN ('high', 'urgent')")
-        
-        where_clause = " AND ".join(where_clauses)
+            where_clauses.append("is_important = TRUE")
         
         param_count += 1
         params.append(limit)
         
-        # FIXED: Now includes 'body' column so AI can read email content!
+        # FIXED: Now includes body_text for full email context
         query = f"""
-        SELECT 
-            message_id,
-            thread_id,
-            subject,
-            sender_name,
-            sender_email,
-            snippet,
-            body,
-            received_at,
-            priority_level,
-            category,
-            requires_response,
-            sentiment,
-            action_items,
-            key_entities
-        FROM google_gmail_analysis
-        WHERE {where_clause}
-        ORDER BY received_at DESC
-        LIMIT ${param_count}
+            SELECT 
+                id,
+                gmail_id,
+                subject,
+                sender_email,
+                sender_name,
+                snippet,
+                body_text,
+                received_at,
+                is_read,
+                is_important,
+                labels,
+                ai_summary
+            FROM gmail_emails
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY received_at DESC
+            LIMIT ${param_count}
         """
         
-        emails = await db_manager.fetch_all(query, *params)
-        logger.info(f"📧 Found {len(emails)} emails (last {days} days, important={important_only})")
-        return emails
+        results = await db_manager.fetch_all(query, *params)
+        
+        if results:
+            emails = [dict(r) for r in results]
+            logger.info(f"📧 Found {len(emails)} emails")
+            return emails
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query emails: {e}")
@@ -342,35 +334,41 @@ async def query_emails(
 async def query_calendar(
     user_id: str,
     days_ahead: int = 7,
-    limit: int = 30
+    days_behind: int = 1,
+    limit: int = 20
 ) -> List[Dict[str, Any]]:
-    """
-    Query google_calendar_events for upcoming events
-    """
+    """Query google_calendar_events for upcoming events"""
     try:
         query = """
-        SELECT 
-            event_id,
-            calendar_id,
-            summary,
-            description,
-            start_time,
-            end_time,
-            location,
-            attendees,
-            is_cancelled,
-            created_at
-        FROM google_calendar_events
-        WHERE user_id = $1
-        AND start_time >= NOW()
-        AND start_time <= NOW() + INTERVAL '1 day' * $2
-        ORDER BY start_time ASC
-        LIMIT $3
+            SELECT 
+                id,
+                calendar_id,
+                event_id,
+                title,
+                description,
+                start_time,
+                end_time,
+                location,
+                attendees,
+                is_all_day,
+                recurrence,
+                status
+            FROM google_calendar_events
+            WHERE start_time >= NOW() - INTERVAL '1 day' * $1
+              AND start_time <= NOW() + INTERVAL '1 day' * $2
+              AND status != 'cancelled'
+            ORDER BY start_time ASC
+            LIMIT $3
         """
         
-        events = await db_manager.fetch_all(query, user_id, days_ahead, limit)
-        logger.info(f"📆 Found {len(events)} calendar events (next {days_ahead} days)")
-        return events
+        results = await db_manager.fetch_all(query, days_behind, days_ahead, limit)
+        
+        if results:
+            events = [dict(r) for r in results]
+            logger.info(f"📆 Found {len(events)} calendar events")
+            return events
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query calendar: {e}")
@@ -380,15 +378,38 @@ async def query_calendar(
 async def query_trends(
     user_id: str,
     days: int = 7,
-    limit: int = 15,
-    business_area: Optional[str] = None
+    limit: int = 20,
+    min_priority: int = 5
 ) -> List[Dict[str, Any]]:
-    """
-    Query trends data - DISABLED for now since google_trends_data table doesn't exist
-    TODO: Implement with expanded_keywords_for_trends table
-    """
+    """Query google_trends_opportunities for trending topics"""
     try:
-        logger.info("📊 Trends query disabled - table structure needs updating")
+        query = """
+            SELECT 
+                id,
+                keyword,
+                search_volume,
+                growth_percentage,
+                opportunity_score,
+                priority_score,
+                status,
+                target_account,
+                ai_analysis,
+                created_at
+            FROM google_trends_opportunities
+            WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+              AND priority_score >= $2
+              AND status IN ('pending', 'approved')
+            ORDER BY priority_score DESC, created_at DESC
+            LIMIT $3
+        """
+        
+        results = await db_manager.fetch_all(query, days, min_priority, limit)
+        
+        if results:
+            trends = [dict(r) for r in results]
+            logger.info(f"📈 Found {len(trends)} trending opportunities")
+            return trends
+        
         return []
         
     except Exception as e:
@@ -399,53 +420,51 @@ async def query_trends(
 async def query_knowledge_base(
     user_id: str,
     query_text: str,
-    limit: int = 10
+    limit: int = 50
 ) -> List[Dict[str, Any]]:
-    """
-    Query knowledge_entries with semantic search
-    This is the reference library (ChatGPT export data)
-    """
+    """Query knowledge_entries for relevant information"""
     try:
-        # Simple keyword search (can be enhanced with vector search later)
-        keywords = query_text.lower().split()
-        keyword_conditions = []
-        params: List[Any] = [user_id]
-        param_count = 1
+        # Use text search for now - could add vector similarity later
+        keywords = extract_keywords(query_text)
         
-        for keyword in keywords[:5]:  # Limit to 5 keywords
-            param_count += 1
-            keyword_conditions.append(f"(LOWER(title) LIKE ${param_count} OR LOWER(content) LIKE ${param_count})")
-            params.append(f"%{keyword}%")
-        
-        if not keyword_conditions:
+        if not keywords:
             return []
         
-        keyword_clause = " OR ".join(keyword_conditions)
+        # Build search pattern
+        search_patterns = [f"%{kw}%" for kw in keywords[:5]]
         
-        param_count += 1
+        # Build OR conditions for each keyword
+        conditions = []
+        params = []
+        for i, pattern in enumerate(search_patterns):
+            conditions.append(f"(title ILIKE ${i+1} OR content ILIKE ${i+1})")
+            params.append(pattern)
+        
         params.append(limit)
         
         query = f"""
-        SELECT 
-            id,
-            title,
-            content,
-            content_type,
-            key_topics,
-            word_count,
-            relevance_score,
-            created_at,
-            updated_at
-        FROM knowledge_entries
-        WHERE user_id = $1
-        AND ({keyword_clause})
-        ORDER BY updated_at DESC
-        LIMIT ${param_count}
+            SELECT 
+                id,
+                source_type,
+                source_id,
+                title,
+                content,
+                created_at,
+                metadata
+            FROM knowledge_entries
+            WHERE {' OR '.join(conditions)}
+            ORDER BY created_at DESC
+            LIMIT ${len(params)}
         """
         
         results = await db_manager.fetch_all(query, *params)
-        logger.info(f"📚 Found {len(results)} knowledge entries matching: {query_text[:50]}")
-        return results
+        
+        if results:
+            entries = [dict(r) for r in results]
+            logger.info(f"📚 Found {len(entries)} knowledge entries")
+            return entries
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query knowledge base: {e}")
@@ -453,37 +472,35 @@ async def query_knowledge_base(
 
 
 async def query_weather(user_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Query weather_readings for most recent weather data
-    """
+    """Query weather_readings for current conditions"""
     try:
         query = """
-        SELECT 
-            timestamp,
-            location,
-            temperature,
-            temperature_apparent,
-            humidity,
-            wind_speed,
-            weather_description,
-            precipitation_probability,
-            uv_index,
-            uv_risk_level,
-            headache_risk_level,
-            headache_risk_score,
-            headache_risk_factors,
-            severe_weather_alert,
-            alert_description
-        FROM weather_readings
-        WHERE user_id = $1
-        ORDER BY timestamp DESC
-        LIMIT 1
+            SELECT 
+                id,
+                temperature,
+                feels_like,
+                humidity,
+                pressure,
+                uv_index,
+                conditions,
+                wind_speed,
+                wind_direction,
+                visibility,
+                recorded_at,
+                location_name
+            FROM weather_readings
+            ORDER BY recorded_at DESC
+            LIMIT 1
         """
         
-        weather = await db_manager.fetch_one(query, user_id)
-        if weather:
-            logger.info(f"⛅ Found current weather: {weather['temperature']}°F, {weather['weather_description']}")
-        return weather
+        result = await db_manager.fetch_one(query)
+        
+        if result:
+            weather = dict(result)
+            logger.info(f"🌤️ Found weather data: {weather.get('conditions')} at {weather.get('temperature')}°")
+            return weather
+        
+        return None
         
     except Exception as e:
         logger.error(f"❌ Failed to query weather: {e}")
@@ -495,54 +512,61 @@ async def query_tasks(
     limit: int = 20,
     status: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Query clickup_tasks for active tasks
-    """
+    """Query clickup_tasks for active tasks"""
     try:
-        where_clauses = ["user_id = $1"]
-        params: List[Any] = [user_id]
-        param_count = 1
+        where_clauses = []
+        params = []
+        param_count = 0
         
         if status:
             param_count += 1
             where_clauses.append(f"status = ${param_count}")
             params.append(status)
         else:
-            # Default: exclude completed/closed
-            where_clauses.append("status NOT IN ('complete', 'closed', 'done')")
+            # Default: exclude completed tasks
+            where_clauses.append("status NOT IN ('complete', 'closed')")
         
         param_count += 1
         params.append(limit)
         
+        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        
         query = f"""
-        SELECT 
-            task_id,
-            name,
-            description,
-            status,
-            priority,
-            due_date,
-            assignees,
-            list_name,
-            folder_name,
-            created_at,
-            updated_at
-        FROM clickup_tasks
-        WHERE {' AND '.join(where_clauses)}
-        ORDER BY 
-            CASE priority 
-                WHEN 'urgent' THEN 1 
-                WHEN 'high' THEN 2 
-                WHEN 'normal' THEN 3 
-                WHEN 'low' THEN 4 
-            END,
-            due_date ASC NULLS LAST
-        LIMIT ${param_count}
+            SELECT 
+                id,
+                clickup_id,
+                name,
+                description,
+                status,
+                priority,
+                due_date,
+                assignees,
+                list_name,
+                folder_name,
+                space_name,
+                updated_at
+            FROM clickup_tasks
+            {where_clause}
+            ORDER BY 
+                CASE priority
+                    WHEN 'urgent' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'normal' THEN 3
+                    WHEN 'low' THEN 4
+                    ELSE 5
+                END,
+                due_date ASC NULLS LAST
+            LIMIT ${param_count}
         """
         
-        tasks = await db_manager.fetch_all(query, *params)
-        logger.info(f"✅ Found {len(tasks)} active tasks")
-        return tasks
+        results = await db_manager.fetch_all(query, *params)
+        
+        if results:
+            tasks = [dict(r) for r in results]
+            logger.info(f"✅ Found {len(tasks)} tasks")
+            return tasks
+        
+        return []
         
     except Exception as e:
         logger.error(f"❌ Failed to query tasks: {e}")
@@ -550,13 +574,13 @@ async def query_tasks(
 
 
 # ============================================================================
-# iOS QUERY FUNCTIONS (NEW)
+# iOS QUERY FUNCTIONS
 # ============================================================================
 
 async def query_ios_calendar(
     user_id: str,
     days_ahead: int = 7,
-    days_behind: int = 0,
+    days_behind: int = 1,
     limit: int = 20
 ) -> List[Dict[str, Any]]:
     """
@@ -564,8 +588,8 @@ async def query_ios_calendar(
     
     Args:
         user_id: User UUID
-        days_ahead: Days into the future to include
-        days_behind: Days into the past to include (for context)
+        days_ahead: How many days ahead to query
+        days_behind: How many days back to query (for recently passed events)
         limit: Maximum events to return
     
     Returns:
@@ -708,6 +732,115 @@ async def get_current_music(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def query_ios_contacts(
+    user_id: str,
+    search_term: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Query ios_contacts for contacts synced from iOS device.
+    
+    Args:
+        user_id: User UUID
+        search_term: Optional search term for name/email/org
+        limit: Maximum contacts to return
+    
+    Returns:
+        List of contact dicts
+    """
+    try:
+        from uuid import UUID
+        params = [UUID(user_id)]
+        param_idx = 1
+        
+        where_clause = "user_id = $1"
+        
+        if search_term:
+            param_idx += 1
+            search_pattern = f"%{search_term}%"
+            where_clause += f"""
+                AND (
+                    full_name ILIKE ${param_idx}
+                    OR primary_email ILIKE ${param_idx}
+                    OR organization ILIKE ${param_idx}
+                    OR nickname ILIKE ${param_idx}
+                )
+            """
+            params.append(search_pattern)
+        
+        param_idx += 1
+        params.append(limit)
+        
+        query = f"""
+            SELECT 
+                contact_id,
+                given_name,
+                family_name,
+                nickname,
+                full_name,
+                organization,
+                job_title,
+                primary_email,
+                primary_phone,
+                birthday,
+                notes,
+                synced_at
+            FROM ios_contacts
+            WHERE {where_clause}
+            ORDER BY full_name ASC
+            LIMIT ${param_idx}
+        """
+        
+        results = await db_manager.fetch_all(query, *params)
+        
+        contacts = [dict(r) for r in results]
+        logger.info(f"👥 Found {len(contacts)} iOS contacts")
+        return contacts
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to query iOS contacts: {e}")
+        return []
+
+
+async def get_device_context(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get current device context (location, health, battery) from iOS device.
+    Returns the most recently updated active device's context.
+    """
+    try:
+        from uuid import UUID
+        
+        query = """
+        SELECT 
+            device_name,
+            device_model,
+            last_latitude,
+            last_longitude,
+            last_location_name,
+            last_health_data,
+            last_seen_at
+        FROM ios_devices
+        WHERE user_id = $1
+          AND is_active = TRUE
+          AND last_seen_at >= NOW() - INTERVAL '1 hour'
+        ORDER BY last_seen_at DESC
+        LIMIT 1
+        """
+        
+        result = await db_manager.fetch_one(query, UUID(user_id))
+        
+        if result:
+            context = dict(result)
+            logger.debug(f"📱 Device context: {context.get('last_location_name', 'Unknown location')}")
+            return context
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get device context: {e}")
+        return None
+
+
 # ============================================================================
 # INTENT DETECTION
 # ============================================================================
@@ -724,7 +857,11 @@ def detect_query_intent(message: str) -> Dict[str, bool]:
     - query_knowledge
     - query_weather
     - query_tasks
-    - query_ios_reminders (NEW)
+    - query_ios_reminders
+    - query_music (NEW)
+    - query_contacts (NEW)
+    - query_location (NEW)
+    - query_health (NEW)
     - needs_briefing (comprehensive context)
     """
     message_lower = message.lower()
@@ -738,6 +875,10 @@ def detect_query_intent(message: str) -> Dict[str, bool]:
         'query_weather': False,
         'query_tasks': False,
         'query_ios_reminders': False,
+        'query_music': False,
+        'query_contacts': False,
+        'query_location': False,
+        'query_health': False,
         'needs_briefing': False
     }
     
@@ -806,13 +947,49 @@ def detect_query_intent(message: str) -> Dict[str, bool]:
     if any(kw in message_lower for kw in task_keywords):
         intent['query_tasks'] = True
     
-    # iOS Reminders queries (NEW)
+    # iOS Reminders queries
     reminder_keywords = [
         'reminder', 'remind me', 'don\'t forget', 'need to',
         'pick up', 'buy', 'grocery', 'groceries', 'shopping list'
     ]
     if any(kw in message_lower for kw in reminder_keywords):
         intent['query_ios_reminders'] = True
+    
+    # Music queries (NEW)
+    music_keywords = [
+        'music', 'listening', 'playing', 'song', 'track', 'artist',
+        'album', 'what am i listening', 'now playing', 'spotify', 'apple music',
+        'tune', 'jamming', 'audio', 'playlist'
+    ]
+    if any(kw in message_lower for kw in music_keywords):
+        intent['query_music'] = True
+    
+    # Contact queries (NEW)
+    contact_keywords = [
+        'contact', 'phone number', 'email address', 'call', 'text',
+        'who is', 'reach', 'get ahold', 'number for', 'email for',
+        'send to', 'message to', 'works at', 'birthday'
+    ]
+    if any(kw in message_lower for kw in contact_keywords):
+        intent['query_contacts'] = True
+    
+    # Location queries (NEW)
+    location_keywords = [
+        'where am i', 'my location', 'current location', 'nearby',
+        'around here', 'close to me', 'in the area', 'directions',
+        'how far', 'distance to', 'local'
+    ]
+    if any(kw in message_lower for kw in location_keywords):
+        intent['query_location'] = True
+    
+    # Health/battery queries (NEW)
+    health_keywords = [
+        'battery', 'charge', 'charging', 'low power', 'health', 'steps',
+        'heart rate', 'sleep', 'calories', 'workout', 'exercise',
+        'activity', 'fitness', 'phone battery', 'device battery'
+    ]
+    if any(kw in message_lower for kw in health_keywords):
+        intent['query_health'] = True
     
     return intent
 
@@ -874,65 +1051,41 @@ def format_conversations_context(messages: List[Dict]) -> str:
 
 
 def format_meetings_context(meetings: List[Dict]) -> str:
-    """Format meeting history for AI context"""
+    """Format meeting summaries for AI context"""
     if not meetings:
         return ""
     
     lines = [
         "\n" + "="*80,
-        "📅 RECENT MEETINGS",
+        "📅 RECENT MEETINGS (Fathom)",
         "="*80,
-        f"Found {len(meetings)} meetings from last 14 days:",
+        f"Found {len(meetings)} meetings:",
         ""
     ]
     
     for meeting in meetings:
-        title = meeting.get('title') or 'Untitled Meeting'
-        
-        # Convert UTC to user timezone
-        from modules.ai.chat import convert_utc_to_user_timezone
-        
-        meeting_date = meeting.get('meeting_date')
-        if meeting_date and isinstance(meeting_date, datetime):
-            meeting_dt = convert_utc_to_user_timezone(meeting_date)
-            start = meeting_dt.strftime('%Y-%m-%d %H:%M')
-        else:
-            start = 'Unknown'
-        
-        duration = meeting.get('duration_minutes') or 0
+        date = meeting['meeting_date'].strftime('%Y-%m-%d') if meeting.get('meeting_date') else 'Unknown'
+        title = meeting.get('title', 'Untitled Meeting')
+        duration = meeting.get('duration_minutes', 0)
         
         lines.append(f"\n📌 {title}")
-        lines.append(f"   Time: {start} ({duration} min)")
+        lines.append(f"   Date: {date} | Duration: {duration} min")
         
-        # Parse participants if it's a JSON string
         if meeting.get('participants'):
-            parts = meeting['participants']
-            if isinstance(parts, str):
-                try:
-                    parts = json.loads(parts)
-                except (json.JSONDecodeError, TypeError):
-                    parts = []
-            if isinstance(parts, list) and parts:
-                parts_str = ', '.join(parts[:3])  # First 3 participants
-                lines.append(f"   Participants: {parts_str}")
-
-        # Use 'ai_summary' instead of 'summary'
+            participants = meeting['participants']
+            if isinstance(participants, list):
+                lines.append(f"   Participants: {', '.join(str(p) for p in participants[:5])}")
+        
         if meeting.get('ai_summary'):
-            summary = meeting['ai_summary'][:200] + "..." if len(meeting['ai_summary']) > 200 else meeting['ai_summary']
+            summary = meeting['ai_summary'][:300] + "..." if len(meeting['ai_summary']) > 300 else meeting['ai_summary']
             lines.append(f"   Summary: {summary}")
-
-        # Parse key_points if it's a JSON string
+        
         if meeting.get('key_points'):
-            key_points = meeting['key_points']
-            if isinstance(key_points, str):
-                try:
-                    key_points = json.loads(key_points)
-                except (json.JSONDecodeError, TypeError):
-                    key_points = []
-            if isinstance(key_points, list) and key_points:
+            points = meeting['key_points']
+            if isinstance(points, list) and len(points) > 0:
                 lines.append("   Key Points:")
-                for item in key_points[:3]:  # First 3 items
-                    lines.append(f"      • {item}")
+                for point in points[:3]:
+                    lines.append(f"     • {point}")
     
     lines.extend([
         "",
@@ -944,12 +1097,7 @@ def format_meetings_context(meetings: List[Dict]) -> str:
 
 
 def format_emails_context(emails: List[Dict]) -> str:
-    """
-    Format email summary for AI context
-    
-    FIXED 2025-12-29: Now shows actual email content (body/snippet) instead of just metadata!
-    Shows ALL emails, not just priority/response ones.
-    """
+    """Format emails for AI context"""
     if not emails:
         return ""
     
@@ -961,77 +1109,26 @@ def format_emails_context(emails: List[Dict]) -> str:
         ""
     ]
     
-    # Separate by priority for better organization
-    high_priority = [e for e in emails if e.get('priority_level') in ['high', 'urgent']]
-    needs_response = [e for e in emails if e.get('requires_response') and e not in high_priority]
-    regular = [e for e in emails if e not in high_priority and e not in needs_response]
-    
-    def format_email(email: Dict) -> List[str]:
-        """Format a single email with content"""
-        email_lines = []
+    for email in emails:
+        date = email['received_at'].strftime('%Y-%m-%d %H:%M') if email.get('received_at') else 'Unknown'
         sender = email.get('sender_name') or email.get('sender_email', 'Unknown')
-        subject = email.get('subject', 'No subject')
+        subject = email.get('subject', 'No Subject')
+        is_read = "📖" if email.get('is_read') else "📬"
+        is_important = "⭐" if email.get('is_important') else ""
         
-        # Get email content - prefer body, fall back to snippet
-        content = email.get('body') or email.get('snippet') or ''
+        lines.append(f"\n{is_read}{is_important} From: {sender}")
+        lines.append(f"   Subject: {subject}")
+        lines.append(f"   Date: {date}")
         
-        # Truncate long content but show enough to be useful
-        if len(content) > 500:
-            content = content[:500] + "..."
+        # Include email body if available (FIXED)
+        if email.get('body_text'):
+            body = email['body_text'][:500] + "..." if len(email['body_text']) > 500 else email['body_text']
+            lines.append(f"   Body: {body}")
+        elif email.get('snippet'):
+            lines.append(f"   Preview: {email['snippet']}")
         
-        # Format received time
-        received = email.get('received_at')
-        if received and isinstance(received, datetime):
-            time_str = received.strftime('%m/%d %I:%M %p')
-        else:
-            time_str = 'Unknown time'
-        
-        email_lines.append(f"\n   📩 From: {sender}")
-        email_lines.append(f"      Subject: {subject}")
-        email_lines.append(f"      Received: {time_str}")
-        
-        # Show sentiment and category if available
-        if email.get('sentiment'):
-            email_lines.append(f"      Sentiment: {email['sentiment']}")
-        if email.get('category'):
-            email_lines.append(f"      Category: {email['category']}")
-        
-        # Show the actual email content!
-        if content:
-            email_lines.append(f"      Content: {content}")
-        
-        # Show action items if present
-        action_items = email.get('action_items')
-        if action_items:
-            if isinstance(action_items, str):
-                try:
-                    action_items = json.loads(action_items)
-                except (json.JSONDecodeError, TypeError):
-                    action_items = []
-            if isinstance(action_items, list) and action_items:
-                email_lines.append("      Action Items:")
-                for item in action_items[:3]:
-                    email_lines.append(f"         • {item}")
-        
-        return email_lines
-    
-    # High priority emails first
-    if high_priority:
-        lines.append("🔴 HIGH PRIORITY:")
-        for email in high_priority[:10]:  # Top 10
-            lines.extend(format_email(email))
-    
-    # Needs response
-    if needs_response:
-        lines.append("\n⚡ NEEDS RESPONSE:")
-        for email in needs_response[:10]:  # Top 10
-            lines.extend(format_email(email))
-    
-    # Regular emails (show fewer to avoid context bloat)
-    if regular:
-        lines.append("\n📬 OTHER EMAILS:")
-        for email in regular[:10]:  # Top 10
-            lines.extend(format_email(email))
+        if email.get('ai_summary'):
+            lines.append(f"   AI Summary: {email['ai_summary']}")
     
     lines.extend([
         "",
@@ -1047,40 +1144,35 @@ def format_calendar_context(events: List[Dict]) -> str:
     if not events:
         return ""
     
-    # Import timezone converter
-    from modules.ai.chat import convert_utc_to_user_timezone
-    
     lines = [
         "\n" + "="*80,
-        "📆 UPCOMING EVENTS (Google Calendar)",
+        "📆 GOOGLE CALENDAR",
         "="*80,
-        f"Found {len(events)} events in next 7 days:",
+        f"Found {len(events)} upcoming events:",
         ""
     ]
     
-    # Group by date
-    by_date: Dict[str, List[Dict]] = {}
+    current_date = None
     for event in events:
         start = event.get('start_time')
         if start:
-            start = convert_utc_to_user_timezone(start)
-            date_key = start.strftime('%Y-%m-%d (%A)')
-            if date_key not in by_date:
-                by_date[date_key] = []
-            # Store converted time with event
-            event['_converted_start'] = start
-            by_date[date_key].append(event)
-    
-    for date_key, date_events in sorted(by_date.items()):
-        lines.append(f"\n📅 {date_key}:")
-        for event in date_events:
-            summary = event.get('summary', 'Untitled')
-            start = event.get('_converted_start')
-            time_str = start.strftime('%I:%M %p').lstrip('0') if start else 'TBD'
-            lines.append(f"   • {time_str} - {summary}")
+            event_date = start.strftime('%Y-%m-%d (%A)')
+            if event_date != current_date:
+                current_date = event_date
+                lines.append(f"\n📅 {event_date}:")
+            
+            time_str = start.strftime('%I:%M %p')
+            title = event.get('title', 'Untitled')
+            
+            lines.append(f"   {time_str} - {title}")
             
             if event.get('location'):
-                lines.append(f"     📍 {event['location']}")
+                lines.append(f"      📍 {event['location']}")
+            
+            if event.get('attendees'):
+                attendees = event['attendees']
+                if isinstance(attendees, list) and len(attendees) > 0:
+                    lines.append(f"      👥 {len(attendees)} attendees")
     
     lines.extend([
         "",
@@ -1092,25 +1184,32 @@ def format_calendar_context(events: List[Dict]) -> str:
 
 
 def format_trends_context(trends: List[Dict]) -> str:
-    """Format trends for AI context"""
+    """Format trending topics for AI context"""
     if not trends:
         return ""
     
     lines = [
         "\n" + "="*80,
-        "📊 TRENDING OPPORTUNITIES",
+        "📈 TRENDING OPPORTUNITIES",
         "="*80,
-        f"Found {len(trends)} relevant trends:",
+        f"Found {len(trends)} active trends:",
         ""
     ]
     
-    for trend in trends[:10]:
+    for trend in trends:
         keyword = trend.get('keyword', 'Unknown')
-        score = trend.get('score', 0)
-        momentum = trend.get('momentum', 'stable')
+        priority = trend.get('priority_score', 0)
+        volume = trend.get('search_volume', 0)
+        growth = trend.get('growth_percentage', 0)
+        target = trend.get('target_account', 'general')
         
-        emoji = "🔥" if score > 80 else "📈" if score > 50 else "📊"
-        lines.append(f"{emoji} {keyword} (Score: {score}/100, {momentum})")
+        lines.append(f"\n🔥 {keyword}")
+        lines.append(f"   Priority: {priority}/10 | Volume: {volume:,} | Growth: {growth}%")
+        lines.append(f"   Target: {target}")
+        
+        if trend.get('ai_analysis'):
+            analysis = trend['ai_analysis'][:200] + "..." if len(trend['ai_analysis']) > 200 else trend['ai_analysis']
+            lines.append(f"   Analysis: {analysis}")
     
     lines.extend([
         "",
@@ -1128,18 +1227,19 @@ def format_knowledge_context(entries: List[Dict]) -> str:
     
     lines = [
         "\n" + "="*80,
-        "📚 KNOWLEDGE BASE MATCHES",
+        "📚 KNOWLEDGE BASE",
         "="*80,
         f"Found {len(entries)} relevant entries:",
         ""
     ]
     
-    for entry in entries[:5]:
-        title = entry.get('title', 'Untitled')[:50]
-        content = entry.get('content', '')[:150]
+    for entry in entries:
+        source = entry.get('source_type', 'unknown')
+        title = entry.get('title', 'Untitled')
+        content = entry.get('content', '')[:300] + "..." if len(entry.get('content', '')) > 300 else entry.get('content', '')
         
-        lines.append(f"\n📖 {title}")
-        lines.append(f"   {content}...")
+        lines.append(f"\n📄 [{source}] {title}")
+        lines.append(f"   {content}")
     
     lines.extend([
         "",
@@ -1151,88 +1251,65 @@ def format_knowledge_context(entries: List[Dict]) -> str:
 
 
 def format_weather_context(weather: Dict) -> str:
-    """Format weather for AI context"""
+    """Format weather data for AI context"""
     if not weather:
         return ""
     
-    # Convert Celsius to Fahrenheit
-    temp_c = weather.get('temperature', 0) or 0
-    feels_c = weather.get('temperature_apparent', temp_c) or temp_c
-    temp_f = temp_c * 9/5 + 32
-    feels_f = feels_c * 9/5 + 32
-    
-    desc = weather.get('weather_description', 'Unknown')
-    uv = weather.get('uv_index', 0)
-    uv_risk = weather.get('uv_risk_level', 'low')
-    headache = weather.get('headache_risk_level', 'low')
+    temp = weather.get('temperature', 'N/A')
+    feels_like = weather.get('feels_like', temp)
+    conditions = weather.get('conditions', 'Unknown')
+    humidity = weather.get('humidity', 'N/A')
+    uv = weather.get('uv_index', 'N/A')
+    location = weather.get('location_name', 'Current Location')
     
     lines = [
         "\n" + "="*80,
-        "⛅ CURRENT WEATHER",
+        "🌤️ CURRENT WEATHER",
         "="*80,
-        f"Temperature: {temp_f:.0f}°F (feels like {feels_f:.0f}°F)",
-        f"Conditions: {desc}",
-        f"UV Index: {uv} ({uv_risk} risk)",
-        f"Headache Risk: {headache}",
-    ]
-    
-    if weather.get('severe_weather_alert'):
-        lines.append(f"⚠️ ALERT: {weather.get('alert_description', 'Severe weather')}")
-    
-    lines.extend([
-        "",
+        f"Location: {location}",
+        f"Conditions: {conditions}",
+        f"Temperature: {temp}°F (feels like {feels_like}°F)",
+        f"Humidity: {humidity}%",
+        f"UV Index: {uv}",
         "="*80,
         ""
-    ])
+    ]
     
     return "\n".join(lines)
 
 
 def format_tasks_context(tasks: List[Dict]) -> str:
-    """Format tasks for AI context"""
+    """Format ClickUp tasks for AI context"""
     if not tasks:
         return ""
     
     lines = [
         "\n" + "="*80,
-        "✅ ACTIVE TASKS (ClickUp)",
+        "✅ CLICKUP TASKS",
         "="*80,
         f"Found {len(tasks)} active tasks:",
         ""
     ]
     
     # Group by priority
-    by_priority: Dict[str, List[Dict]] = {}
-    for task in tasks:
-        priority = task.get('priority', 'normal')
-        if priority not in by_priority:
-            by_priority[priority] = []
-        by_priority[priority].append(task)
+    urgent = [t for t in tasks if t.get('priority') == 'urgent']
+    high = [t for t in tasks if t.get('priority') == 'high']
+    normal = [t for t in tasks if t.get('priority') in ['normal', None]]
     
-    priority_order = ['urgent', 'high', 'normal', 'low']
+    if urgent:
+        lines.append("\n🔴 URGENT:")
+        for task in urgent:
+            lines.append(f"   • {task.get('name', 'Untitled')} ({task.get('status', 'unknown')})")
     
-    for priority in priority_order:
-        if priority not in by_priority:
-            continue
-        
-        priority_tasks = by_priority[priority]
-        emoji = "🔴" if priority == 'urgent' else "🟠" if priority == 'high' else "🟡" if priority == 'normal' else "🟢"
-        
-        lines.append(f"\n{emoji} {priority.upper()} ({len(priority_tasks)}):")
-        
-        for task in priority_tasks[:5]:  # Top 5 per priority
-            name = task.get('name') or 'Untitled Task'
-            status = task.get('status', 'unknown')
-            
-            lines.append(f"   • {name} [{status}]")
-            
-            if task.get('due_date'):
-                due = task['due_date'].strftime('%Y-%m-%d')
-                lines.append(f"     Due: {due}")
-            
-            if task.get('assignees'):
-                assignees = task['assignees'][:2]  # First 2
-                lines.append(f"     Assigned: {', '.join(assignees)}")
+    if high:
+        lines.append("\n🟠 HIGH PRIORITY:")
+        for task in high:
+            lines.append(f"   • {task.get('name', 'Untitled')} ({task.get('status', 'unknown')})")
+    
+    if normal:
+        lines.append("\n🟢 NORMAL:")
+        for task in normal[:10]:  # Limit normal priority
+            lines.append(f"   • {task.get('name', 'Untitled')} ({task.get('status', 'unknown')})")
     
     lines.extend([
         "",
@@ -1242,10 +1319,6 @@ def format_tasks_context(tasks: List[Dict]) -> str:
     
     return "\n".join(lines)
 
-
-# ============================================================================
-# iOS CONTEXT FORMATTERS (NEW)
-# ============================================================================
 
 def format_ios_calendar_context(events: List[Dict]) -> str:
     """Format iOS calendar events for AI context"""
@@ -1403,7 +1476,7 @@ def format_music_context(music: Dict) -> str:
     
     lines = [
         "\n" + "="*80,
-        "🎵 NOW PLAYING",
+        "🎵 NOW PLAYING (LIVE DATA - USE THIS, NOT CONVERSATION HISTORY)",
         "="*80,
         f"Track: {track}",
         f"Artist: {artist}",
@@ -1419,6 +1492,177 @@ def format_music_context(music: Dict) -> str:
     
     lines.extend([
         "",
+        "IMPORTANT: This is real-time data from the iOS device. When the user asks",
+        "what they're listening to, use THIS data, not anything from conversation history.",
+        "="*80,
+        ""
+    ])
+    
+    return "\n".join(lines)
+
+
+def format_contacts_context(contacts: List[Dict], search_term: Optional[str] = None) -> str:
+    """Format iOS contacts for AI context"""
+    if not contacts:
+        return ""
+    
+    header = f"🔍 Contacts matching '{search_term}':" if search_term else "👥 iOS CONTACTS"
+    
+    lines = [
+        "\n" + "="*80,
+        header,
+        "="*80,
+        f"Found {len(contacts)} contacts:",
+        ""
+    ]
+    
+    for contact in contacts:
+        name = contact.get('full_name', 'Unknown')
+        org = contact.get('organization', '')
+        title = contact.get('job_title', '')
+        email = contact.get('primary_email', '')
+        phone = contact.get('primary_phone', '')
+        
+        lines.append(f"\n👤 {name}")
+        
+        if org and title:
+            lines.append(f"   💼 {title} at {org}")
+        elif org:
+            lines.append(f"   🏢 {org}")
+        elif title:
+            lines.append(f"   💼 {title}")
+        
+        if email:
+            lines.append(f"   📧 {email}")
+        if phone:
+            lines.append(f"   📱 {phone}")
+        
+        if contact.get('birthday'):
+            birthday = contact['birthday']
+            if isinstance(birthday, datetime):
+                lines.append(f"   🎂 {birthday.strftime('%B %d')}")
+        
+        if contact.get('notes'):
+            notes = contact['notes'][:100] + "..." if len(contact['notes']) > 100 else contact['notes']
+            lines.append(f"   📝 {notes}")
+    
+    lines.extend([
+        "",
+        "="*80,
+        ""
+    ])
+    
+    return "\n".join(lines)
+
+
+def format_location_context(device_context: Dict) -> str:
+    """Format location context for AI"""
+    if not device_context:
+        return ""
+    
+    location_name = device_context.get('last_location_name', 'Unknown')
+    latitude = device_context.get('last_latitude')
+    longitude = device_context.get('last_longitude')
+    device_name = device_context.get('device_name', 'iPhone')
+    last_seen = device_context.get('last_seen_at')
+    
+    lines = [
+        "\n" + "="*80,
+        "📍 CURRENT LOCATION (LIVE DATA)",
+        "="*80,
+        f"Device: {device_name}",
+        f"Location: {location_name}",
+    ]
+    
+    if latitude and longitude:
+        lines.append(f"Coordinates: {latitude:.4f}, {longitude:.4f}")
+    
+    if last_seen:
+        if isinstance(last_seen, datetime):
+            lines.append(f"Last Updated: {last_seen.strftime('%I:%M %p')}")
+    
+    lines.extend([
+        "",
+        "IMPORTANT: This is real-time location from the iOS device.",
+        "="*80,
+        ""
+    ])
+    
+    return "\n".join(lines)
+
+
+def format_health_context(device_context: Dict) -> str:
+    """Format health/battery context for AI"""
+    if not device_context:
+        return ""
+    
+    health_data = device_context.get('last_health_data', {})
+    
+    if not health_data:
+        return ""
+    
+    # Handle case where health_data might be a JSON string
+    if isinstance(health_data, str):
+        try:
+            health_data = json.loads(health_data)
+        except:
+            return ""
+    
+    device_name = device_context.get('device_name', 'iPhone')
+    
+    lines = [
+        "\n" + "="*80,
+        "📱 DEVICE STATUS & HEALTH (LIVE DATA)",
+        "="*80,
+        f"Device: {device_name}",
+        ""
+    ]
+    
+    # Battery info
+    battery_level = health_data.get('battery_level')
+    battery_state = health_data.get('battery_state')
+    is_charging = health_data.get('is_charging')
+    is_low_power = health_data.get('is_low_power_mode')
+    is_low_battery = health_data.get('is_low_battery')
+    is_critical = health_data.get('is_critical_battery')
+    
+    if battery_level is not None:
+        battery_emoji = "🔋"
+        if is_critical:
+            battery_emoji = "🪫"
+            lines.append(f"{battery_emoji} CRITICAL BATTERY: {battery_level}%")
+        elif is_low_battery:
+            battery_emoji = "🔋"
+            lines.append(f"{battery_emoji} LOW BATTERY: {battery_level}%")
+        elif is_charging:
+            battery_emoji = "⚡"
+            lines.append(f"{battery_emoji} Charging: {battery_level}%")
+        else:
+            lines.append(f"{battery_emoji} Battery: {battery_level}%")
+        
+        if is_low_power:
+            lines.append("   ⚠️ Low Power Mode is ON")
+    
+    # Health metrics
+    steps = health_data.get('step_count')
+    heart_rate = health_data.get('heart_rate')
+    calories = health_data.get('active_calories')
+    sleep = health_data.get('sleep_hours')
+    
+    if steps or heart_rate or calories or sleep:
+        lines.append("\n📊 Health Metrics:")
+        if steps:
+            lines.append(f"   👟 Steps: {steps:,}")
+        if heart_rate:
+            lines.append(f"   ❤️ Heart Rate: {heart_rate} bpm")
+        if calories:
+            lines.append(f"   🔥 Active Calories: {calories}")
+        if sleep:
+            lines.append(f"   😴 Sleep: {sleep} hours")
+    
+    lines.extend([
+        "",
+        "IMPORTANT: This is real-time data from the iOS device.",
         "="*80,
         ""
     ])
@@ -1436,16 +1680,13 @@ async def build_memory_context(
     thread_id: Optional[str] = None
 ) -> str:
     """
-    MAIN FUNCTION - Build comprehensive memory context
+    Main orchestrator: Build comprehensive context based on:
+    1. Context level (minimal/comprehensive/full)
+    2. Query intent (what the user is asking about)
     
-    This is the single entry point called from router.py
+    This is called BEFORE building the AI prompt to inject relevant memory.
     
-    Process:
-    1. Detect context level (minimal/comprehensive/full)
-    2. Detect query intent (what to search for)
-    3. Query relevant databases
-    4. Format results for AI
-    5. Return formatted context string
+    NO LOOPS: This function only QUERIES data, never triggers actions.
     """
     try:
         logger.info("="*80)
@@ -1508,7 +1749,7 @@ async def build_memory_context(
             if calendar:
                 context_parts.append(format_calendar_context(calendar))
             
-            # iOS Calendar (NEW)
+            # iOS Calendar
             ios_calendar = await query_ios_calendar(
                 user_id=user_id,
                 days_ahead=7,
@@ -1517,7 +1758,7 @@ async def build_memory_context(
             if ios_calendar:
                 context_parts.append(format_ios_calendar_context(ios_calendar))
             
-            # iOS Reminders (NEW)
+            # iOS Reminders
             ios_reminders = await query_ios_reminders(
                 user_id=user_id,
                 include_completed=False,
@@ -1526,10 +1767,16 @@ async def build_memory_context(
             if ios_reminders:
                 context_parts.append(format_ios_reminders_context(ios_reminders))
             
-            # Current Music (NEW)
+            # Current Music
             current_music = await get_current_music(user_id)
             if current_music:
                 context_parts.append(format_music_context(current_music))
+            
+            # Device Context (Location + Health/Battery)
+            device_context = await get_device_context(user_id)
+            if device_context:
+                context_parts.append(format_location_context(device_context))
+                context_parts.append(format_health_context(device_context))
             
             # Emails (FIXED - now includes body!)
             emails = await query_emails(
@@ -1610,11 +1857,58 @@ async def build_memory_context(
                 if tasks:
                     context_parts.append(format_tasks_context(tasks))
             
-            # iOS Reminders (NEW) - triggered by reminder keywords
+            # iOS Reminders - triggered by reminder keywords
             if intent['query_ios_reminders']:
                 ios_reminders = await query_ios_reminders(user_id=user_id, limit=20)
                 if ios_reminders:
                     context_parts.append(format_ios_reminders_context(ios_reminders))
+            
+            # Music - triggered by music keywords (NEW)
+            if intent['query_music']:
+                current_music = await get_current_music(user_id)
+                if current_music:
+                    context_parts.append(format_music_context(current_music))
+                else:
+                    # Let the AI know we checked but nothing is playing
+                    context_parts.append("\n🎵 No music currently playing (checked iOS device)\n")
+            
+            # Contacts - triggered by contact keywords (NEW)
+            if intent['query_contacts']:
+                # Try to extract a name from the query
+                search_term = None
+                name_patterns = [
+                    r"who is (\w+)",
+                    r"contact (?:for |info for )?(\w+)",
+                    r"(\w+)'s (?:number|email|phone|contact)",
+                    r"call (\w+)",
+                    r"text (\w+)",
+                    r"email (\w+)"
+                ]
+                for pattern in name_patterns:
+                    match = re.search(pattern, user_message.lower())
+                    if match:
+                        search_term = match.group(1)
+                        break
+                
+                contacts = await query_ios_contacts(
+                    user_id=user_id,
+                    search_term=search_term,
+                    limit=CONTEXT_CONFIG['limits']['ios_contacts']
+                )
+                if contacts:
+                    context_parts.append(format_contacts_context(contacts, search_term))
+            
+            # Location - triggered by location keywords (NEW)
+            if intent['query_location']:
+                device_context = await get_device_context(user_id)
+                if device_context:
+                    context_parts.append(format_location_context(device_context))
+            
+            # Health/Battery - triggered by health keywords (NEW)
+            if intent['query_health']:
+                device_context = await get_device_context(user_id)
+                if device_context:
+                    context_parts.append(format_health_context(device_context))
         
         # Combine all context parts
         if not context_parts:
