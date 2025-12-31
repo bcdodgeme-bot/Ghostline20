@@ -113,29 +113,24 @@ async def chat_with_ai(
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     user_id: str = Depends(get_current_user_id),
-    internal_image_attachments: Optional[List[Dict]] = None,  # Internal use - for iOS images
-    internal_document_attachments: Optional[List[Dict]] = None  # Internal use - for iOS documents (PDFs, etc.)
+    internal_image_attachments: Optional[List[Dict]] = None  # Internal use - for iOS images
 ):
     """
     Main chat endpoint with file upload support
     Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google Trends → Voice → Image → Health → Chat/AI
+    
+    Note: Document attachments (PDF, docx, xlsx) are handled by extracting text in /chat-json
+    and appending to the message. Only images use the vision API content blocks.
     """
     # Process uploaded files if any
     file_context = ""
     image_attachments = []  # Initialize here so it's always available
-    document_attachments = []  # NEW: For PDFs and other documents
     
     # Check for pre-built image attachments (from iOS/JSON endpoint)
     if internal_image_attachments:
         image_attachments = internal_image_attachments
         logger.info(f"📱 iOS: Using {len(image_attachments)} pre-built image attachments")
         file_context = "\n\n📸 **Image attached from iOS device**\n"
-    
-    # Check for pre-built document attachments (from iOS/JSON endpoint)
-    if internal_document_attachments:
-        document_attachments = internal_document_attachments
-        logger.info(f"📱 iOS: Using {len(document_attachments)} pre-built document attachments")
-        file_context += "\n\n📄 **Document attached from iOS device**\n"
     
     # Import file processing function at the top to avoid scope issues
     from .chat import process_uploaded_files
@@ -878,13 +873,12 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 logger.info(f"✅ DEBUG: AI messages array built: {len(ai_messages)} total messages")
                 
                 # Add current message
-                # Add user message with vision/document support if attachments are present
+                # Add user message with vision support if images are present
                 has_images = 'image_attachments' in locals() and len(image_attachments) > 0
-                has_documents = 'document_attachments' in locals() and len(document_attachments) > 0
                 
-                if has_images or has_documents:
-                    # Multi-modal message format (array of content blocks)
-                    logger.info(f"📎 Building multi-modal message with {len(image_attachments) if has_images else 0} images and {len(document_attachments) if has_documents else 0} documents")
+                if has_images:
+                    # Vision-enabled message format (array of content blocks)
+                    logger.info(f"📸 Building vision message with {len(image_attachments)} images")
                     
                     content_blocks = [
                         {
@@ -894,45 +888,27 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                     ]
                     
                     # Add images using image_url format
-                    if has_images:
-                        logger.info(f"🔍 DEBUG: image_attachments contents:")
-                        for idx, img in enumerate(image_attachments):
-                            logger.info(f"🔍 DEBUG [{idx}]: filename={img.get('filename')}, type={img.get('type')}, media_type={img.get('media_type')}")
-                        
-                        for img in image_attachments:
-                            content_blocks.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{img['media_type']};base64,{img['base64']}"
-                                }
-                            })
-                            logger.info(f"📸 Added image to request: {img['filename']}")
+                    logger.info(f"🔍 DEBUG: image_attachments contents:")
+                    for idx, img in enumerate(image_attachments):
+                        logger.info(f"🔍 DEBUG [{idx}]: filename={img.get('filename')}, type={img.get('type')}, media_type={img.get('media_type')}")
                     
-                    # Add documents using document format (for PDFs, docx, xlsx, etc.)
-                    if has_documents:
-                        logger.info(f"🔍 DEBUG: document_attachments contents:")
-                        for idx, doc in enumerate(document_attachments):
-                            logger.info(f"🔍 DEBUG [{idx}]: filename={doc.get('filename')}, media_type={doc.get('media_type')}")
-                        
-                        for doc in document_attachments:
-                            content_blocks.append({
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": doc['media_type'],
-                                    "data": doc['base64']
-                                }
-                            })
-                            logger.info(f"📄 Added document to request: {doc['filename']}")
+                    for img in image_attachments:
+                        content_blocks.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{img['media_type']};base64,{img['base64']}"
+                            }
+                        })
+                        logger.info(f"📸 Added image to request: {img['filename']}")
                     
                     ai_messages.append({
                         "role": "user",
-                        "content": content_blocks  # Array format for multi-modal
+                        "content": content_blocks  # Array format for vision
                     })
                     
-                    # Force vision-capable model for images/documents
+                    # Force vision-capable model for images
                     model_override = "anthropic/claude-3.5-sonnet"
-                    logger.info(f"📎 Using multi-modal model: {model_override}")
+                    logger.info(f"📸 Using vision model: {model_override}")
                 else:
                     # Text-only message (original format)
                     ai_messages.append({
@@ -1112,20 +1088,115 @@ async def chat_with_ai_json(
     - image_base64 (legacy, for backward compatibility - assumes JPEG)
     - attachment_data + attachment_filename + attachment_mime_type (new universal format)
     
-    For images (image/*): sends as image_url content block
-    For documents (application/pdf, application/*, etc.): sends as document content block
+    For images (image/*): sends as image_url content block to vision model
+    For documents (PDF, docx, xlsx, etc.): extracts text and appends to message
+    
+    NOTE: OpenRouter doesn't support Anthropic's native "document" content type,
+    so we extract text from documents on the backend instead.
     """
     import base64
+    import tempfile
+    import os
+    from pathlib import Path
     
     # Build attachments from request fields
     image_attachments = None
-    document_attachments = None
+    document_text_context = ""  # Text extracted from documents
     
     # Helper function to determine if MIME type is an image
     def is_image_mime_type(mime_type: str) -> bool:
         if not mime_type:
             return False
         return mime_type.startswith('image/')
+    
+    # Helper function to extract text from document bytes
+    async def extract_document_text(data: bytes, mime_type: str, filename: str) -> str:
+        """Extract text content from document bytes based on MIME type"""
+        try:
+            # Create temp file to process
+            suffix = Path(filename).suffix or '.bin'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                tmp_file.write(data)
+                tmp_path = tmp_file.name
+            
+            try:
+                extracted_text = ""
+                
+                # PDF extraction
+                if mime_type == 'application/pdf' or suffix.lower() == '.pdf':
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(tmp_path) as pdf:
+                            pages_text = []
+                            for i, page in enumerate(pdf.pages[:20]):  # Limit to first 20 pages
+                                text = page.extract_text()
+                                if text:
+                                    pages_text.append(f"[Page {i+1}]\n{text}")
+                            extracted_text = "\n\n".join(pages_text)
+                            logger.info(f"📄 Extracted {len(extracted_text)} chars from PDF ({len(pdf.pages)} pages)")
+                    except Exception as e:
+                        logger.error(f"PDF extraction failed: {e}")
+                        extracted_text = f"[PDF file: {filename} - extraction failed: {str(e)}]"
+                
+                # Word document extraction (.docx)
+                elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' or suffix.lower() == '.docx':
+                    try:
+                        from docx import Document
+                        doc = Document(tmp_path)
+                        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                        extracted_text = "\n\n".join(paragraphs)
+                        logger.info(f"📄 Extracted {len(extracted_text)} chars from DOCX ({len(paragraphs)} paragraphs)")
+                    except Exception as e:
+                        logger.error(f"DOCX extraction failed: {e}")
+                        extracted_text = f"[Word document: {filename} - extraction failed: {str(e)}]"
+                
+                # Excel extraction (.xlsx)
+                elif mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or suffix.lower() == '.xlsx':
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
+                        sheets_text = []
+                        for sheet_name in wb.sheetnames[:5]:  # Limit to first 5 sheets
+                            sheet = wb[sheet_name]
+                            rows_text = []
+                            for row in list(sheet.iter_rows(values_only=True))[:100]:  # Limit to first 100 rows
+                                row_str = " | ".join([str(cell) if cell is not None else "" for cell in row])
+                                if row_str.strip():
+                                    rows_text.append(row_str)
+                            if rows_text:
+                                sheets_text.append(f"[Sheet: {sheet_name}]\n" + "\n".join(rows_text))
+                        extracted_text = "\n\n".join(sheets_text)
+                        logger.info(f"📄 Extracted {len(extracted_text)} chars from XLSX ({len(wb.sheetnames)} sheets)")
+                    except Exception as e:
+                        logger.error(f"XLSX extraction failed: {e}")
+                        extracted_text = f"[Excel file: {filename} - extraction failed: {str(e)}]"
+                
+                # Plain text files
+                elif mime_type.startswith('text/') or suffix.lower() in ['.txt', '.md', '.csv', '.json']:
+                    try:
+                        extracted_text = data.decode('utf-8', errors='replace')[:50000]  # Limit to 50k chars
+                        logger.info(f"📄 Read {len(extracted_text)} chars from text file")
+                    except Exception as e:
+                        logger.error(f"Text file read failed: {e}")
+                        extracted_text = f"[Text file: {filename} - read failed: {str(e)}]"
+                
+                # Unsupported format
+                else:
+                    extracted_text = f"[Attached file: {filename} (type: {mime_type}) - text extraction not supported for this format]"
+                    logger.warning(f"⚠️ Unsupported document type for extraction: {mime_type}")
+                
+                return extracted_text
+                
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"❌ Document extraction failed: {e}")
+            return f"[Document: {filename} - processing failed: {str(e)}]"
     
     # Priority 1: New universal attachment fields (attachment_data + attachment_mime_type)
     if request.attachment_data and request.attachment_mime_type:
@@ -1137,17 +1208,17 @@ async def chat_with_ai_json(
             if ',' in attachment_data:
                 attachment_data = attachment_data.split(',', 1)[1]
             
-            # Validate it's valid base64
-            base64.b64decode(attachment_data)
+            # Decode base64 to bytes
+            attachment_bytes = base64.b64decode(attachment_data)
             
             # Get filename or generate one
             filename = request.attachment_filename or f"attachment.{request.attachment_mime_type.split('/')[-1]}"
             
-            logger.info(f"📱 iOS: Processing attachment - filename={filename}, mime_type={request.attachment_mime_type}")
+            logger.info(f"📱 iOS: Processing attachment - filename={filename}, mime_type={request.attachment_mime_type}, size={len(attachment_bytes)} bytes")
             
             # Route based on MIME type
             if is_image_mime_type(request.attachment_mime_type):
-                # This is an IMAGE - use image_url format
+                # This is an IMAGE - use image_url format for vision model
                 image_attachments = [{
                     'filename': filename,
                     'type': f".{request.attachment_mime_type.split('/')[-1]}",
@@ -1156,16 +1227,18 @@ async def chat_with_ai_json(
                 }]
                 logger.info(f"📸 iOS: Prepared IMAGE attachment ({len(attachment_data)} chars)")
             else:
-                # This is a DOCUMENT (PDF, docx, xlsx, etc.) - use document format
-                document_attachments = [{
-                    'filename': filename,
-                    'base64': attachment_data,
-                    'media_type': request.attachment_mime_type
-                }]
-                logger.info(f"📄 iOS: Prepared DOCUMENT attachment ({len(attachment_data)} chars) - type: {request.attachment_mime_type}")
+                # This is a DOCUMENT - extract text content
+                logger.info(f"📄 iOS: Extracting text from document: {filename}")
+                extracted_text = await extract_document_text(attachment_bytes, request.attachment_mime_type, filename)
+                
+                if extracted_text:
+                    document_text_context = f"\n\n📎 **Attached Document: {filename}**\n\n{extracted_text}\n"
+                    logger.info(f"📄 iOS: Extracted {len(extracted_text)} chars from document")
                 
         except Exception as e:
             logger.error(f"❌ iOS: Failed to process attachment: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Continue without attachment rather than failing
     
     # Priority 2: Legacy image_base64 field (backward compatibility - assumes JPEG)
@@ -1193,17 +1266,22 @@ async def chat_with_ai_json(
             logger.error(f"❌ iOS: Failed to decode base64 image: {e}")
             # Continue without image rather than failing
     
+    # Build the final message with document context if present
+    final_message = request.message
+    if document_text_context:
+        final_message = request.message + document_text_context
+        logger.info(f"📄 iOS: Appended document context to message (total: {len(final_message)} chars)")
+    
     # Delegate to the form-based endpoint with extracted values
     return await chat_with_ai(
-        message=request.message,
+        message=final_message,
         personality_id=request.personality_id,
         thread_id=request.thread_id,
         include_knowledge=request.include_knowledge,
         files=[],
         request=None,
         user_id=user_id,
-        internal_image_attachments=image_attachments,
-        internal_document_attachments=document_attachments
+        internal_image_attachments=image_attachments
     )
 
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)
