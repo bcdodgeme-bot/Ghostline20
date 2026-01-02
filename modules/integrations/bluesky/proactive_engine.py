@@ -17,6 +17,7 @@ Now everything happens in one place:
 5. One-tap execution when user presses button
 
 Created: 2025-12-19
+Updated: 2026-01-02 - Added task_type="quick" for Mercury model routing
 """
 
 import asyncio
@@ -400,12 +401,13 @@ Write ONLY the reply text, nothing else. Max 280 characters."""
                 }
             ]
             
-            # Call OpenRouter
+            # Call OpenRouter - use Mercury for fast Bluesky drafts
             client = await self._get_openrouter_client()
             response = await client.chat_completion(
                 messages=messages,
                 max_tokens=150,
-                temperature=0.8  # Slightly creative
+                temperature=0.8,  # Slightly creative
+                task_type="quick"  # Mercury for speed
             )
             
             # Extract response

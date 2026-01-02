@@ -19,6 +19,7 @@ FLOW FOR ALL TYPES:
 6. ONE-TAP execute (user taps, action happens)
 
 Created: 2025-12-19
+Updated: 2026-01-02 - Added task_type routing (quick=Mercury, heavy=Claude)
 """
 
 import logging
@@ -482,7 +483,8 @@ Write the reply now (no explanations, just the reply text):"""
                 ],
                 model=self.default_model,
                 max_tokens=1000,
-                temperature=0.7
+                temperature=0.7,
+                task_type="quick"  # Mercury for email drafts
             )
             
             draft = response['choices'][0]['message']['content'].strip()
@@ -540,7 +542,8 @@ Write the complete blog post now:"""
                 ],
                 model=self.default_model,
                 max_tokens=2500,
-                temperature=0.7
+                temperature=0.7,
+                task_type="heavy"  # Claude for substantive blog content
             )
             
             post = response['choices'][0]['message']['content'].strip()
@@ -591,7 +594,8 @@ Output the post text and nothing else:"""
                 ],
                 model=self.default_model,
                 max_tokens=150,
-                temperature=0.8
+                temperature=0.8,
+                task_type="quick"  # Mercury for social posts
             )
             
             post = response['choices'][0]['message']['content'].strip()
