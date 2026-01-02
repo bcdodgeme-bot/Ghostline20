@@ -672,3 +672,8 @@ async def get_email_summary(user_id: str, email: Optional[str] = None, days: int
     logger.debug(f"📧 get_email_summary() called: user_id={user_id}, email={email}, days={days}")
     await gmail_client.initialize(user_id, email)
     return await gmail_client.get_email_summary(email, days)
+    
+def get_gmail_client(user_id: str = None) -> GmailClient:
+    """Get the Gmail client singleton, optionally initializing for a user"""
+    # Note: caller should await gmail_client.initialize(user_id) if needed
+    return gmail_client

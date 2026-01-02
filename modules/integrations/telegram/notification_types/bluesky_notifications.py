@@ -4,6 +4,7 @@ Bluesky Notification Handler
 Sends PROACTIVE notifications for Bluesky engagement opportunities with AI-drafted replies
 
 UPDATED: 2025-12-19 - Now uses proactive_engine for AI draft generation
+UPDATED: 2026-01-02 - Fixed post_cid capture for proper reply threading
 Instead of just notifying "engagement opportunity found", we now:
 1. Detect opportunity
 2. Generate AI draft reply BEFORE notification (via proactive_engine)
@@ -126,11 +127,12 @@ class BlueskyNotificationHandler:
     
     async def _get_legacy_opportunities(self) -> List[Dict[str, Any]]:
         """Get opportunities from old table that haven't been processed"""
+        # FIX: Added post_cid to SELECT for proper reply threading
         query = """
         SELECT 
-            id, detected_by_account, author_handle, post_text,
+            id, detected_by_account, author_handle, author_did, post_text,
             matched_keywords, engagement_score, opportunity_type,
-            post_context, post_uri, detected_at, expires_at
+            post_context, post_uri, post_cid, detected_at, expires_at
         FROM bluesky_engagement_opportunities
         WHERE user_response IS NULL
           AND already_engaged = false
@@ -165,13 +167,14 @@ class BlueskyNotificationHandler:
             
             # Reconstruct post data for proactive engine
             # The engine expects raw Bluesky API format
+            # FIX: Now includes post_cid for proper reply threading
             post_data = {
                 'uri': opp.get('post_uri', ''),
-                'cid': '',  # Not available from legacy
+                'cid': opp.get('post_cid', ''),  # FIX: Was hardcoded empty string
                 'author': {
                     'handle': opp.get('author_handle', 'unknown'),
                     'displayName': opp.get('author_handle', 'Unknown'),
-                    'did': '',
+                    'did': opp.get('author_did', ''),
                 },
                 'record': {
                     'text': opp.get('post_text', ''),
@@ -199,48 +202,44 @@ class BlueskyNotificationHandler:
             )
             
             if queue_id:
+                logger.info(f"✅ Processed legacy opportunity {opp['id']} -> proactive queue {queue_id}")
+                
                 # Mark legacy opportunity as processed
-                await self._mark_legacy_processed(opp['id'])
-                logger.info(f"✅ Processed legacy opportunity: {queue_id}")
+                try:
+                    await self.db.execute(
+                        "UPDATE bluesky_engagement_opportunities SET already_engaged = true WHERE id = $1",
+                        opp['id']
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not mark legacy opportunity as processed: {e}")
+                
                 return True
-            
-            return False
-            
+            else:
+                logger.warning(f"Proactive engine returned no queue_id for {opp['id']}")
+                return False
+                
         except Exception as e:
-            logger.error(f"Failed to process legacy opportunity: {e}")
+            logger.error(f"Error processing legacy opportunity: {e}", exc_info=True)
             return False
-    
-    async def _mark_legacy_processed(self, opp_id) -> None:
-        """Mark legacy opportunity as engaged"""
-        try:
-            query = """
-            UPDATE bluesky_engagement_opportunities
-            SET already_engaged = true,
-                user_response = 'processed_via_proactive'
-            WHERE id = $1
-            """
-            await self.db.execute(query, opp_id)
-        except Exception as e:
-            logger.error(f"Failed to mark legacy processed: {e}")
     
     async def _send_proactive_notification(self, item: Dict[str, Any]) -> None:
         """
-        Send notification for a proactive queue item.
+        Send rich notification for a proactive queue item.
         
-        This is only called if the proactive engine stored an item
-        but didn't send the notification (edge case).
+        The draft is already generated - just format and send with action buttons.
         """
         try:
-            from ...telegram.bot_client import get_bot_client
+            from ..bot_client import get_bot_client
             
-            # Format account display name
+            # Extract notification data
             account = item.get('detected_by_account', 'personal').replace('_', ' ').title()
             author = item.get('author_handle', 'unknown')
-            score = int(item.get('engagement_score', 0))
-            draft = item.get('draft_text', '')
+            author_display = item.get('author_display_name') or author
             original = item.get('original_text', '')[:200]
-            
-            # Build Bluesky URL
+            if len(item.get('original_text', '')) > 200:
+                original += "..."
+            draft = item.get('draft_text', '')
+            score = int(item.get('engagement_score', 0))
             bluesky_url = item.get('bluesky_url', '')
             
             # Build message

@@ -1,6 +1,8 @@
 """
 Bluesky Engagement Detector
 Scans timelines for conversations matching keywords
+
+UPDATED: 2026-01-02 - Fixed post_cid capture for proper reply threading
 """
 
 import asyncio
@@ -281,6 +283,7 @@ class BlueskyEngagementDetector:
                     record = post_data.get('record', {})
                     post_text = record.get('text', '')
                     post_uri = post_data.get('uri', '')
+                    post_cid = post_data.get('cid', '')  # FIX: Extract CID for reply threading
                     author = post_data.get('author', {})
                     author_handle = author.get('handle', 'unknown')
                     author_did = author.get('did', '')
@@ -314,9 +317,10 @@ class BlueskyEngagementDetector:
                     else:
                         opportunity_type = 'like'
                     
-                    # Build opportunity
+                    # Build opportunity - FIX: Now includes post_cid for reply threading
                     opportunity = {
                         'post_uri': post_uri,
+                        'post_cid': post_cid,  # FIX: Added for reply threading
                         'author_handle': author_handle,
                         'author_did': author_did,
                         'detected_by_account': account_id,
@@ -388,10 +392,11 @@ class BlueskyEngagementDetector:
                 except Exception:
                     pass
             
-            # Insert opportunity
+            # Insert opportunity - FIX: Now includes post_cid for reply threading
             await conn.execute('''
                 INSERT INTO bluesky_engagement_opportunities (
                     post_uri,
+                    post_cid,
                     author_handle,
                     author_did,
                     detected_by_account,
@@ -402,9 +407,10 @@ class BlueskyEngagementDetector:
                     post_context,
                     post_created_at,
                     expires_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ''',
                 opportunity['post_uri'],
+                opportunity.get('post_cid', ''),  # FIX: Added post_cid
                 opportunity['author_handle'],
                 opportunity['author_did'],
                 opportunity['detected_by_account'],
@@ -597,5 +603,6 @@ if __name__ == "__main__":
             print(f"  Author: @{top['author_handle']}")
             print(f"  Score: {top['engagement_score']}")
             print(f"  Keywords: {', '.join(top['matched_keywords'][:3])}")
+            print(f"  Has CID: {'✅' if top.get('post_cid') else '❌'}")  # Added CID check
     
     asyncio.run(test())
