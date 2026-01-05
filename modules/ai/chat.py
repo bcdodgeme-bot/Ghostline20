@@ -1113,7 +1113,7 @@ Please verify the URL is accessible and try again."""
                 analysis = await analyzer.analyze_scraped_content(scraped_data)
                 
                 # Store in database
-                await db.store_scraped_content(
+                content_id = await db.store_scraped_content(
                     user_id=user_id,
                     scraped_data=scraped_data,
                     analysis_results=analysis

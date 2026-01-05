@@ -657,6 +657,114 @@ class GmailClient:
             logger.error(f"❌ Failed to create draft: {e}", exc_info=True)
             raise
 
+
+    # ==========================================================================
+    # SEND REPLY METHOD - Added 01/06/26
+    # ==========================================================================
+    
+    async def send_reply(
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        thread_id: Optional[str] = None,
+        message_id: Optional[str] = None,
+        email: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Send an email reply via Gmail API
+        
+        This method sends the email immediately (not as a draft).
+        Uses thread_id to keep the reply in the same conversation thread.
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject (should include "Re: " prefix)
+            body: Email body text
+            thread_id: Gmail thread ID (for threading replies)
+            message_id: Original message ID (for In-Reply-To header)
+            email: Which email account to send from (optional)
+            
+        Returns:
+            Dict with success status and sent message details
+        """
+        try:
+            logger.info(f"✉️ Sending reply: to={to_email}, subject={subject[:50]}")
+            
+            if not self._user_creds:
+                logger.debug(f"📧 No credentials loaded, initializing...")
+                await self.initialize(self._user_id, email)
+            
+            # Build email headers
+            headers = [
+                f"To: {to_email}",
+                f"Subject: {subject}",
+                "Content-Type: text/plain; charset=utf-8",
+                "MIME-Version: 1.0",
+            ]
+            
+            # Add threading headers if replying to specific message
+            if message_id:
+                # Gmail message IDs need to be formatted as Message-ID headers
+                headers.append(f"In-Reply-To: <{message_id}@mail.gmail.com>")
+                headers.append(f"References: <{message_id}@mail.gmail.com>")
+            
+            # Combine headers and body
+            message_text = "\r\n".join(headers) + "\r\n\r\n" + body
+            
+            # Encode to base64url format
+            encoded_message = base64.urlsafe_b64encode(message_text.encode('utf-8')).decode('ascii')
+            
+            logger.debug(f"🔍 Encoded message length: {len(encoded_message)} chars")
+            
+            # Need client_creds for token refresh
+            from .oauth_manager import google_auth_manager
+            
+            client_creds = {
+                'client_id': google_auth_manager.client_id,
+                'client_secret': google_auth_manager.client_secret
+            }
+            
+            async with Aiogoogle(user_creds=self._user_creds, client_creds=client_creds) as aiogoogle:
+                gmail_v1 = await aiogoogle.discover('gmail', 'v1')
+                
+                logger.debug(f"🔍 Calling Gmail API: users.messages.send")
+                
+                # Build the message payload
+                message_payload = {
+                    'raw': encoded_message
+                }
+                
+                # Add threadId if provided (keeps reply in same thread)
+                if thread_id:
+                    message_payload['threadId'] = thread_id
+                
+                # SEND the email (not create draft)
+                sent_message = await aiogoogle.as_user(
+                    gmail_v1.users.messages.send(
+                        userId='me',
+                        json=message_payload
+                    )
+                )
+                
+                result = {
+                    'success': True,
+                    'message_id': sent_message.get('id'),
+                    'thread_id': sent_message.get('threadId'),
+                    'to': to_email,
+                    'subject': subject
+                }
+                
+                logger.info(f"✅ Email sent successfully: id={sent_message.get('id')}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to send email: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 # Global instance
 gmail_client = GmailClient()
 
