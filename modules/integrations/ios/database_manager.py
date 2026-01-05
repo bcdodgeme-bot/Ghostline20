@@ -159,7 +159,7 @@ class iOSDatabaseManager:
             
             if health_data is not None:
                 updates.append(f"last_health_data = ${param_idx}")
-                params.append(health_data)
+                params.append(json.dumps(health_data))  # Serialize dict to JSON string for PostgreSQL
                 param_idx += 1
             
             query = f"""
