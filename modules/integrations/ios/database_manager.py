@@ -1138,6 +1138,279 @@ class iOSDatabaseManager:
             logger.error(f"❌ Failed to clear music context: {e}")
             return False
 
+    # =========================================================================
+    # HEALTH HISTORY TRACKING (NEW 01/06/26)
+    # =========================================================================
+    
+    async def store_daily_health(
+        self,
+        device_identifier: str,
+        health_data: Dict[str, Any],
+        user_id: str = DEFAULT_USER_ID
+    ) -> bool:
+        """
+        Store or update daily health snapshot.
+        Uses UPSERT - one row per device per day.
+        
+        Args:
+            device_identifier: iOS device ID
+            health_data: Dict with steps, sleep, heart rate, workouts, nutrition
+            user_id: User UUID
+        
+        Returns:
+            True if successful
+        """
+        try:
+            today = datetime.now(timezone.utc).date()
+            
+            query = """
+                INSERT INTO ios_health_daily (
+                    user_id, device_identifier, date,
+                    step_count, active_calories, sleep_hours, sleep_end_time,
+                    heart_rate_avg, workout_minutes, workout_calories, workout_count,
+                    calories_consumed, protein_grams, carbs_grams, fat_grams,
+                    water_liters, caffeine_mg, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+                ON CONFLICT (user_id, device_identifier, date) DO UPDATE SET
+                    step_count = COALESCE(EXCLUDED.step_count, ios_health_daily.step_count),
+                    active_calories = COALESCE(EXCLUDED.active_calories, ios_health_daily.active_calories),
+                    sleep_hours = COALESCE(EXCLUDED.sleep_hours, ios_health_daily.sleep_hours),
+                    sleep_end_time = COALESCE(EXCLUDED.sleep_end_time, ios_health_daily.sleep_end_time),
+                    heart_rate_avg = COALESCE(EXCLUDED.heart_rate_avg, ios_health_daily.heart_rate_avg),
+                    workout_minutes = COALESCE(EXCLUDED.workout_minutes, ios_health_daily.workout_minutes),
+                    workout_calories = COALESCE(EXCLUDED.workout_calories, ios_health_daily.workout_calories),
+                    workout_count = COALESCE(EXCLUDED.workout_count, ios_health_daily.workout_count),
+                    calories_consumed = COALESCE(EXCLUDED.calories_consumed, ios_health_daily.calories_consumed),
+                    protein_grams = COALESCE(EXCLUDED.protein_grams, ios_health_daily.protein_grams),
+                    carbs_grams = COALESCE(EXCLUDED.carbs_grams, ios_health_daily.carbs_grams),
+                    fat_grams = COALESCE(EXCLUDED.fat_grams, ios_health_daily.fat_grams),
+                    water_liters = COALESCE(EXCLUDED.water_liters, ios_health_daily.water_liters),
+                    caffeine_mg = COALESCE(EXCLUDED.caffeine_mg, ios_health_daily.caffeine_mg),
+                    updated_at = NOW()
+            """
+            
+            await self.db.execute(
+                query,
+                UUID(user_id),
+                device_identifier,
+                today,
+                health_data.get('step_count'),
+                health_data.get('active_calories'),
+                health_data.get('sleep_hours'),
+                health_data.get('last_sleep_end'),
+                health_data.get('heart_rate'),
+                health_data.get('today_workout_minutes'),
+                health_data.get('today_workout_calories'),
+                health_data.get('workout_count', 1 if health_data.get('today_workout_minutes') else 0),
+                health_data.get('calories_consumed'),
+                health_data.get('protein_grams'),
+                health_data.get('carbs_grams'),
+                health_data.get('fat_grams'),
+                health_data.get('water_liters'),
+                health_data.get('caffeine_milligrams')
+            )
+            
+            logger.debug(f"📊 Stored daily health for {device_identifier}: {today}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store daily health: {e}")
+            return False
+    
+    async def store_workout(
+        self,
+        device_identifier: str,
+        workout: Dict[str, Any],
+        user_id: str = DEFAULT_USER_ID
+    ) -> bool:
+        """
+        Store individual workout to history.
+        Uses UPSERT to prevent duplicates.
+        
+        Args:
+            device_identifier: iOS device ID
+            workout: Dict with type, duration, calories, distance, start/end times
+            user_id: User UUID
+        
+        Returns:
+            True if successful
+        """
+        try:
+            query = """
+                INSERT INTO ios_workout_history (
+                    user_id, device_identifier,
+                    workout_type, duration_minutes, calories_burned, distance_meters,
+                    started_at, ended_at, source_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (user_id, device_identifier, started_at, workout_type) DO NOTHING
+            """
+            
+            await self.db.execute(
+                query,
+                UUID(user_id),
+                device_identifier,
+                workout.get('type', 'Workout'),
+                workout.get('duration_minutes', 0),
+                workout.get('calories_burned'),
+                workout.get('distance_meters'),
+                workout.get('start_time'),
+                workout.get('end_time'),
+                workout.get('source_id')
+            )
+            
+            logger.debug(f"🏋️ Stored workout: {workout.get('type')} for {workout.get('duration_minutes')} min")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store workout: {e}")
+            return False
+    
+    async def get_health_history(
+        self,
+        days: int = 7,
+        user_id: str = DEFAULT_USER_ID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get health history for the past N days.
+        
+        Args:
+            days: Number of days to look back
+            user_id: User UUID
+        
+        Returns:
+            List of daily health records, newest first
+        """
+        try:
+            query = """
+                SELECT 
+                    date,
+                    step_count,
+                    active_calories,
+                    sleep_hours,
+                    heart_rate_avg,
+                    workout_minutes,
+                    workout_calories,
+                    workout_count,
+                    calories_consumed,
+                    protein_grams,
+                    carbs_grams,
+                    fat_grams,
+                    water_liters,
+                    caffeine_mg
+                FROM ios_health_daily
+                WHERE user_id = $1
+                  AND date >= CURRENT_DATE - $2::INTEGER
+                ORDER BY date DESC
+            """
+            
+            results = await self.db.fetch_all(query, UUID(user_id), days)
+            
+            history = [dict(r) for r in results]
+            logger.debug(f"📊 Retrieved {len(history)} days of health history")
+            return history
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get health history: {e}")
+            return []
+    
+    async def get_workout_history(
+        self,
+        days: int = 30,
+        workout_type: Optional[str] = None,
+        user_id: str = DEFAULT_USER_ID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get workout history for the past N days.
+        
+        Args:
+            days: Number of days to look back
+            workout_type: Optional filter by type ("Running", "Yoga", etc.)
+            user_id: User UUID
+        
+        Returns:
+            List of workouts, newest first
+        """
+        try:
+            params = [UUID(user_id), days]
+            
+            type_filter = ""
+            if workout_type:
+                type_filter = "AND workout_type = $3"
+                params.append(workout_type)
+            
+            query = f"""
+                SELECT 
+                    workout_type,
+                    duration_minutes,
+                    calories_burned,
+                    distance_meters,
+                    started_at,
+                    ended_at
+                FROM ios_workout_history
+                WHERE user_id = $1
+                  AND started_at >= NOW() - ($2::INTEGER || ' days')::INTERVAL
+                  {type_filter}
+                ORDER BY started_at DESC
+            """
+            
+            results = await self.db.fetch_all(query, *params)
+            
+            workouts = [dict(r) for r in results]
+            logger.debug(f"🏋️ Retrieved {len(workouts)} workouts from history")
+            return workouts
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get workout history: {e}")
+            return []
+    
+    async def get_health_summary(
+        self,
+        days: int = 7,
+        user_id: str = DEFAULT_USER_ID
+    ) -> Dict[str, Any]:
+        """
+        Get aggregated health summary for AI context.
+        
+        Args:
+            days: Number of days to summarize
+            user_id: User UUID
+        
+        Returns:
+            Dict with averages and totals
+        """
+        try:
+            query = """
+                SELECT 
+                    ROUND(AVG(step_count)) as avg_steps,
+                    ROUND(AVG(sleep_hours)::numeric, 1) as avg_sleep,
+                    ROUND(AVG(active_calories)) as avg_active_calories,
+                    SUM(workout_minutes) as total_workout_minutes,
+                    COUNT(CASE WHEN workout_count > 0 THEN 1 END) as workout_days,
+                    ROUND(AVG(calories_consumed)) as avg_calories_consumed,
+                    ROUND(AVG(protein_grams)) as avg_protein,
+                    MAX(date) as latest_date,
+                    MIN(date) as earliest_date,
+                    COUNT(*) as days_tracked
+                FROM ios_health_daily
+                WHERE user_id = $1
+                  AND date >= CURRENT_DATE - $2::INTEGER
+            """
+            
+            result = await self.db.fetch_one(query, UUID(user_id), days)
+            
+            if result:
+                summary = dict(result)
+                logger.debug(f"📊 Health summary: {summary['days_tracked']} days, avg {summary['avg_steps']} steps")
+                return summary
+            
+            return {}
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get health summary: {e}")
+            return {}
+
 
 # =============================================================================
 # SINGLETON GETTER

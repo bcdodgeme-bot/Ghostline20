@@ -12,15 +12,18 @@ Endpoints:
 - GET  /ios/devices                - List registered devices
 - GET  /ios/stats                  - Notification statistics
 - POST /ios/cleanup                - Cleanup old notifications
-- POST /ios/calendar               - Sync calendar events from iOS (NEW)
-- POST /ios/reminders              - Sync reminders from iOS (NEW)
-- POST /ios/contacts               - Sync contacts from iOS (NEW)
-- POST /ios/music                  - Update music context from iOS (NEW)
+- POST /ios/calendar               - Sync calendar events from iOS
+- POST /ios/reminders              - Sync reminders from iOS
+- POST /ios/contacts               - Sync contacts from iOS
+- POST /ios/music                  - Update music context from iOS
+- GET  /ios/health-history         - Get health data history for trends (NEW)
+- GET  /ios/workout-history        - Get workout history (NEW)
+- GET  /ios/health-summary         - Get aggregated health summary (NEW)
 
 Authentication:
 - All endpoints require X-iOS-Key header matching IOS_API_KEY env var
 
-Updated: 2025-12-29 - Added calendar, reminders, contacts, music sync endpoints
+Updated: 2026-01-06 - Added health history tracking and trend endpoints
 """
 
 import os
@@ -473,9 +476,10 @@ async def update_device_context(context: DeviceContext):
     iOS app sends this periodically with:
     - Current GPS coordinates
     - Location name (if available)
-    - HealthKit summary (steps, heart rate, sleep, etc.)
+    - HealthKit summary (steps, heart rate, sleep, workouts, nutrition)
     
     This data is used by the AI for context-aware notifications.
+    Also stores health data to history tables for trend tracking.
     """
     db = get_ios_db_manager()
     
@@ -492,6 +496,7 @@ async def update_device_context(context: DeviceContext):
         if context.health_data is not None:
             updated_fields.append("health_data")
         
+        # Update current device context (existing behavior)
         success = await db.update_device_context(
             device_identifier=context.device_identifier,
             latitude=context.latitude,
@@ -499,6 +504,27 @@ async def update_device_context(context: DeviceContext):
             location_name=context.location_name,
             health_data=context.health_data
         )
+        
+        # NEW: Store health data to history table for trends
+        if context.health_data is not None and success:
+            try:
+                await db.store_daily_health(
+                    device_identifier=context.device_identifier,
+                    health_data=context.health_data
+                )
+                logger.debug(f"📊 Stored health history for {context.device_identifier}")
+                
+                # If there's workout data, store that too
+                last_workout = context.health_data.get('last_workout')
+                if last_workout and isinstance(last_workout, dict):
+                    await db.store_workout(
+                        device_identifier=context.device_identifier,
+                        workout=last_workout
+                    )
+                    logger.debug(f"🏋️ Stored workout to history")
+            except Exception as hist_error:
+                # Don't fail the whole request if history storage fails
+                logger.warning(f"⚠️ Failed to store health history: {hist_error}")
         
         if success:
             logger.debug(f"📍 Context updated for {context.device_identifier}: {updated_fields}")
@@ -662,6 +688,140 @@ async def cleanup_notifications(
         
     except Exception as e:
         logger.error(f"❌ Cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# HEALTH HISTORY ENDPOINTS (NEW 01/06/26)
+# =============================================================================
+
+@router.get(
+    "/health-history",
+    summary="Get health history",
+    description="Get health data history for trends and analysis"
+)
+async def get_health_history(
+    days: int = Query(7, ge=1, le=90, description="Number of days to look back")
+):
+    """
+    Get health history for the past N days.
+    
+    Returns daily snapshots including:
+    - Steps, calories, heart rate
+    - Sleep hours
+    - Workout totals
+    - Nutrition data
+    
+    Also returns a summary with averages.
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        history = await db.get_health_history(days=days)
+        summary = await db.get_health_summary(days=days)
+        
+        return {
+            'success': True,
+            'days_requested': days,
+            'days_with_data': len(history),
+            'history': history,
+            'summary': summary
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get health history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/workout-history",
+    summary="Get workout history",
+    description="Get workout history for the past N days"
+)
+async def get_workout_history(
+    days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
+    workout_type: Optional[str] = Query(None, description="Filter by workout type (e.g., 'Running', 'Yoga')")
+):
+    """
+    Get workout history for the past N days.
+    
+    Can optionally filter by workout type.
+    
+    Returns list of workouts with:
+    - Type (Running, Yoga, Strength Training, etc.)
+    - Duration in minutes
+    - Calories burned
+    - Distance (if applicable)
+    - Start/end times
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        workouts = await db.get_workout_history(
+            days=days,
+            workout_type=workout_type
+        )
+        
+        # Calculate summary stats
+        total_minutes = sum(w.get('duration_minutes', 0) or 0 for w in workouts)
+        total_calories = sum(w.get('calories_burned', 0) or 0 for w in workouts)
+        
+        # Count by type
+        type_counts = {}
+        for w in workouts:
+            wtype = w.get('workout_type', 'Unknown')
+            type_counts[wtype] = type_counts.get(wtype, 0) + 1
+        
+        return {
+            'success': True,
+            'days_requested': days,
+            'workout_count': len(workouts),
+            'filter': workout_type,
+            'summary': {
+                'total_workouts': len(workouts),
+                'total_minutes': total_minutes,
+                'total_calories': total_calories,
+                'by_type': type_counts
+            },
+            'workouts': workouts
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get workout history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/health-summary",
+    summary="Get health summary",
+    description="Get aggregated health summary for AI context"
+)
+async def get_health_summary_endpoint(
+    days: int = Query(7, ge=1, le=30, description="Number of days to summarize")
+):
+    """
+    Get aggregated health summary.
+    
+    Returns averages and totals useful for AI context:
+    - Average daily steps
+    - Average sleep hours
+    - Total workout minutes
+    - Workout frequency
+    - Average calories consumed
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        summary = await db.get_health_summary(days=days)
+        
+        return {
+            'success': True,
+            'days': days,
+            'summary': summary
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get health summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
