@@ -16,14 +16,20 @@ Endpoints:
 - POST /ios/reminders              - Sync reminders from iOS
 - POST /ios/contacts               - Sync contacts from iOS
 - POST /ios/music                  - Update music context from iOS
-- GET  /ios/health-history         - Get health data history for trends (NEW)
-- GET  /ios/workout-history        - Get workout history (NEW)
-- GET  /ios/health-summary         - Get aggregated health summary (NEW)
+- GET  /ios/health-history         - Get health data history for trends
+- GET  /ios/workout-history        - Get workout history
+- GET  /ios/health-summary         - Get aggregated health summary
+- GET  /ios/actions/pending        - Get pending proactive actions (NEW)
+- GET  /ios/actions/{queue_id}     - Get action details (NEW)
+- POST /ios/actions/{queue_id}/execute  - Execute action (NEW)
+- POST /ios/actions/{queue_id}/dismiss  - Dismiss action (NEW)
+- POST /ios/actions/{queue_id}/edit     - Edit action draft with AI (NEW)
+- GET  /ios/actions/stats          - Get action statistics (NEW)
 
 Authentication:
 - All endpoints require X-iOS-Key header matching IOS_API_KEY env var
 
-Updated: 2026-01-06 - Added health history tracking and trend endpoints
+Updated: 2026-01-06 - Added proactive action endpoints for conversational execution
 """
 
 import os
@@ -161,7 +167,7 @@ class HealthResponse(BaseModel):
 
 
 # =============================================================================
-# PYDANTIC MODELS - NEW (Calendar, Reminders, Contacts, Music)
+# PYDANTIC MODELS - DATA SYNC (Calendar, Reminders, Contacts, Music)
 # =============================================================================
 
 class CalendarEventItem(BaseModel):
@@ -264,6 +270,82 @@ class MusicContextResponse(BaseModel):
 
 
 # =============================================================================
+# PYDANTIC MODELS - PROACTIVE ACTIONS (NEW)
+# =============================================================================
+
+class PendingAction(BaseModel):
+    """Model for a pending actionable item from unified_proactive_queue"""
+    id: str
+    source_type: str  # email, trend, meeting, etc.
+    source_id: Optional[str] = None
+    source_url: Optional[str] = None
+    source_title: str
+    source_preview: str
+    source_metadata: Optional[Dict[str, Any]] = None
+    content_type: Optional[str] = None
+    draft_title: Optional[str] = None
+    draft_text: str
+    draft_secondary: Optional[str] = None  # Bluesky post for trends
+    draft_structured: Optional[Dict[str, Any]] = None
+    business_context: Optional[str] = None
+    priority: str = "medium"
+    status: str
+    created_at: datetime
+
+
+class PendingActionsResponse(BaseModel):
+    """Response model for pending actions list"""
+    success: bool
+    actions: List[PendingAction] = []
+    count: int = 0
+    server_time: datetime
+
+
+class ActionDetailResponse(BaseModel):
+    """Response model for single action with full details"""
+    success: bool
+    action: Optional[PendingAction] = None
+    message: Optional[str] = None
+
+
+class ExecuteActionRequest(BaseModel):
+    """Request model for executing an action"""
+    edited_text: Optional[str] = Field(None, description="Optional edited draft text")
+
+
+class ExecuteActionResponse(BaseModel):
+    """Response model for action execution"""
+    success: bool
+    message: str
+    action: str
+    result: Optional[Dict[str, Any]] = None
+
+
+class DismissActionRequest(BaseModel):
+    """Request model for dismissing an action"""
+    reason: Optional[str] = Field(None, description="Optional reason for dismissal")
+
+
+class EditActionRequest(BaseModel):
+    """Request model for editing an action draft"""
+    instructions: str = Field(..., description="Instructions for how to edit the draft")
+
+
+class EditActionResponse(BaseModel):
+    """Response model for draft editing"""
+    success: bool
+    message: str
+    action: Optional[PendingAction] = None  # Updated action with new draft
+
+
+class ActionStatsResponse(BaseModel):
+    """Response model for action statistics"""
+    success: bool
+    stats: Dict[str, Any] = {}
+    days: int = 7
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
@@ -291,7 +373,7 @@ def parse_json_field(value: Any, default: Any = None) -> Any:
 
 
 # =============================================================================
-# ENDPOINTS - EXISTING
+# ENDPOINTS - NOTIFICATIONS
 # =============================================================================
 
 @router.get(
@@ -505,7 +587,7 @@ async def update_device_context(context: DeviceContext):
             health_data=context.health_data
         )
         
-        # NEW: Store health data to history table for trends
+        # Store health data to history table for trends
         if context.health_data is not None and success:
             try:
                 await db.store_daily_health(
@@ -595,7 +677,7 @@ async def health_check():
 
 
 # =============================================================================
-# ADDITIONAL UTILITY ENDPOINTS
+# ENDPOINTS - UTILITY
 # =============================================================================
 
 @router.get(
@@ -692,7 +774,7 @@ async def cleanup_notifications(
 
 
 # =============================================================================
-# HEALTH HISTORY ENDPOINTS (NEW 01/06/26)
+# ENDPOINTS - HEALTH HISTORY
 # =============================================================================
 
 @router.get(
@@ -826,7 +908,7 @@ async def get_health_summary_endpoint(
 
 
 # =============================================================================
-# NEW ENDPOINTS - iOS DATA SYNC (Calendar, Reminders, Contacts, Music)
+# ENDPOINTS - DATA SYNC (Calendar, Reminders, Contacts, Music)
 # =============================================================================
 
 @router.post(
@@ -1077,4 +1159,401 @@ async def clear_music_context(
         
     except Exception as e:
         logger.error(f"❌ Failed to clear music context: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ENDPOINTS - PROACTIVE ACTIONS (NEW)
+# =============================================================================
+
+@router.get(
+    "/actions/pending",
+    response_model=PendingActionsResponse,
+    summary="Get pending actions",
+    description="Fetch actionable items from the proactive queue (email replies, posts, etc.)"
+)
+async def get_pending_actions(
+    limit: int = Query(20, ge=1, le=50, description="Max actions to return")
+):
+    """
+    Fetch pending actionable items for iOS.
+    
+    These are AI-generated drafts ready for user action:
+    - Email replies ready to send
+    - Bluesky posts ready to publish  
+    - Meeting summaries with action items
+    - Trend content with blog outlines
+    
+    iOS polls this to show notification badges and populate action views.
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        actions = await db.get_pending_actions(
+            user_id=DEFAULT_USER_ID,
+            limit=limit
+        )
+        
+        # Convert to response format
+        action_list = []
+        for action in actions:
+            action_list.append(PendingAction(
+                id=action['id'],
+                source_type=action['source_type'],
+                source_id=action.get('source_id'),
+                source_url=action.get('source_url'),
+                source_title=action['source_title'],
+                source_preview=action.get('source_preview', ''),
+                source_metadata=action.get('source_metadata'),
+                content_type=action.get('content_type'),
+                draft_title=action.get('draft_title'),
+                draft_text=action['draft_text'],
+                draft_secondary=action.get('draft_secondary'),
+                draft_structured=action.get('draft_structured'),
+                business_context=action.get('business_context'),
+                priority=action.get('priority', 'medium'),
+                status=action['status'],
+                created_at=action['created_at']
+            ))
+        
+        logger.debug(f"📋 Returning {len(action_list)} pending actions")
+        
+        return PendingActionsResponse(
+            success=True,
+            actions=action_list,
+            count=len(action_list),
+            server_time=datetime.now(timezone.utc)
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get pending actions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/actions/stats",
+    response_model=ActionStatsResponse,
+    summary="Get action statistics",
+    description="Get action statistics for understanding patterns"
+)
+async def get_action_stats(
+    days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
+):
+    """
+    Get action statistics for the past N days.
+    
+    Useful for:
+    - Understanding action patterns
+    - Auto-execution eligibility
+    - Usage analytics
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        stats = await db.get_action_stats(
+            user_id=DEFAULT_USER_ID,
+            days=days
+        )
+        
+        return ActionStatsResponse(
+            success=True,
+            stats=stats,
+            days=days
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get action stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/actions/{queue_id}",
+    response_model=ActionDetailResponse,
+    summary="Get action details",
+    description="Get full details for a specific action (for conversation display)"
+)
+async def get_action_details(queue_id: str):
+    """
+    Get full action details for conversation display.
+    
+    Called when user taps notification to open ActionConversationView.
+    Returns complete draft, context, and source info.
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        action = await db.get_action_by_id(queue_id)
+        
+        if not action:
+            return ActionDetailResponse(
+                success=False,
+                message="Action not found"
+            )
+        
+        return ActionDetailResponse(
+            success=True,
+            action=PendingAction(
+                id=action['id'],
+                source_type=action['source_type'],
+                source_id=action.get('source_id'),
+                source_url=action.get('source_url'),
+                source_title=action['source_title'],
+                source_preview=action.get('source_preview', ''),
+                source_metadata=action.get('source_metadata'),
+                content_type=action.get('content_type'),
+                draft_title=action.get('draft_title'),
+                draft_text=action['draft_text'],
+                draft_secondary=action.get('draft_secondary'),
+                draft_structured=action.get('draft_structured'),
+                business_context=action.get('business_context'),
+                priority=action.get('priority', 'medium'),
+                status=action['status'],
+                created_at=action['created_at']
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get action details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/actions/{queue_id}/execute",
+    response_model=ExecuteActionResponse,
+    summary="Execute action",
+    description="Execute the action (send email, post to Bluesky, etc.)"
+)
+async def execute_action(
+    queue_id: str,
+    request: Optional[ExecuteActionRequest] = None
+):
+    """
+    Execute the action on a pending item.
+    
+    This calls unified_engine.execute_action() which routes to:
+    - _execute_send_email() for email replies
+    - _execute_bluesky_post() for trend posts
+    - _execute_create_tasks() for meeting action items
+    
+    Optionally accepts edited_text if user modified the draft.
+    """
+    try:
+        from modules.proactive.unified_engine import get_unified_engine
+        
+        engine = get_unified_engine()
+        
+        # Determine action type from the queue item
+        db = get_ios_db_manager()
+        action_item = await db.get_action_by_id(queue_id)
+        
+        if not action_item:
+            return ExecuteActionResponse(
+                success=False,
+                message="Action not found",
+                action="unknown"
+            )
+        
+        # Map source_type to action
+        source_type = action_item['source_type']
+        if source_type == 'email':
+            action = 'send'
+        elif source_type == 'trend':
+            action = 'post'
+        elif source_type == 'meeting':
+            action = 'tasks'
+        else:
+            action = 'action'  # Generic
+        
+        # Get edited text if provided
+        edited_text = request.edited_text if request else None
+        
+        # Execute via unified engine
+        result = await engine.execute_action(
+            queue_id=queue_id,
+            action=action,
+            edited_text=edited_text
+        )
+        
+        if result.get('success'):
+            logger.info(f"✅ Action executed: {action} for {queue_id}")
+            return ExecuteActionResponse(
+                success=True,
+                message=result.get('message', 'Action completed'),
+                action=action,
+                result=result
+            )
+        else:
+            return ExecuteActionResponse(
+                success=False,
+                message=result.get('message', 'Action failed'),
+                action=action,
+                result=result
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to execute action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/actions/{queue_id}/dismiss",
+    response_model=ExecuteActionResponse,
+    summary="Dismiss action",
+    description="Dismiss/skip an action without executing"
+)
+async def dismiss_action(
+    queue_id: str,
+    request: Optional[DismissActionRequest] = None
+):
+    """
+    Dismiss an action (user said "skip" or "ignore").
+    
+    This is a simple dismissal. For email ignore with sender tracking,
+    use execute with action='ignore' instead.
+    """
+    db = get_ios_db_manager()
+    
+    try:
+        reason = request.reason if request else None
+        success = await db.dismiss_action(queue_id, reason)
+        
+        if success:
+            logger.info(f"⏭️ Action dismissed: {queue_id}")
+            return ExecuteActionResponse(
+                success=True,
+                message="Action dismissed",
+                action="dismiss"
+            )
+        else:
+            return ExecuteActionResponse(
+                success=False,
+                message="Failed to dismiss action",
+                action="dismiss"
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to dismiss action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/actions/{queue_id}/edit",
+    response_model=EditActionResponse,
+    summary="Edit action draft",
+    description="Edit the draft with AI (e.g., 'make it shorter', 'more casual')"
+)
+async def edit_action_draft(
+    queue_id: str,
+    request: EditActionRequest
+):
+    """
+    Edit an action's draft using AI.
+    
+    User provides instructions like:
+    - "make it shorter"
+    - "more professional tone"
+    - "add a question about timing"
+    
+    Claude rewrites the draft and returns the updated action.
+    """
+    try:
+        from modules.ai.openrouter_client import get_openrouter_client
+        
+        db = get_ios_db_manager()
+        
+        # Get current action
+        action_item = await db.get_action_by_id(queue_id)
+        
+        if not action_item:
+            return EditActionResponse(
+                success=False,
+                message="Action not found"
+            )
+        
+        # Get OpenRouter client for AI editing
+        ai_client = get_openrouter_client()
+        
+        # Build prompt for editing
+        source_type = action_item['source_type']
+        current_draft = action_item['draft_text']
+        instructions = request.instructions
+        
+        if source_type == 'email':
+            edit_prompt = f"""You are editing an email reply draft. 
+
+Current draft:
+{current_draft}
+
+User's editing instructions: {instructions}
+
+Rewrite the email following the user's instructions. Return ONLY the new email text, no explanations."""
+
+        elif source_type == 'trend':
+            edit_prompt = f"""You are editing a social media post.
+
+Current draft:
+{current_draft}
+
+User's editing instructions: {instructions}
+
+Rewrite the post following the user's instructions. Keep it under 280 characters for Bluesky. Return ONLY the new post text, no explanations."""
+
+        else:
+            edit_prompt = f"""You are editing content.
+
+Current draft:
+{current_draft}
+
+User's editing instructions: {instructions}
+
+Rewrite the content following the user's instructions. Return ONLY the new text, no explanations."""
+
+        # Call AI to rewrite
+        response = await ai_client.chat(
+            messages=[{"role": "user", "content": edit_prompt}],
+            task_type="heavy"  # Use Claude for quality editing
+        )
+        
+        new_draft = response.get('content', '').strip()
+        
+        if not new_draft:
+            return EditActionResponse(
+                success=False,
+                message="AI failed to generate new draft"
+            )
+        
+        # Update the draft in database
+        await db.update_action_draft(
+            queue_id=queue_id,
+            new_draft_text=new_draft
+        )
+        
+        # Return updated action
+        updated_action = await db.get_action_by_id(queue_id)
+        
+        return EditActionResponse(
+            success=True,
+            message="Draft updated",
+            action=PendingAction(
+                id=updated_action['id'],
+                source_type=updated_action['source_type'],
+                source_id=updated_action.get('source_id'),
+                source_url=updated_action.get('source_url'),
+                source_title=updated_action['source_title'],
+                source_preview=updated_action.get('source_preview', ''),
+                source_metadata=updated_action.get('source_metadata'),
+                content_type=updated_action.get('content_type'),
+                draft_title=updated_action.get('draft_title'),
+                draft_text=updated_action['draft_text'],
+                draft_secondary=updated_action.get('draft_secondary'),
+                draft_structured=updated_action.get('draft_structured'),
+                business_context=updated_action.get('business_context'),
+                priority=updated_action.get('priority', 'medium'),
+                status=updated_action['status'],
+                created_at=updated_action['created_at']
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to edit action draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,11 +1,15 @@
 # modules/integrations/ios/database_manager.py
 """
 iOS Integration Database Manager
-Handles ios_devices, ios_pending_notifications, and NEW iOS sync tables:
+Handles ios_devices, ios_pending_notifications, and iOS sync tables:
 - ios_calendar_events
 - ios_reminders
 - ios_contacts
 - ios_music_context
+- ios_health_daily
+- ios_workout_history
+
+Also handles proactive actions from unified_proactive_queue for iOS.
 
 Follows established patterns:
 - Singleton with _instance + get_ios_db_manager() getter
@@ -13,7 +17,7 @@ Follows established patterns:
 - Parameterized SQL queries
 - Timezone-aware datetimes
 
-Updated: 2025-12-29 - Added calendar, reminders, contacts, music sync methods
+Updated: 2026-01-06 - Added proactive action methods for iOS conversational execution
 """
 
 import logging
@@ -529,7 +533,7 @@ class iOSDatabaseManager:
             return False
 
     # =========================================================================
-    # iOS CALENDAR SYNC (NEW)
+    # iOS CALENDAR SYNC
     # =========================================================================
     
     async def sync_calendar_events(
@@ -541,21 +545,6 @@ class iOSDatabaseManager:
         """
         Sync calendar events from iOS device.
         Uses UPSERT to handle new and updated events.
-        
-        Args:
-            device_identifier: iOS device identifier
-            events: List of event dicts with keys:
-                - event_id (required): iOS EventKit identifier
-                - title (required): Event title
-                - start_time (required): ISO datetime string
-                - end_time (required): ISO datetime string
-                - location (optional): Location string
-                - notes (optional): Event notes
-                - is_all_day (optional): Boolean
-                - calendar_name (optional): Source calendar name
-        
-        Returns:
-            Dict with 'synced' and 'failed' counts
         """
         synced = 0
         failed = 0
@@ -622,18 +611,7 @@ class iOSDatabaseManager:
         days_behind: int = 0,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
-        """
-        Query iOS calendar events for memory layer.
-        
-        Args:
-            user_id: User UUID
-            days_ahead: Days into the future to include
-            days_behind: Days into the past to include (for context)
-            limit: Maximum events to return
-        
-        Returns:
-            List of calendar event dicts
-        """
+        """Query iOS calendar events for memory layer."""
         try:
             query = """
                 SELECT 
@@ -671,7 +649,7 @@ class iOSDatabaseManager:
             return []
 
     # =========================================================================
-    # iOS REMINDERS SYNC (NEW)
+    # iOS REMINDERS SYNC
     # =========================================================================
     
     async def sync_reminders(
@@ -680,25 +658,7 @@ class iOSDatabaseManager:
         reminders: List[Dict[str, Any]],
         user_id: str = DEFAULT_USER_ID
     ) -> Dict[str, int]:
-        """
-        Sync reminders from iOS device.
-        Uses UPSERT to handle new and updated reminders.
-        
-        Args:
-            device_identifier: iOS device identifier
-            reminders: List of reminder dicts with keys:
-                - reminder_id (required): iOS Reminders identifier
-                - title (required): Reminder title
-                - notes (optional): Reminder notes
-                - due_date (optional): ISO datetime string
-                - is_completed (optional): Boolean
-                - completed_at (optional): ISO datetime string
-                - priority (optional): Integer 0-9
-                - list_name (optional): Source list name
-        
-        Returns:
-            Dict with 'synced' and 'failed' counts
-        """
+        """Sync reminders from iOS device."""
         synced = 0
         failed = 0
         now = datetime.now(timezone.utc)
@@ -763,17 +723,7 @@ class iOSDatabaseManager:
         include_completed: bool = False,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
-        """
-        Query iOS reminders for memory layer.
-        
-        Args:
-            user_id: User UUID
-            include_completed: Whether to include completed reminders
-            limit: Maximum reminders to return
-        
-        Returns:
-            List of reminder dicts
-        """
+        """Query iOS reminders for memory layer."""
         try:
             where_clause = "user_id = $1"
             params = [UUID(user_id)]
@@ -816,7 +766,7 @@ class iOSDatabaseManager:
             return []
 
     # =========================================================================
-    # iOS CONTACTS SYNC (NEW)
+    # iOS CONTACTS SYNC
     # =========================================================================
     
     async def sync_contacts(
@@ -825,27 +775,7 @@ class iOSDatabaseManager:
         contacts: List[Dict[str, Any]],
         user_id: str = DEFAULT_USER_ID
     ) -> Dict[str, int]:
-        """
-        Sync contacts from iOS device.
-        Uses UPSERT to handle new and updated contacts.
-        
-        Args:
-            device_identifier: iOS device identifier
-            contacts: List of contact dicts with keys:
-                - contact_id (required): iOS Contacts identifier
-                - given_name (optional): First name
-                - family_name (optional): Last name
-                - nickname (optional): Nickname
-                - organization (optional): Company
-                - job_title (optional): Job title
-                - primary_email (optional): Primary email
-                - primary_phone (optional): Primary phone
-                - birthday (optional): ISO date string
-                - notes (optional): Contact notes
-        
-        Returns:
-            Dict with 'synced' and 'failed' counts
-        """
+        """Sync contacts from iOS device."""
         synced = 0
         failed = 0
         now = datetime.now(timezone.utc)
@@ -921,17 +851,7 @@ class iOSDatabaseManager:
         search_term: Optional[str] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """
-        Query iOS contacts for memory layer.
-        
-        Args:
-            user_id: User UUID
-            search_term: Optional search term for name/email/org
-            limit: Maximum contacts to return
-        
-        Returns:
-            List of contact dicts
-        """
+        """Query iOS contacts for memory layer."""
         try:
             params = [UUID(user_id)]
             param_idx = 1
@@ -985,7 +905,7 @@ class iOSDatabaseManager:
             return []
 
     # =========================================================================
-    # iOS MUSIC CONTEXT (NEW)
+    # iOS MUSIC CONTEXT
     # =========================================================================
     
     async def update_music_context(
@@ -1000,23 +920,7 @@ class iOSDatabaseManager:
         mood_hint: Optional[str] = None,
         user_id: str = DEFAULT_USER_ID
     ) -> bool:
-        """
-        Update current music context from iOS device.
-        Uses UPSERT - one row per user/device.
-        
-        Args:
-            device_identifier: iOS device identifier
-            track_title: Current track title
-            artist: Artist name
-            album: Album name
-            genre: Music genre
-            duration_seconds: Track duration
-            is_playing: Whether currently playing
-            mood_hint: AI-detected mood (optional)
-        
-        Returns:
-            True if successful
-        """
+        """Update current music context from iOS device."""
         try:
             now = datetime.now(timezone.utc)
             
@@ -1069,16 +973,7 @@ class iOSDatabaseManager:
         self,
         user_id: str = DEFAULT_USER_ID
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get current music context for memory layer.
-        Returns most recently updated music context if still playing.
-        
-        Args:
-            user_id: User UUID
-        
-        Returns:
-            Music context dict or None if nothing playing
-        """
+        """Get current music context for memory layer."""
         try:
             query = """
                 SELECT 
@@ -1117,10 +1012,7 @@ class iOSDatabaseManager:
         device_identifier: str,
         user_id: str = DEFAULT_USER_ID
     ) -> bool:
-        """
-        Mark music as stopped (is_playing = FALSE).
-        Called when iOS reports playback stopped.
-        """
+        """Mark music as stopped (is_playing = FALSE)."""
         try:
             query = """
                 UPDATE ios_music_context
@@ -1139,7 +1031,7 @@ class iOSDatabaseManager:
             return False
 
     # =========================================================================
-    # HEALTH HISTORY TRACKING (NEW 01/06/26)
+    # HEALTH HISTORY TRACKING
     # =========================================================================
     
     async def store_daily_health(
@@ -1148,18 +1040,7 @@ class iOSDatabaseManager:
         health_data: Dict[str, Any],
         user_id: str = DEFAULT_USER_ID
     ) -> bool:
-        """
-        Store or update daily health snapshot.
-        Uses UPSERT - one row per device per day.
-        
-        Args:
-            device_identifier: iOS device ID
-            health_data: Dict with steps, sleep, heart rate, workouts, nutrition
-            user_id: User UUID
-        
-        Returns:
-            True if successful
-        """
+        """Store or update daily health snapshot."""
         try:
             today = datetime.now(timezone.utc).date()
             
@@ -1224,18 +1105,7 @@ class iOSDatabaseManager:
         workout: Dict[str, Any],
         user_id: str = DEFAULT_USER_ID
     ) -> bool:
-        """
-        Store individual workout to history.
-        Uses UPSERT to prevent duplicates.
-        
-        Args:
-            device_identifier: iOS device ID
-            workout: Dict with type, duration, calories, distance, start/end times
-            user_id: User UUID
-        
-        Returns:
-            True if successful
-        """
+        """Store individual workout to history."""
         try:
             query = """
                 INSERT INTO ios_workout_history (
@@ -1272,16 +1142,7 @@ class iOSDatabaseManager:
         days: int = 7,
         user_id: str = DEFAULT_USER_ID
     ) -> List[Dict[str, Any]]:
-        """
-        Get health history for the past N days.
-        
-        Args:
-            days: Number of days to look back
-            user_id: User UUID
-        
-        Returns:
-            List of daily health records, newest first
-        """
+        """Get health history for the past N days."""
         try:
             query = """
                 SELECT 
@@ -1321,17 +1182,7 @@ class iOSDatabaseManager:
         workout_type: Optional[str] = None,
         user_id: str = DEFAULT_USER_ID
     ) -> List[Dict[str, Any]]:
-        """
-        Get workout history for the past N days.
-        
-        Args:
-            days: Number of days to look back
-            workout_type: Optional filter by type ("Running", "Yoga", etc.)
-            user_id: User UUID
-        
-        Returns:
-            List of workouts, newest first
-        """
+        """Get workout history for the past N days."""
         try:
             params = [UUID(user_id), days]
             
@@ -1370,16 +1221,7 @@ class iOSDatabaseManager:
         days: int = 7,
         user_id: str = DEFAULT_USER_ID
     ) -> Dict[str, Any]:
-        """
-        Get aggregated health summary for AI context.
-        
-        Args:
-            days: Number of days to summarize
-            user_id: User UUID
-        
-        Returns:
-            Dict with averages and totals
-        """
+        """Get aggregated health summary for AI context."""
         try:
             query = """
                 SELECT 
@@ -1409,6 +1251,245 @@ class iOSDatabaseManager:
             
         except Exception as e:
             logger.error(f"❌ Failed to get health summary: {e}")
+            return {}
+
+    # =========================================================================
+    # PROACTIVE ACTIONS (iOS Conversational Execution)
+    # Queries unified_proactive_queue for iOS action handling
+    # Added: 2026-01-06
+    # =========================================================================
+    
+    async def get_pending_actions(
+        self,
+        user_id: str = DEFAULT_USER_ID,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get pending actionable items from unified_proactive_queue.
+        
+        These are AI-generated drafts waiting for user action:
+        - Email replies ready to send
+        - Bluesky posts ready to publish
+        - Meeting summaries with action items
+        - Trend content with blog outlines
+        
+        Returns items ordered by priority and creation time.
+        """
+        try:
+            query = """
+                SELECT 
+                    id,
+                    source_type,
+                    source_id,
+                    source_url,
+                    source_title,
+                    source_preview,
+                    source_metadata,
+                    content_type,
+                    draft_title,
+                    draft_text,
+                    draft_secondary,
+                    draft_structured,
+                    business_context,
+                    priority,
+                    status,
+                    created_at
+                FROM unified_proactive_queue
+                WHERE status = 'pending'
+                ORDER BY 
+                    CASE priority 
+                        WHEN 'critical' THEN 1 
+                        WHEN 'high' THEN 2 
+                        WHEN 'medium' THEN 3 
+                        WHEN 'low' THEN 4 
+                    END,
+                    created_at DESC
+                LIMIT $1
+            """
+            
+            results = await self.db.fetch_all(query, limit)
+            
+            actions = []
+            for r in results:
+                action = dict(r)
+                # Convert UUID to string for JSON serialization
+                action['id'] = str(action['id'])
+                # Parse JSONB fields if they're strings
+                if isinstance(action.get('source_metadata'), str):
+                    action['source_metadata'] = json.loads(action['source_metadata'])
+                if isinstance(action.get('draft_structured'), str):
+                    action['draft_structured'] = json.loads(action['draft_structured'])
+                actions.append(action)
+            
+            logger.debug(f"📋 Retrieved {len(actions)} pending actions")
+            return actions
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get pending actions: {e}")
+            return []
+    
+    async def get_action_by_id(
+        self,
+        queue_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a single action with full details for conversation display.
+        
+        Returns complete draft, context, and source info needed
+        for the iOS ActionConversationView.
+        """
+        try:
+            query = """
+                SELECT 
+                    id,
+                    source_type,
+                    source_id,
+                    source_url,
+                    source_title,
+                    source_preview,
+                    source_metadata,
+                    rss_context,
+                    trend_context,
+                    business_context,
+                    content_type,
+                    draft_title,
+                    draft_text,
+                    draft_secondary,
+                    draft_structured,
+                    personality_used,
+                    model_used,
+                    priority,
+                    status,
+                    action_taken,
+                    action_result,
+                    actioned_at,
+                    created_at
+                FROM unified_proactive_queue
+                WHERE id = $1
+            """
+            
+            result = await self.db.fetch_one(query, UUID(queue_id))
+            
+            if result:
+                action = dict(result)
+                action['id'] = str(action['id'])
+                # Parse JSONB fields
+                for field in ['source_metadata', 'rss_context', 'trend_context', 'draft_structured', 'action_result']:
+                    if isinstance(action.get(field), str):
+                        try:
+                            action[field] = json.loads(action[field])
+                        except json.JSONDecodeError:
+                            pass
+                return action
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get action by ID: {e}")
+            return None
+    
+    async def update_action_draft(
+        self,
+        queue_id: str,
+        new_draft_text: str,
+        new_draft_secondary: Optional[str] = None
+    ) -> bool:
+        """
+        Update action draft after AI editing.
+        
+        Called when user says "make it shorter" and we regenerate
+        the draft with Claude.
+        """
+        try:
+            if new_draft_secondary:
+                query = """
+                    UPDATE unified_proactive_queue
+                    SET draft_text = $2,
+                        draft_secondary = $3,
+                        updated_at = NOW()
+                    WHERE id = $1
+                """
+                await self.db.execute(query, UUID(queue_id), new_draft_text, new_draft_secondary)
+            else:
+                query = """
+                    UPDATE unified_proactive_queue
+                    SET draft_text = $2,
+                        updated_at = NOW()
+                    WHERE id = $1
+                """
+                await self.db.execute(query, UUID(queue_id), new_draft_text)
+            
+            logger.info(f"✏️ Updated draft for action: {queue_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to update action draft: {e}")
+            return False
+    
+    async def dismiss_action(
+        self,
+        queue_id: str,
+        reason: Optional[str] = None
+    ) -> bool:
+        """
+        Dismiss an action (user said "skip" or "ignore").
+        
+        Different from execute_action ignore which tracks sender stats.
+        This is a simple dismissal without learning.
+        """
+        try:
+            query = """
+                UPDATE unified_proactive_queue
+                SET status = 'dismissed',
+                    action_taken = 'dismiss',
+                    action_result = $2,
+                    actioned_at = NOW()
+                WHERE id = $1
+            """
+            
+            result_json = json.dumps({'reason': reason}) if reason else '{}'
+            await self.db.execute(query, UUID(queue_id), result_json)
+            
+            logger.info(f"⏭️ Dismissed action: {queue_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to dismiss action: {e}")
+            return False
+    
+    async def get_action_stats(
+        self,
+        user_id: str = DEFAULT_USER_ID,
+        days: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Get action statistics for the past N days.
+        
+        Useful for understanding action patterns and
+        auto-execution eligibility.
+        """
+        try:
+            query = """
+                SELECT 
+                    COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
+                    COUNT(*) FILTER (WHERE status = 'actioned') as actioned_count,
+                    COUNT(*) FILTER (WHERE status = 'dismissed') as dismissed_count,
+                    COUNT(*) FILTER (WHERE status = 'expired') as expired_count,
+                    COUNT(*) FILTER (WHERE action_taken = 'send') as emails_sent,
+                    COUNT(*) FILTER (WHERE action_taken = 'post') as posts_made,
+                    COUNT(*) as total
+                FROM unified_proactive_queue
+                WHERE created_at > NOW() - ($1::INTEGER || ' days')::INTERVAL
+            """
+            
+            result = await self.db.fetch_one(query, days)
+            
+            if result:
+                return dict(result)
+            return {}
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get action stats: {e}")
             return {}
 
 
