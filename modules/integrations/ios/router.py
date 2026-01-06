@@ -1359,6 +1359,8 @@ async def execute_action(
             action = 'send'
         elif source_type == 'trend':
             action = 'post'
+        elif source_type == 'bluesky':
+            action = 'post'  # Direct Bluesky posts (engagement replies)
         elif source_type == 'meeting':
             action = 'tasks'
         else:

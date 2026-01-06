@@ -1052,7 +1052,7 @@ Output the post text and nothing else:"""
             # Route to appropriate handler
             if action == 'send' and source_type == 'email':
                 result = await self._execute_send_email(row, edited_text)
-            elif action == 'post' and source_type == 'trend':
+            elif action == 'post' and source_type in ['trend', 'bluesky']:
                 result = await self._execute_bluesky_post(row)
             elif action == 'tasks' and source_type == 'meeting':
                 result = await self._execute_create_tasks(row)
@@ -1182,12 +1182,14 @@ Output the post text and nothing else:"""
             return {'success': False, 'message': str(e)}
     
     async def _execute_bluesky_post(self, row: Dict) -> Dict[str, Any]:
-        """Post to Bluesky (for trends - creates original post, not reply)"""
+        """Post to Bluesky (for trends AND direct bluesky posts)"""
         try:
             from modules.integrations.bluesky.multi_account_client import get_bluesky_multi_client
             
-            # Get the post text (secondary draft is for Bluesky post)
-            post_text = row.get('draft_secondary')
+            # Get the post text:
+            # - For trends: draft_secondary contains the Bluesky post
+            # - For direct bluesky posts: draft_text contains the post
+            post_text = row.get('draft_secondary') or row.get('draft_text')
             if not post_text:
                 return {'success': False, 'message': 'No Bluesky post text available'}
             
