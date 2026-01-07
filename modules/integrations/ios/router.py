@@ -384,7 +384,7 @@ def parse_json_field(value: Any, default: Any = None) -> Any:
 )
 async def get_pending_notifications(
     device_identifier: str = Query(..., description="Device identifier for filtering"),
-    limit: int = Query(20, ge=1, le=50, description="Max notifications to return")
+    limit: int = Query(20, ge=1, le=100, description="Max notifications to return")
 ):
     """
     Fetch pending notifications for iOS app.
