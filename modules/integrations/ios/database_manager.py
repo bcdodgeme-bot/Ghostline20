@@ -1262,18 +1262,13 @@ class iOSDatabaseManager:
     async def get_pending_actions(
         self,
         user_id: str = DEFAULT_USER_ID,
-        limit: int = 20
+        limit: int = 30
     ) -> List[Dict[str, Any]]:
         """
-        Get pending actionable items from unified_proactive_queue.
+        Get pending actionable items for iOS.
         
-        These are AI-generated drafts waiting for user action:
-        - Email replies ready to send
-        - Bluesky posts ready to publish
-        - Meeting summaries with action items
-        - Trend content with blog outlines
-        
-        Returns items ordered by priority and creation time.
+        FIXED: Sort by created_at first, then priority within same day.
+        This ensures new items appear even if older items have higher priority.
         """
         try:
             query = """
@@ -1297,13 +1292,13 @@ class iOSDatabaseManager:
                 FROM unified_proactive_queue
                 WHERE status = 'pending'
                 ORDER BY 
+                    created_at DESC,
                     CASE priority 
                         WHEN 'critical' THEN 1 
                         WHEN 'high' THEN 2 
                         WHEN 'medium' THEN 3 
                         WHEN 'low' THEN 4 
-                    END,
-                    created_at DESC
+                    END
                 LIMIT $1
             """
             
