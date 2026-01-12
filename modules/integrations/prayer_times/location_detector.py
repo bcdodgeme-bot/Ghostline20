@@ -2,6 +2,9 @@
 """
 IP-based Location Detection for Prayer Times
 Automatically detects user location from IP address for accurate prayer time calculations
+
+Updated: 01/12/26 - Added GPS priority for iOS/macOS apps
+Priority: GPS > IP > Fallback (Merrifield, VA)
 """
 
 import asyncio
@@ -28,7 +31,8 @@ class IPLocationDetector:
             'country': 'United States',
             'latitude': 38.8606,
             'longitude': -77.2287,
-            'timezone': 'America/New_York'
+            'timezone': 'America/New_York',
+            'source': 'fallback'
         }
         
         # Multiple IP geolocation services for redundancy
@@ -50,17 +54,38 @@ class IPLocationDetector:
             }
         ]
     
-    async def get_location_from_ip(self, ip_address: str = None) -> Dict[str, any]:
+    #-- Section 1: Main Location Method with GPS Priority - 01/12/26
+    async def get_location_from_ip(self, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> Dict[str, any]:
         """
-        Get location data from IP address with caching and fallback
+        Get location data with GPS > IP > Fallback priority
         
         Args:
             ip_address: IP address to geolocate (None = detect automatically)
+            gps_latitude: GPS latitude from mobile device (optional)
+            gps_longitude: GPS longitude from mobile device (optional)
             
         Returns:
-            Location dict with lat, lng, city, country, timezone
+            Location dict with lat, lng, city, country, timezone, source
         """
         
+        # PRIORITY 1: GPS coordinates from iOS/macOS (if provided)
+        if gps_latitude is not None and gps_longitude is not None:
+            # Validate GPS coordinates
+            if -90 <= gps_latitude <= 90 and -180 <= gps_longitude <= 180 and not (gps_latitude == 0 and gps_longitude == 0):
+                logger.info(f"📍 Using GPS location: {gps_latitude}, {gps_longitude}")
+                return {
+                    'city': 'GPS Location',
+                    'region': '',
+                    'country': 'United States',
+                    'latitude': gps_latitude,
+                    'longitude': gps_longitude,
+                    'timezone': 'America/New_York',
+                    'source': 'gps'
+                }
+            else:
+                logger.warning(f"⚠️ Invalid GPS coordinates: {gps_latitude}, {gps_longitude}")
+        
+        # PRIORITY 2: IP-based geolocation
         # Use cached location if available and recent
         cache_key = ip_address or 'auto'
         if cache_key in self.location_cache:
@@ -80,6 +105,7 @@ class IPLocationDetector:
         
         return detected_location
     
+    #-- Section 2: IP Detection with Fallback
     async def _detect_location_with_fallback(self, ip_address: str = None) -> Dict[str, any]:
         """Try multiple location services with fallback"""
         
@@ -117,6 +143,7 @@ class IPLocationDetector:
             data = response.json()
             return service['parser'](data)
     
+    #-- Section 3: Response Parsers
     def _parse_ipapi_response(self, data: Dict) -> Optional[Dict]:
         """Parse ipapi.co response"""
         if data.get('error'):
@@ -166,6 +193,7 @@ class IPLocationDetector:
         except (ValueError, KeyError):
             return None
     
+    #-- Section 4: Validation
     def _validate_location(self, location: Dict) -> bool:
         """Validate that location data is reasonable"""
         try:
@@ -185,16 +213,28 @@ class IPLocationDetector:
         except (KeyError, TypeError, ValueError):
             return False
     
-    async def get_location_for_prayers(self, user_id: str, ip_address: str = None) -> Tuple[str, float, float]:
+    #-- Section 5: Prayer-specific Location Method - Updated 01/12/26
+    async def get_location_for_prayers(self, user_id: str, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> Tuple[str, float, float]:
         """
         Get location specifically formatted for prayer time calculations
+        Now supports GPS priority for iOS/macOS apps
         
+        Args:
+            user_id: User ID for caching/preferences
+            ip_address: IP address for geolocation
+            gps_latitude: GPS latitude from mobile device
+            gps_longitude: GPS longitude from mobile device
+            
         Returns:
             Tuple of (location_name, latitude, longitude)
         """
         
         try:
-            location = await self.get_location_from_ip(ip_address)
+            location = await self.get_location_from_ip(ip_address, gps_latitude, gps_longitude)
+            
+            # Log the source for debugging
+            source = location.get('source', 'unknown')
+            logger.info(f"📍 Prayer location source: {source}")
             
             # Format location name for prayer database
             city = location['city']
@@ -213,6 +253,7 @@ class IPLocationDetector:
             # Return fallback location
             return ("Merrifield, Virginia", 38.8606, -77.2287)
     
+    #-- Section 6: Cache Management
     def clear_cache(self):
         """Clear location cache"""
         self.location_cache.clear()
@@ -226,7 +267,8 @@ class IPLocationDetector:
             'cached_ips': list(self.location_cache.keys())
         }
 
-# Global location detector instance
+
+#-- Section 7: Global Instance and Convenience Functions - Updated 01/12/26
 _location_detector = None
 
 def get_location_detector() -> IPLocationDetector:
@@ -236,13 +278,30 @@ def get_location_detector() -> IPLocationDetector:
         _location_detector = IPLocationDetector()
     return _location_detector
 
-# Convenience functions
-async def detect_user_location(ip_address: str = None) -> Dict:
-    """Detect user location from IP"""
+async def detect_user_location(ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> Dict:
+    """
+    Detect user location with GPS > IP > Fallback priority
+    
+    Args:
+        ip_address: IP address for geolocation
+        gps_latitude: GPS latitude from mobile device
+        gps_longitude: GPS longitude from mobile device
+    """
     detector = get_location_detector()
-    return await detector.get_location_from_ip(ip_address)
+    return await detector.get_location_from_ip(ip_address, gps_latitude, gps_longitude)
 
-async def get_prayer_location(user_id: str, ip_address: str = None) -> Tuple[str, float, float]:
-    """Get location for prayer time calculations"""
+async def get_prayer_location(user_id: str, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> Tuple[str, float, float]:
+    """
+    Get location for prayer time calculations with GPS priority
+    
+    Args:
+        user_id: User ID
+        ip_address: IP address for geolocation
+        gps_latitude: GPS latitude from mobile device
+        gps_longitude: GPS longitude from mobile device
+    
+    Returns:
+        Tuple of (location_name, latitude, longitude)
+    """
     detector = get_location_detector()
-    return await detector.get_location_for_prayers(user_id, ip_address)
+    return await detector.get_location_for_prayers(user_id, ip_address, gps_latitude, gps_longitude)

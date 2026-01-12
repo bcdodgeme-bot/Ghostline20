@@ -65,6 +65,9 @@ class ChatRequest(BaseModel):
     attachment_data: Optional[str] = Field(None, alias='attachmentData', description="Base64-encoded attachment data")
     attachment_filename: Optional[str] = Field(None, alias='attachmentFilename', description="Original filename of attachment")
     attachment_mime_type: Optional[str] = Field(None, alias='attachmentMimeType', description="MIME type of attachment (e.g., image/jpeg, application/pdf)")
+    # GPS location from iOS/macOS for accurate prayer times & weather - 01/12/26
+    latitude: Optional[float] = Field(None, description="GPS latitude from device")
+    longitude: Optional[float] = Field(None, description="GPS longitude from device")
     
     class Config:
         # Allow both snake_case and camelCase field names
@@ -118,7 +121,9 @@ async def chat_with_ai(
     files: List[UploadFile] = File(default=[]),
     request: Request = None,
     user_id: str = Depends(get_current_user_id),
-    internal_image_attachments: Optional[List[Dict]] = None  # Internal use - for iOS images
+    internal_image_attachments: Optional[List[Dict]] = None,  # Internal use - for iOS images
+    gps_latitude: Optional[float] = None,  # GPS from iOS/macOS - 01/12/26
+    gps_longitude: Optional[float] = None  # GPS from iOS/macOS - 01/12/26
 ):
     """
     Main chat endpoint with file upload support
@@ -558,8 +563,10 @@ Weather data powered by Tomorrow.io"""
                 # Get client IP address for location detection
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
                 logger.info(f"🌍 DEBUG: Using IP address for location: {client_ip}")
+                if gps_latitude and gps_longitude:
+                    logger.info(f"📍 DEBUG: GPS coordinates provided: {gps_latitude}, {gps_longitude}")
                 
-                special_response = await process_prayer_command(message, user_id, client_ip)
+                special_response = await process_prayer_command(message, user_id, client_ip, gps_latitude, gps_longitude)
                 logger.info("✅ DEBUG: Prayer times response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer times processing failed: {e}")
@@ -570,7 +577,7 @@ Weather data powered by Tomorrow.io"""
             logger.info("🔔 DEBUG: Prayer notification command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
-                special_response = await process_prayer_notification_command(message, user_id, client_ip)
+                special_response = await process_prayer_notification_command(message, user_id, client_ip, gps_latitude, gps_longitude)
                 logger.info("✅ DEBUG: Prayer notification command response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Prayer notification command processing failed: {e}")
@@ -591,7 +598,7 @@ Weather data powered by Tomorrow.io"""
             logger.info("📍 DEBUG: Location command detected")
             try:
                 client_ip = request.client.host if hasattr(request, 'client') and request.client else None
-                special_response = await process_location_command(message, user_id, client_ip)
+                special_response = await process_location_command(message, user_id, client_ip, gps_latitude, gps_longitude)
                 logger.info("✅ DEBUG: Location command response generated successfully")
             except Exception as e:
                 logger.error(f"❌ DEBUG: Location command processing failed: {e}")
@@ -1342,7 +1349,9 @@ async def chat_with_ai_json(
         files=[],
         request=None,
         user_id=user_id,
-        internal_image_attachments=image_attachments
+        internal_image_attachments=image_attachments,
+        gps_latitude=request.latitude,
+        gps_longitude=request.longitude
     )
 
 #-- Support Endpoints (NO DUPLICATION - CLEAN SUPPORT ONLY)

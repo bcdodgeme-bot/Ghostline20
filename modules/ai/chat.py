@@ -1202,8 +1202,12 @@ def detect_prayer_question_type(message: str) -> str:
     else:
         return "general_prayer"
 
-async def process_prayer_command(message: str, user_id: str, ip_address: str = None) -> str:
-    """Process prayer-related commands using the cached database system"""
+async def process_prayer_command(message: str, user_id: str, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> str:
+    """Process prayer-related commands using the cached database system
+    
+    Updated 01/12/26: Added GPS coordinate support for iOS/macOS
+    Note: database_manager.get_todays_prayer_times() also needs GPS params to fully propagate
+    """
     try:
         from ..integrations.prayer_times.database_manager import get_prayer_database_manager
         
@@ -2265,8 +2269,11 @@ def detect_prayer_notification_command(message: str) -> bool:
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in notification_keywords)
 
-async def process_prayer_notification_command(message: str, user_id: str, ip_address: str = None) -> str:
-    """Process prayer notification management commands"""
+async def process_prayer_notification_command(message: str, user_id: str, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> str:
+    """Process prayer notification management commands
+    
+    Updated 01/12/26: Added GPS coordinate params for consistency with router.py
+    """
     try:
         from ..integrations.prayer_times.notification_manager import (
             get_prayer_notification_manager,
@@ -2343,8 +2350,11 @@ def detect_location_command(message: str) -> bool:
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in location_keywords)
 
-async def process_location_command(message: str, user_id: str, ip_address: str = None) -> str:
-    """Process location detection and management commands"""
+async def process_location_command(message: str, user_id: str, ip_address: str = None, gps_latitude: float = None, gps_longitude: float = None) -> str:
+    """Process location detection and management commands
+    
+    Updated 01/12/26: Added GPS coordinate support - GPS takes priority over IP
+    """
     try:
         from ..integrations.prayer_times.location_detector import (
             get_location_detector,
@@ -2355,12 +2365,21 @@ async def process_location_command(message: str, user_id: str, ip_address: str =
         detector = get_location_detector()
         
         if any(term in message_lower for term in ['where am i', 'current location', 'my location']):
-            # Detect and show current location
-            location = await detect_user_location(ip_address)
+            # Detect and show current location (GPS > IP > Fallback)
+            location = await detect_user_location(ip_address, gps_latitude, gps_longitude)
+            
+            # Show source appropriately
+            source_text = location.get('source', 'Unknown')
+            if source_text == 'gps':
+                source_display = "📱 GPS (from device)"
+            elif source_text == 'fallback':
+                source_display = "🔄 Fallback (default location)"
+            else:
+                source_display = f"🌐 {source_text}"
             
             return f"""📍 **Your Current Location**
 
-🌐 **Detected from IP:** {location.get('source', 'IP Service')}
+**Source:** {source_display}
 🏙️ **City:** {location['city']}
 📍 **Region:** {location['region']}
 🌍 **Country:** {location['country']}
@@ -2370,16 +2389,20 @@ async def process_location_command(message: str, user_id: str, ip_address: str =
 This location will be used automatically for prayer time calculations."""
         
         elif 'prayer location' in message_lower:
-            # Get location specifically formatted for prayers
+            # Get location specifically formatted for prayers (GPS > IP > Fallback)
             from ..integrations.prayer_times.location_detector import get_prayer_location
-            location_name, lat, lng = await get_prayer_location(user_id, ip_address)
+            location_name, lat, lng = await get_prayer_location(user_id, ip_address, gps_latitude, gps_longitude)
+            
+            # Determine source for display
+            source_info = "GPS coordinates" if gps_latitude and gps_longitude else "IP address"
             
             return f"""🕌 **Prayer Times Location**
 
 📍 **Location:** {location_name}
 📊 **Coordinates:** {lat:.4f}, {lng:.4f}
+📱 **Source:** {source_info}
 
-Prayer times are automatically calculated for your current location based on your IP address. 
+Prayer times are automatically calculated for your current location.
 
 **Available Commands:**
 - `prayer times` - Get today's schedule for your location
