@@ -34,6 +34,9 @@ from typing import Dict, List, Optional, Any, Tuple
 # Import database manager
 from modules.core.database import db_manager
 
+# Import thread-safe logging for atomic multi-line output
+from modules.core.safe_logger import log_summary
+
 logger = logging.getLogger(__name__)
 
 
@@ -1917,11 +1920,18 @@ async def build_memory_context(
         
         full_context = "\n".join(context_parts)
         
-        logger.info("="*80)
-        logger.info(f"✅ Memory context built: {len(full_context)} characters")
-        logger.info(f"   Context level: {context_level}")
-        logger.info(f"   Sources queried: {len(context_parts)}")
-        logger.info("="*80)
+        # Use atomic summary logging to prevent interleaving with concurrent requests
+        # This replaces multiple logger.info calls that could be split across threads
+        log_summary(
+            title="MEMORY CONTEXT BUILT",
+            stats={
+                "chars": len(full_context),
+                "level": context_level,
+                "sources": len(context_parts),
+                "threads": len([p for p in context_parts if "CONVERSATION" in p]),
+            },
+            logger_name=__name__
+        )
         
         return full_context
         

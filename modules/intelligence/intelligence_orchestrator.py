@@ -42,6 +42,9 @@ from modules.intelligence.situation_manager import get_situation_manager
 from modules.intelligence.action_suggester import get_action_suggester
 from modules.intelligence.action_executor import get_action_executor
 
+# Import thread-safe logging for atomic multi-line output
+from modules.core.safe_logger import log_summary, atomic_log
+
 logger = logging.getLogger(__name__)
 
 #===============================================================================
@@ -355,15 +358,35 @@ class IntelligenceOrchestrator:
         results = await asyncio.gather(*collector_tasks, return_exceptions=True)
         
         # Combine all signals, filtering out errors
+        # Use atomic logging to prevent interleaving when multiple collectors complete
         all_signals = []
+        collector_names = [
+            'calendar', 'email', 'meeting', 'conversation',
+            'trend', 'weather', 'knowledge', 'action_item', 'bluesky'
+        ]
+        collector_stats = {}
+        
         for i, result in enumerate(results):
+            name = collector_names[i] if i < len(collector_names) else f"collector_{i}"
             if isinstance(result, Exception):
-                logger.error(f"Collector {i} failed: {result}")
+                logger.error(f"Collector {name} failed: {result}")
+                collector_stats[name] = "error"
                 continue
             
             if isinstance(result, list):
                 all_signals.extend(result)
-                logger.debug(f"Collector {i} returned {len(result)} signals")
+                collector_stats[name] = len(result)
+        
+        # Log all collector results in one atomic summary (prevents interleaving)
+        log_summary(
+            title="SIGNAL COLLECTION COMPLETE",
+            stats={
+                "total_signals": len(all_signals),
+                "collectors_ok": sum(1 for v in collector_stats.values() if v != "error"),
+                "collectors_err": sum(1 for v in collector_stats.values() if v == "error"),
+            },
+            logger_name=__name__
+        )
         
         return all_signals
     

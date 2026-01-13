@@ -116,17 +116,21 @@ from modules.ai.chat import get_integration_info as chat_integration_info, check
 #-- Section 5: Authentication Module Imports - 9/23/25
 from modules.core.auth import AuthManager, get_current_user
 
-#-- Section 6: Logging Configuration - 9/30/25
-logging.basicConfig(
+#-- Section 5a: Safe Logging Module Import - 01/13/26
+from modules.core.safe_logger import init_safe_logging, get_safe_logger, log_summary
+
+#-- Section 6: Logging Configuration - 9/30/25 (Updated 01/13/26 for thread-safe logging)
+# Initialize thread-safe logging to prevent log interleaving from concurrent async operations
+# This fixes the "stream of consciousness" log issue where multiple chat requests,
+# intelligence collectors, and background tasks write multi-line content simultaneously
+init_safe_logging(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(stream=sys.stdout)
-    ]
+    format_string='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    use_structured=False  # Set to True for JSON logging (better for log aggregation)
 )
 
-logger = logging.getLogger(__name__)
-logger.info("🔧 DEBUG logging enabled for chat diagnostics")
+logger = get_safe_logger(__name__)
+logger.info("🔒 Thread-safe logging initialized for chat diagnostics")
 
 #-- Section 7: Configuration Constants - 12/09/25
 # Background task intervals (in seconds)
