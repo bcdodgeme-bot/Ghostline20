@@ -38,7 +38,7 @@ class OpenRouterImageClient:
         
         self.base_url = "https://openrouter.ai/api/v1"
         self._session: Optional[aiohttp.ClientSession] = None
-        self._timeout = aiohttp.ClientTimeout(total=120)  # 2 min for image gen
+        self._timeout = aiohttp.ClientTimeout(total=240)  # 2 min for image gen
         
         # Model configuration
         self.default_model = "google/gemini-3-pro-image-preview"
