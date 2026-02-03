@@ -529,11 +529,6 @@ Weather data powered by Tomorrow.io"""
                     await memory_manager.add_message(thread_id, 'user', message)
                     await memory_manager.add_message(thread_id, 'assistant', response_text)
                     
-                    # Process any generated files (CSV exports, etc.)
-                    ai_response, generated_files = process_generated_files(ai_response)
-                    if generated_files:
-                        logger.info(f"📥 Generated {len(generated_files)} downloadable files: {[f['filename'] for f in generated_files]}")
-                    
                     return ChatResponse(
                         response=ai_response,
                         personality=personality_id,
@@ -1067,6 +1062,11 @@ Integration Status: All systems active - Weather, Bluesky, RSS Learning, Marketi
                 video_url=f"/static/gestures/{gesture_result['video']}"
             )
             logger.info(f"🎭 Gesture detected: {gesture_result['gesture']}")
+        
+        # Process any generated files (CSV exports, etc.)
+        final_response, generated_files = process_generated_files(final_response)
+        if generated_files:
+            logger.info(f"📥 Generated {len(generated_files)} downloadable files: {[f['filename'] for f in generated_files]}")
         
         try:
             chat_response = ChatResponse(
