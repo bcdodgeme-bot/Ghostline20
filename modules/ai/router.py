@@ -35,6 +35,7 @@ from typing import Dict, List, Optional, Any
 import json
 import logging
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Form, UploadFile, File
 from pydantic import BaseModel, Field
@@ -50,6 +51,48 @@ from .feedback_processor import get_feedback_processor
 from modules.ai.memory_query_layer import build_memory_context
 
 logger = logging.getLogger(__name__)
+
+# --- File Generation Helper (CSV exports, etc.) ---
+def process_generated_files(response_text: str) -> tuple[str, list[dict]]:
+    """
+    Detect [FILE:filename]content[/FILE] blocks in response,
+    save them to web/downloads/, and replace with download links.
+    
+    Returns: (modified_response, list_of_files_created)
+    """
+    import re
+    
+    pattern = r'\[FILE:([^\]]+)\](.*?)\[/FILE\]'
+    files_created = []
+    
+    def replace_with_link(match):
+        filename = match.group(1).strip()
+        content = match.group(2).strip()
+        
+        # Sanitize filename
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
+        
+        # Add timestamp to prevent overwrites
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name_part, ext = os.path.splitext(safe_filename)
+        unique_filename = f"{name_part}_{timestamp}{ext}"
+        
+        # Save file
+        filepath = Path("web/downloads") / unique_filename
+        filepath.write_text(content)
+        
+        download_url = f"/downloads/{unique_filename}"
+        files_created.append({
+            "filename": unique_filename,
+            "original_name": filename,
+            "url": download_url,
+            "size": len(content)
+        })
+        
+        return f"📥 **Download ready:** [{filename}]({download_url})"
+    
+    modified_response = re.sub(pattern, replace_with_link, response_text, flags=re.DOTALL)
+    return modified_response, files_created
 
 #-- Request/Response Models
 class ChatRequest(BaseModel):
@@ -486,8 +529,13 @@ Weather data powered by Tomorrow.io"""
                     await memory_manager.add_message(thread_id, 'user', message)
                     await memory_manager.add_message(thread_id, 'assistant', response_text)
                     
+                    # Process any generated files (CSV exports, etc.)
+                    ai_response, generated_files = process_generated_files(ai_response)
+                    if generated_files:
+                        logger.info(f"📥 Generated {len(generated_files)} downloadable files: {[f['filename'] for f in generated_files]}")
+                    
                     return ChatResponse(
-                        response=response_text,
+                        response=ai_response,
                         personality=personality_id,
                         thread_id=thread_id,
                         message_id=str(uuid.uuid4()),

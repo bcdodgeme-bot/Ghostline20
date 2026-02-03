@@ -183,6 +183,10 @@ class AuthResponse(BaseModel):
 #-- Section 10: Static Files and Web Interface - 9/23/25
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
+# Generated file downloads (CSVs, exports, etc.)
+os.makedirs("web/downloads", exist_ok=True)
+app.mount("/downloads", StaticFiles(directory="web/downloads"), name="downloads")
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_login():
     """Serve the login page as the main entry point."""
