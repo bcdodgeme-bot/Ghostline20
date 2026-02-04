@@ -88,6 +88,20 @@
                     </div>
                 </div>
 
+                <!-- Projects Section -->
+                <div class="sidebar-section projects-section">
+                    <div class="projects-header">
+                        <h3>📁 Projects</h3>
+                        <div class="projects-header-actions">
+                            <span class="project-count" id="projectCount">0</span>
+                            <button class="add-project-btn" id="addProjectBtn" title="New Project">+</button>
+                        </div>
+                    </div>
+                    <div class="projects-list" id="projectsList">
+                        <div class="loading-projects">Loading projects...</div>
+                    </div>
+                </div>
+
                 <div class="sidebar-section">
                     <div class="sidebar-header">
                         <h3>Bookmarks</h3>
@@ -121,6 +135,10 @@
                         </div>
                         <h2 id="greetingText">Hey there</h2>
                         <p id="greetingSubtext">What can I help you with?</p>
+                        <div class="welcome-project-indicator" id="welcomeProjectIndicator" style="display: none;">
+                            <span class="project-icon" id="welcomeProjectIcon">📁</span>
+                            <span id="welcomeProjectName">Project Name</span>
+                        </div>
                     </div>
                 </div>
 
@@ -235,6 +253,219 @@
             <div class="modal-footer">
                 <button class="btn btn-primary" id="saveSettings">Save Settings</button>
             </div>
+        </div>
+    </div>
+
+    <!-- New Project Modal -->
+    <div class="modal" id="newProjectModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📁 New Project</h3>
+                <button class="modal-close" id="closeNewProjectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Project Name <small>(identifier, no spaces)</small></label>
+                    <input type="text" id="newProjectName" placeholder="my-project" maxlength="50" pattern="[a-zA-Z0-9_-]+">
+                </div>
+                <div class="form-group">
+                    <label>Display Name</label>
+                    <input type="text" id="newProjectDisplayName" placeholder="My Awesome Project" maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label>Description <small>(optional)</small></label>
+                    <textarea id="newProjectDescription" placeholder="What is this project about?" maxlength="500" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Instructions <small>(AI context for this project)</small></label>
+                    <textarea id="newProjectInstructions" placeholder="When working on this project, remember to..." maxlength="2000" rows="4"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Color</label>
+                        <div class="color-picker" id="newProjectColorPicker">
+                            <div class="color-swatch selected" data-color="#EF4444" style="background: #EF4444;"></div>
+                            <div class="color-swatch" data-color="#F97316" style="background: #F97316;"></div>
+                            <div class="color-swatch" data-color="#F59E0B" style="background: #F59E0B;"></div>
+                            <div class="color-swatch" data-color="#84CC16" style="background: #84CC16;"></div>
+                            <div class="color-swatch" data-color="#10B981" style="background: #10B981;"></div>
+                            <div class="color-swatch" data-color="#06B6D4" style="background: #06B6D4;"></div>
+                            <div class="color-swatch" data-color="#3B82F6" style="background: #3B82F6;"></div>
+                            <div class="color-swatch" data-color="#8B5CF6" style="background: #8B5CF6;"></div>
+                            <div class="color-swatch" data-color="#EC4899" style="background: #EC4899;"></div>
+                            <div class="color-swatch" data-color="#6B7280" style="background: #6B7280;"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Icon</label>
+                        <div class="icon-picker" id="newProjectIconPicker">
+                            <button class="icon-option selected" data-icon="📁">📁</button>
+                            <button class="icon-option" data-icon="💼">💼</button>
+                            <button class="icon-option" data-icon="🚀">🚀</button>
+                            <button class="icon-option" data-icon="💡">💡</button>
+                            <button class="icon-option" data-icon="🎯">🎯</button>
+                            <button class="icon-option" data-icon="📊">📊</button>
+                            <button class="icon-option" data-icon="🔧">🔧</button>
+                            <button class="icon-option" data-icon="📝">📝</button>
+                            <button class="icon-option" data-icon="🎨">🎨</button>
+                            <button class="icon-option" data-icon="🏠">🏠</button>
+                            <button class="icon-option" data-icon="❤️">❤️</button>
+                            <button class="icon-option" data-icon="⭐">⭐</button>
+                            <button class="icon-option" data-icon="🔥">🔥</button>
+                            <button class="icon-option" data-icon="💻">💻</button>
+                            <button class="icon-option" data-icon="📱">📱</button>
+                            <button class="icon-option" data-icon="🌐">🌐</button>
+                            <button class="icon-option" data-icon="📈">📈</button>
+                            <button class="icon-option" data-icon="🎬">🎬</button>
+                            <button class="icon-option" data-icon="🎵">🎵</button>
+                            <button class="icon-option" data-icon="📚">📚</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="project-preview" id="newProjectPreview">
+                    <div class="project-preview-color" id="newProjectPreviewColor" style="background: #EF4444;"></div>
+                    <div class="project-preview-icon" id="newProjectPreviewIcon">📁</div>
+                    <div class="project-preview-info">
+                        <div class="project-preview-name" id="newProjectPreviewName">Project Name</div>
+                        <div class="project-preview-display-name" id="newProjectPreviewDisplayName">Display Name</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelNewProject">Cancel</button>
+                <button class="btn btn-primary" id="saveNewProject">Create Project</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Project Modal -->
+    <div class="modal" id="editProjectModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✏️ Edit Project</h3>
+                <button class="modal-close" id="closeEditProjectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editProjectId">
+                <div class="form-group">
+                    <label>Project Name <small>(identifier, no spaces)</small></label>
+                    <input type="text" id="editProjectName" placeholder="my-project" maxlength="50" pattern="[a-zA-Z0-9_-]+">
+                </div>
+                <div class="form-group">
+                    <label>Display Name</label>
+                    <input type="text" id="editProjectDisplayName" placeholder="My Awesome Project" maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label>Description <small>(optional)</small></label>
+                    <textarea id="editProjectDescription" placeholder="What is this project about?" maxlength="500" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Instructions <small>(AI context for this project)</small></label>
+                    <textarea id="editProjectInstructions" placeholder="When working on this project, remember to..." maxlength="2000" rows="4"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Color</label>
+                        <div class="color-picker" id="editProjectColorPicker">
+                            <div class="color-swatch" data-color="#EF4444" style="background: #EF4444;"></div>
+                            <div class="color-swatch" data-color="#F97316" style="background: #F97316;"></div>
+                            <div class="color-swatch" data-color="#F59E0B" style="background: #F59E0B;"></div>
+                            <div class="color-swatch" data-color="#84CC16" style="background: #84CC16;"></div>
+                            <div class="color-swatch" data-color="#10B981" style="background: #10B981;"></div>
+                            <div class="color-swatch" data-color="#06B6D4" style="background: #06B6D4;"></div>
+                            <div class="color-swatch" data-color="#3B82F6" style="background: #3B82F6;"></div>
+                            <div class="color-swatch" data-color="#8B5CF6" style="background: #8B5CF6;"></div>
+                            <div class="color-swatch" data-color="#EC4899" style="background: #EC4899;"></div>
+                            <div class="color-swatch" data-color="#6B7280" style="background: #6B7280;"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Icon</label>
+                        <div class="icon-picker" id="editProjectIconPicker">
+                            <button class="icon-option" data-icon="📁">📁</button>
+                            <button class="icon-option" data-icon="💼">💼</button>
+                            <button class="icon-option" data-icon="🚀">🚀</button>
+                            <button class="icon-option" data-icon="💡">💡</button>
+                            <button class="icon-option" data-icon="🎯">🎯</button>
+                            <button class="icon-option" data-icon="📊">📊</button>
+                            <button class="icon-option" data-icon="🔧">🔧</button>
+                            <button class="icon-option" data-icon="📝">📝</button>
+                            <button class="icon-option" data-icon="🎨">🎨</button>
+                            <button class="icon-option" data-icon="🏠">🏠</button>
+                            <button class="icon-option" data-icon="❤️">❤️</button>
+                            <button class="icon-option" data-icon="⭐">⭐</button>
+                            <button class="icon-option" data-icon="🔥">🔥</button>
+                            <button class="icon-option" data-icon="💻">💻</button>
+                            <button class="icon-option" data-icon="📱">📱</button>
+                            <button class="icon-option" data-icon="🌐">🌐</button>
+                            <button class="icon-option" data-icon="📈">📈</button>
+                            <button class="icon-option" data-icon="🎬">🎬</button>
+                            <button class="icon-option" data-icon="🎵">🎵</button>
+                            <button class="icon-option" data-icon="📚">📚</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="project-preview" id="editProjectPreview">
+                    <div class="project-preview-color" id="editProjectPreviewColor" style="background: #EF4444;"></div>
+                    <div class="project-preview-icon" id="editProjectPreviewIcon">📁</div>
+                    <div class="project-preview-info">
+                        <div class="project-preview-name" id="editProjectPreviewName">Project Name</div>
+                        <div class="project-preview-display-name" id="editProjectPreviewDisplayName">Display Name</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="deleteProject">Delete Project</button>
+                <button class="btn btn-secondary" id="cancelEditProject">Cancel</button>
+                <button class="btn btn-primary" id="saveEditProject">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move to Project Modal -->
+    <div class="modal" id="moveToProjectModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📂 Move to Project</h3>
+                <button class="modal-close" id="closeMoveToProjectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="moveThreadId">
+                <p>Select a project for this conversation:</p>
+                <div class="move-project-list" id="moveProjectList">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelMoveToProject">Cancel</button>
+                <button class="btn btn-primary" id="confirmMoveToProject" disabled>Move</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu (for conversation right-click) -->
+    <div class="context-menu" id="conversationContextMenu">
+        <div class="context-menu-item" id="contextMenuOpen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15,3 21,3 21,9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            Open
+        </div>
+        <div class="context-menu-item" id="contextMenuMoveToProject">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Move to Project
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item danger" id="contextMenuDelete">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3,6 5,6 21,6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Delete
         </div>
     </div>
 

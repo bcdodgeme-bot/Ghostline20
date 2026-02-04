@@ -2,6 +2,7 @@
 // Syntax Prime V2 - Chat Interface JavaScript
 // Session 23: Removed embedded CSS, fixed auto-resize, added random greetings
 // Session 26: FIXED - Audio undefined error when messageId not returned by API
+// Session 27: Added Project Folders feature - organize conversations into projects
 // Original: 9/27/25 - Working sidebar + submit protection + Google Trends
 // Updated: Session 23 - CSS moved to style.css, greeting system added
 //=============================================================================
@@ -25,6 +26,12 @@ class SyntaxPrimeChat {
         // Screen lock recovery system
         this.pendingRequest = null;  // Tracks in-flight request for recovery
         this.wasHiddenDuringRequest = false;
+        
+        // Project Folders System
+        this.projects = [];
+        this.selectedProjectId = null;  // null = "All Conversations"
+        this.allConversations = [];     // Store all conversations for filtering
+        this.contextMenuThreadId = null; // Track which thread context menu is for
         
         // Google Trends Training System
         this.trendsEnabled = false;
@@ -79,6 +86,7 @@ class SyntaxPrimeChat {
         this.setupEventListeners();
         this.setupVisibilityListener();  // Screen lock recovery
         this.loadPersonalities();
+        this.loadProjects();  // Load projects before conversations
         this.loadConversations();
         this.loadBookmarks();
         this.setupDragAndDrop();
@@ -88,6 +96,7 @@ class SyntaxPrimeChat {
         this.initializeImageSystem();
         this.initGestureVideo();
         this.setRandomGreeting();
+        this.setupContextMenu();  // Setup context menu for conversations
         
         // Focus message input
         document.getElementById('messageInput').focus();
@@ -468,6 +477,13 @@ class SyntaxPrimeChat {
             trendsBtn._syntaxListenersAttached = true;
         }
         
+        // Project buttons
+        const addProjectBtn = document.getElementById('addProjectBtn');
+        if (addProjectBtn && !addProjectBtn._syntaxListenersAttached) {
+            addProjectBtn.addEventListener('click', this.showNewProjectModal.bind(this));
+            addProjectBtn._syntaxListenersAttached = true;
+        }
+        
         // Modal handlers
         this.setupModalHandlers();
         
@@ -550,6 +566,9 @@ class SyntaxPrimeChat {
         if (closeSettingsModal) closeSettingsModal.addEventListener('click', () => this.hideModal(settingsModal));
         if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', this.saveSettings.bind(this));
         
+        // Project modal handlers
+        this.setupProjectModalHandlers();
+        
         // Close modals on outside click
         [bookmarkModal, settingsModal].forEach(modal => {
             if (modal) {
@@ -560,6 +579,136 @@ class SyntaxPrimeChat {
                 });
             }
         });
+    }
+    
+    // === Project Modal Handlers ===
+    setupProjectModalHandlers() {
+        // New Project Modal
+        const newProjectModal = document.getElementById('newProjectModal');
+        const closeNewProjectModal = document.getElementById('closeNewProjectModal');
+        const cancelNewProject = document.getElementById('cancelNewProject');
+        const saveNewProject = document.getElementById('saveNewProject');
+        
+        if (closeNewProjectModal) closeNewProjectModal.addEventListener('click', () => this.hideModal(newProjectModal));
+        if (cancelNewProject) cancelNewProject.addEventListener('click', () => this.hideModal(newProjectModal));
+        if (saveNewProject) saveNewProject.addEventListener('click', this.createProject.bind(this));
+        
+        // Edit Project Modal
+        const editProjectModal = document.getElementById('editProjectModal');
+        const closeEditProjectModal = document.getElementById('closeEditProjectModal');
+        const cancelEditProject = document.getElementById('cancelEditProject');
+        const saveEditProject = document.getElementById('saveEditProject');
+        const deleteProject = document.getElementById('deleteProject');
+        
+        if (closeEditProjectModal) closeEditProjectModal.addEventListener('click', () => this.hideModal(editProjectModal));
+        if (cancelEditProject) cancelEditProject.addEventListener('click', () => this.hideModal(editProjectModal));
+        if (saveEditProject) saveEditProject.addEventListener('click', this.updateProject.bind(this));
+        if (deleteProject) deleteProject.addEventListener('click', this.deleteProject.bind(this));
+        
+        // Move to Project Modal
+        const moveToProjectModal = document.getElementById('moveToProjectModal');
+        const closeMoveToProjectModal = document.getElementById('closeMoveToProjectModal');
+        const cancelMoveToProject = document.getElementById('cancelMoveToProject');
+        const confirmMoveToProject = document.getElementById('confirmMoveToProject');
+        
+        if (closeMoveToProjectModal) closeMoveToProjectModal.addEventListener('click', () => this.hideModal(moveToProjectModal));
+        if (cancelMoveToProject) cancelMoveToProject.addEventListener('click', () => this.hideModal(moveToProjectModal));
+        if (confirmMoveToProject) confirmMoveToProject.addEventListener('click', this.moveThreadToProject.bind(this));
+        
+        // Setup color pickers
+        this.setupColorPicker('newProjectColorPicker', 'newProjectPreviewColor');
+        this.setupColorPicker('editProjectColorPicker', 'editProjectPreviewColor');
+        
+        // Setup icon pickers
+        this.setupIconPicker('newProjectIconPicker', 'newProjectPreviewIcon');
+        this.setupIconPicker('editProjectIconPicker', 'editProjectPreviewIcon');
+        
+        // Setup live preview updates for new project
+        const newProjectName = document.getElementById('newProjectName');
+        const newProjectDisplayName = document.getElementById('newProjectDisplayName');
+        if (newProjectName) {
+            newProjectName.addEventListener('input', () => this.updateProjectPreview('new'));
+        }
+        if (newProjectDisplayName) {
+            newProjectDisplayName.addEventListener('input', () => this.updateProjectPreview('new'));
+        }
+        
+        // Setup live preview updates for edit project
+        const editProjectName = document.getElementById('editProjectName');
+        const editProjectDisplayName = document.getElementById('editProjectDisplayName');
+        if (editProjectName) {
+            editProjectName.addEventListener('input', () => this.updateProjectPreview('edit'));
+        }
+        if (editProjectDisplayName) {
+            editProjectDisplayName.addEventListener('input', () => this.updateProjectPreview('edit'));
+        }
+        
+        // Close modals on outside click
+        [newProjectModal, editProjectModal, moveToProjectModal].forEach(modal => {
+            if (modal) {
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        this.hideModal(modal);
+                    }
+                });
+            }
+        });
+    }
+    
+    setupColorPicker(pickerId, previewId) {
+        const picker = document.getElementById(pickerId);
+        if (!picker) return;
+        
+        const swatches = picker.querySelectorAll('.color-swatch');
+        swatches.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                // Remove selected from all
+                swatches.forEach(s => s.classList.remove('selected'));
+                // Add selected to clicked
+                swatch.classList.add('selected');
+                // Update preview
+                const preview = document.getElementById(previewId);
+                if (preview) {
+                    preview.style.background = swatch.dataset.color;
+                }
+            });
+        });
+    }
+    
+    setupIconPicker(pickerId, previewId) {
+        const picker = document.getElementById(pickerId);
+        if (!picker) return;
+        
+        const options = picker.querySelectorAll('.icon-option');
+        options.forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.preventDefault();
+                // Remove selected from all
+                options.forEach(o => o.classList.remove('selected'));
+                // Add selected to clicked
+                option.classList.add('selected');
+                // Update preview
+                const preview = document.getElementById(previewId);
+                if (preview) {
+                    preview.textContent = option.dataset.icon;
+                }
+            });
+        });
+    }
+    
+    updateProjectPreview(type) {
+        const prefix = type === 'new' ? 'newProject' : 'editProject';
+        const nameInput = document.getElementById(`${prefix}Name`);
+        const displayNameInput = document.getElementById(`${prefix}DisplayName`);
+        const previewName = document.getElementById(`${prefix}PreviewName`);
+        const previewDisplayName = document.getElementById(`${prefix}PreviewDisplayName`);
+        
+        if (previewName && nameInput) {
+            previewName.textContent = nameInput.value || 'Project Name';
+        }
+        if (previewDisplayName && displayNameInput) {
+            previewDisplayName.textContent = displayNameInput.value || 'Display Name';
+        }
     }
     
     // === Voice Synthesis Integration ===
@@ -1474,6 +1623,11 @@ class SyntaxPrimeChat {
                 formData.append('thread_id', this.currentThreadId);
             }
             
+            // Add project_id if a project is selected
+            if (this.selectedProjectId) {
+                formData.append('project_id', this.selectedProjectId);
+            }
+            
             formData.append('include_knowledge', 'true');
             
             // Add uploaded files if any - FIXED: Must verify File objects exist
@@ -1536,6 +1690,9 @@ class SyntaxPrimeChat {
             
             // Show remember button
             this.showRememberButton(response.message_id);
+            
+            // Reload conversations to update sidebar
+            await this.loadConversations();
             
         } catch (error) {
             console.error(`❌ Chat error (ID: ${messageId}):`, error);
@@ -1888,7 +2045,7 @@ class SyntaxPrimeChat {
         }
     }
     
-    // UPDATED: Start new chat with simplified greeting
+    // UPDATED: Start new chat with simplified greeting and project support
     startNewChat() {
         this.currentThreadId = null;
         
@@ -1900,6 +2057,20 @@ class SyntaxPrimeChat {
         // Get a fresh random greeting
         const greeting = this.getRandomGreeting();
         
+        // Build project indicator HTML if a project is selected
+        let projectIndicatorHtml = '';
+        if (this.selectedProjectId) {
+            const project = this.projects.find(p => p.id === this.selectedProjectId);
+            if (project) {
+                projectIndicatorHtml = `
+                    <div class="welcome-project-indicator">
+                        <span class="project-icon">${project.icon || '📁'}</span>
+                        <span>New chat in ${project.display_name || project.name}</span>
+                    </div>
+                `;
+            }
+        }
+        
         messagesContainer.innerHTML = `
             <div class="welcome-message">
                 <div class="welcome-icon">
@@ -1907,10 +2078,11 @@ class SyntaxPrimeChat {
                 </div>
                 <h2 id="greetingText">${greeting.text}</h2>
                 <p id="greetingSubtext">${greeting.subtext}</p>
+                ${projectIndicatorHtml}
             </div>
         `;
         
-        console.log('New chat started');
+        console.log('New chat started' + (this.selectedProjectId ? ` in project ${this.selectedProjectId}` : ''));
     }
     
     openSettings() {
@@ -1985,12 +2157,514 @@ class SyntaxPrimeChat {
         console.log('Personalities loaded');
     }
     
+    // === Project Folders System ===
+    async loadProjects() {
+        try {
+            console.log('📁 Loading projects...');
+            const response = await this.apiCall('/ai/projects', 'GET');
+            
+            if (response && response.projects) {
+                this.projects = response.projects;
+                this.renderProjects();
+                console.log(`📁 Loaded ${this.projects.length} projects`);
+            }
+        } catch (error) {
+            console.error('Failed to load projects:', error);
+            // Show empty state instead of error
+            this.projects = [];
+            this.renderProjects();
+        }
+    }
+    
+    renderProjects() {
+        const projectsList = document.getElementById('projectsList');
+        const projectCount = document.getElementById('projectCount');
+        
+        if (!projectsList) return;
+        
+        // Update count
+        if (projectCount) {
+            projectCount.textContent = this.projects.length;
+        }
+        
+        // Build HTML
+        let html = '';
+        
+        // "All Conversations" option
+        html += `
+            <div class="project-item-all ${this.selectedProjectId === null ? 'active' : ''}" 
+                 data-project-id="all"
+                 onclick="window.syntaxPrimeChat.selectProject(null)">
+                <div class="project-icon">💬</div>
+                <div class="project-name">All Conversations</div>
+            </div>
+        `;
+        
+        if (this.projects.length === 0) {
+            html += `
+                <div class="no-projects">
+                    <p>No projects yet</p>
+                    <small>Click + to create your first project</small>
+                </div>
+            `;
+        } else {
+            // Render each project
+            this.projects.forEach(project => {
+                const isActive = this.selectedProjectId === project.id;
+                html += `
+                    <div class="project-item ${isActive ? 'active' : ''}" 
+                         data-project-id="${project.id}"
+                         onclick="window.syntaxPrimeChat.selectProject(${project.id})">
+                        <div class="project-color-indicator" style="background: ${project.color || '#7b61ff'};"></div>
+                        <div class="project-icon">${project.icon || '📁'}</div>
+                        <div class="project-info">
+                            <div class="project-name">${project.display_name || project.name}</div>
+                            <div class="project-thread-count">${project.thread_count || 0} chats</div>
+                        </div>
+                        <button class="project-item-menu-btn" onclick="event.stopPropagation(); window.syntaxPrimeChat.showEditProjectModal(${project.id});" title="Edit Project">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="1"/>
+                                <circle cx="12" cy="5" r="1"/>
+                                <circle cx="12" cy="19" r="1"/>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+            });
+        }
+        
+        projectsList.innerHTML = html;
+    }
+    
+    selectProject(projectId) {
+        console.log(`📁 Selected project: ${projectId}`);
+        this.selectedProjectId = projectId;
+        
+        // Update project list UI
+        this.renderProjects();
+        
+        // Filter conversations
+        this.filterConversationsByProject(projectId);
+        
+        // Update welcome screen project indicator
+        this.updateWelcomeProjectIndicator();
+    }
+    
+    updateWelcomeProjectIndicator() {
+        const indicator = document.getElementById('welcomeProjectIndicator');
+        const iconEl = document.getElementById('welcomeProjectIcon');
+        const nameEl = document.getElementById('welcomeProjectName');
+        
+        if (!indicator) return;
+        
+        if (this.selectedProjectId) {
+            const project = this.projects.find(p => p.id === this.selectedProjectId);
+            if (project) {
+                indicator.style.display = 'flex';
+                if (iconEl) iconEl.textContent = project.icon || '📁';
+                if (nameEl) nameEl.textContent = `New chat in ${project.display_name || project.name}`;
+            }
+        } else {
+            indicator.style.display = 'none';
+        }
+    }
+    
+    filterConversationsByProject(projectId) {
+        if (projectId === null) {
+            // Show all conversations
+            this.renderConversations(this.allConversations);
+        } else {
+            // Filter to only show conversations in this project
+            const filtered = this.allConversations.filter(conv => conv.primary_project_id === projectId);
+            this.renderConversations(filtered);
+        }
+    }
+    
+    showNewProjectModal() {
+        const modal = document.getElementById('newProjectModal');
+        if (!modal) return;
+        
+        // Reset form
+        document.getElementById('newProjectName').value = '';
+        document.getElementById('newProjectDisplayName').value = '';
+        document.getElementById('newProjectDescription').value = '';
+        document.getElementById('newProjectInstructions').value = '';
+        
+        // Reset color picker - select first
+        const colorSwatches = document.querySelectorAll('#newProjectColorPicker .color-swatch');
+        colorSwatches.forEach((s, i) => s.classList.toggle('selected', i === 0));
+        document.getElementById('newProjectPreviewColor').style.background = '#EF4444';
+        
+        // Reset icon picker - select first
+        const iconOptions = document.querySelectorAll('#newProjectIconPicker .icon-option');
+        iconOptions.forEach((o, i) => o.classList.toggle('selected', i === 0));
+        document.getElementById('newProjectPreviewIcon').textContent = '📁';
+        
+        // Reset preview
+        document.getElementById('newProjectPreviewName').textContent = 'Project Name';
+        document.getElementById('newProjectPreviewDisplayName').textContent = 'Display Name';
+        
+        // Show modal
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+        
+        // Focus name input
+        document.getElementById('newProjectName').focus();
+    }
+    
+    async createProject() {
+        const name = document.getElementById('newProjectName').value.trim();
+        const displayName = document.getElementById('newProjectDisplayName').value.trim();
+        const description = document.getElementById('newProjectDescription').value.trim();
+        const instructions = document.getElementById('newProjectInstructions').value.trim();
+        
+        // Get selected color
+        const selectedColor = document.querySelector('#newProjectColorPicker .color-swatch.selected');
+        const color = selectedColor ? selectedColor.dataset.color : '#7b61ff';
+        
+        // Get selected icon
+        const selectedIcon = document.querySelector('#newProjectIconPicker .icon-option.selected');
+        const icon = selectedIcon ? selectedIcon.dataset.icon : '📁';
+        
+        // Validate
+        if (!name) {
+            this.showToast('❌ Please enter a project name', 'error');
+            return;
+        }
+        
+        // Validate name format (no spaces, alphanumeric + dash/underscore)
+        if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+            this.showToast('❌ Project name can only contain letters, numbers, dashes, and underscores', 'error');
+            return;
+        }
+        
+        try {
+            const response = await this.apiCall('/ai/projects', 'POST', {
+                name: name,
+                display_name: displayName || name,
+                description: description || null,
+                instructions: instructions || null,
+                color: color,
+                icon: icon
+            });
+            
+            if (response && response.project) {
+                this.showToast('✅ Project created!', 'success');
+                this.hideModal(document.getElementById('newProjectModal'));
+                
+                // Reload projects
+                await this.loadProjects();
+                
+                // Select the new project
+                this.selectProject(response.project.id);
+            }
+        } catch (error) {
+            console.error('Failed to create project:', error);
+            this.showToast('❌ Failed to create project', 'error');
+        }
+    }
+    
+    showEditProjectModal(projectId) {
+        const project = this.projects.find(p => p.id === projectId);
+        if (!project) return;
+        
+        const modal = document.getElementById('editProjectModal');
+        if (!modal) return;
+        
+        // Fill form with project data
+        document.getElementById('editProjectId').value = project.id;
+        document.getElementById('editProjectName').value = project.name;
+        document.getElementById('editProjectDisplayName').value = project.display_name || '';
+        document.getElementById('editProjectDescription').value = project.description || '';
+        document.getElementById('editProjectInstructions').value = project.instructions || '';
+        
+        // Set color picker
+        const colorSwatches = document.querySelectorAll('#editProjectColorPicker .color-swatch');
+        colorSwatches.forEach(s => {
+            s.classList.toggle('selected', s.dataset.color === project.color);
+        });
+        document.getElementById('editProjectPreviewColor').style.background = project.color || '#7b61ff';
+        
+        // Set icon picker
+        const iconOptions = document.querySelectorAll('#editProjectIconPicker .icon-option');
+        iconOptions.forEach(o => {
+            o.classList.toggle('selected', o.dataset.icon === project.icon);
+        });
+        document.getElementById('editProjectPreviewIcon').textContent = project.icon || '📁';
+        
+        // Update preview
+        document.getElementById('editProjectPreviewName').textContent = project.name;
+        document.getElementById('editProjectPreviewDisplayName').textContent = project.display_name || project.name;
+        
+        // Show modal
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+    
+    async updateProject() {
+        const projectId = document.getElementById('editProjectId').value;
+        const name = document.getElementById('editProjectName').value.trim();
+        const displayName = document.getElementById('editProjectDisplayName').value.trim();
+        const description = document.getElementById('editProjectDescription').value.trim();
+        const instructions = document.getElementById('editProjectInstructions').value.trim();
+        
+        // Get selected color
+        const selectedColor = document.querySelector('#editProjectColorPicker .color-swatch.selected');
+        const color = selectedColor ? selectedColor.dataset.color : '#7b61ff';
+        
+        // Get selected icon
+        const selectedIcon = document.querySelector('#editProjectIconPicker .icon-option.selected');
+        const icon = selectedIcon ? selectedIcon.dataset.icon : '📁';
+        
+        // Validate
+        if (!name) {
+            this.showToast('❌ Please enter a project name', 'error');
+            return;
+        }
+        
+        if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+            this.showToast('❌ Project name can only contain letters, numbers, dashes, and underscores', 'error');
+            return;
+        }
+        
+        try {
+            const response = await this.apiCall(`/ai/projects/${projectId}`, 'PUT', {
+                name: name,
+                display_name: displayName || name,
+                description: description || null,
+                instructions: instructions || null,
+                color: color,
+                icon: icon
+            });
+            
+            if (response && response.project) {
+                this.showToast('✅ Project updated!', 'success');
+                this.hideModal(document.getElementById('editProjectModal'));
+                
+                // Reload projects
+                await this.loadProjects();
+            }
+        } catch (error) {
+            console.error('Failed to update project:', error);
+            this.showToast('❌ Failed to update project', 'error');
+        }
+    }
+    
+    async deleteProject() {
+        const projectId = document.getElementById('editProjectId').value;
+        const project = this.projects.find(p => p.id == projectId);
+        
+        if (!confirm(`Are you sure you want to delete "${project?.display_name || project?.name}"?\n\nConversations will NOT be deleted, they will just be unassigned from this project.`)) {
+            return;
+        }
+        
+        try {
+            await this.apiCall(`/ai/projects/${projectId}`, 'DELETE');
+            
+            this.showToast('✅ Project deleted', 'success');
+            this.hideModal(document.getElementById('editProjectModal'));
+            
+            // If this was the selected project, deselect it
+            if (this.selectedProjectId == projectId) {
+                this.selectedProjectId = null;
+            }
+            
+            // Reload projects and conversations
+            await this.loadProjects();
+            await this.loadConversations();
+        } catch (error) {
+            console.error('Failed to delete project:', error);
+            this.showToast('❌ Failed to delete project', 'error');
+        }
+    }
+    
+    // === Context Menu for Conversations ===
+    setupContextMenu() {
+        const contextMenu = document.getElementById('conversationContextMenu');
+        if (!contextMenu) return;
+        
+        // Close context menu on click outside
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.contains(e.target)) {
+                contextMenu.classList.remove('active');
+            }
+        });
+        
+        // Context menu item handlers
+        document.getElementById('contextMenuOpen')?.addEventListener('click', () => {
+            if (this.contextMenuThreadId) {
+                this.loadThread(this.contextMenuThreadId);
+            }
+            contextMenu.classList.remove('active');
+        });
+        
+        document.getElementById('contextMenuMoveToProject')?.addEventListener('click', () => {
+            if (this.contextMenuThreadId) {
+                this.showMoveToProjectModal(this.contextMenuThreadId);
+            }
+            contextMenu.classList.remove('active');
+        });
+        
+        document.getElementById('contextMenuDelete')?.addEventListener('click', () => {
+            if (this.contextMenuThreadId) {
+                this.deleteConversation(this.contextMenuThreadId);
+            }
+            contextMenu.classList.remove('active');
+        });
+    }
+    
+    showConversationContextMenu(event, threadId) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        this.contextMenuThreadId = threadId;
+        
+        const contextMenu = document.getElementById('conversationContextMenu');
+        if (!contextMenu) return;
+        
+        // Position the menu
+        const x = event.clientX;
+        const y = event.clientY;
+        
+        // Make sure menu doesn't go off screen
+        const menuWidth = 180;
+        const menuHeight = 120;
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+        
+        let posX = x;
+        let posY = y;
+        
+        if (x + menuWidth > windowWidth) {
+            posX = windowWidth - menuWidth - 10;
+        }
+        if (y + menuHeight > windowHeight) {
+            posY = windowHeight - menuHeight - 10;
+        }
+        
+        contextMenu.style.left = `${posX}px`;
+        contextMenu.style.top = `${posY}px`;
+        contextMenu.classList.add('active');
+    }
+    
+    showMoveToProjectModal(threadId) {
+        const modal = document.getElementById('moveToProjectModal');
+        if (!modal) return;
+        
+        document.getElementById('moveThreadId').value = threadId;
+        
+        // Find current project for this thread
+        const conversation = this.allConversations.find(c => c.thread_id === threadId);
+        const currentProjectId = conversation?.primary_project_id;
+        
+        // Build project list
+        const listContainer = document.getElementById('moveProjectList');
+        let html = `
+            <div class="move-project-unassign ${currentProjectId === null ? 'selected' : ''}" 
+                 data-project-id="null"
+                 onclick="window.syntaxPrimeChat.selectMoveProject(null)">
+                Remove from project
+            </div>
+        `;
+        
+        this.projects.forEach(project => {
+            const isSelected = currentProjectId === project.id;
+            html += `
+                <div class="move-project-item ${isSelected ? 'selected' : ''}" 
+                     data-project-id="${project.id}"
+                     onclick="window.syntaxPrimeChat.selectMoveProject(${project.id})">
+                    <div class="project-color-dot" style="background: ${project.color || '#7b61ff'};"></div>
+                    <span class="project-icon">${project.icon || '📁'}</span>
+                    <span class="project-name">${project.display_name || project.name}</span>
+                </div>
+            `;
+        });
+        
+        listContainer.innerHTML = html;
+        
+        // Enable/disable confirm button based on selection
+        document.getElementById('confirmMoveToProject').disabled = false;
+        
+        // Show modal
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+    
+    selectMoveProject(projectId) {
+        // Update UI selection
+        const items = document.querySelectorAll('#moveProjectList .move-project-item, #moveProjectList .move-project-unassign');
+        items.forEach(item => {
+            const itemProjectId = item.dataset.projectId === 'null' ? null : parseInt(item.dataset.projectId);
+            item.classList.toggle('selected', itemProjectId === projectId);
+        });
+        
+        // Store selection
+        this._selectedMoveProjectId = projectId;
+        
+        // Enable confirm button
+        document.getElementById('confirmMoveToProject').disabled = false;
+    }
+    
+    async moveThreadToProject() {
+        const threadId = document.getElementById('moveThreadId').value;
+        const projectId = this._selectedMoveProjectId;
+        
+        try {
+            await this.apiCall(`/ai/projects/threads/${threadId}/assign`, 'PUT', {
+                project_id: projectId
+            });
+            
+            this.showToast('✅ Conversation moved!', 'success');
+            this.hideModal(document.getElementById('moveToProjectModal'));
+            
+            // Reload data
+            await this.loadProjects();
+            await this.loadConversations();
+            
+        } catch (error) {
+            console.error('Failed to move conversation:', error);
+            this.showToast('❌ Failed to move conversation', 'error');
+        }
+    }
+    
+    async deleteConversation(threadId) {
+        if (!confirm('Are you sure you want to delete this conversation?')) {
+            return;
+        }
+        
+        try {
+            await this.apiCall(`/ai/conversations/${threadId}`, 'DELETE');
+            
+            this.showToast('✅ Conversation deleted', 'success');
+            
+            // If this was the current conversation, start a new one
+            if (this.currentThreadId === threadId) {
+                this.startNewChat();
+            }
+            
+            // Reload conversations
+            await this.loadConversations();
+            
+        } catch (error) {
+            console.error('Failed to delete conversation:', error);
+            this.showToast('❌ Failed to delete conversation', 'error');
+        }
+    }
+    
     async loadConversations() {
         try {
             const response = await this.apiCall('/ai/conversations?limit=300', 'GET');
             
             if (response && response.conversations) {
-                this.renderConversations(response.conversations);
+                // Store all conversations for filtering
+                this.allConversations = response.conversations;
+                
+                // Render filtered or all based on selected project
+                if (this.selectedProjectId) {
+                    this.filterConversationsByProject(this.selectedProjectId);
+                } else {
+                    this.renderConversations(response.conversations);
+                }
             }
         } catch (error) {
             console.error('Failed to load conversations:', error);
@@ -2010,17 +2684,37 @@ class SyntaxPrimeChat {
             return;
         }
         
-        sidebar.innerHTML = conversations.map(conv => `
-            <div class="conversation-item ${conv.thread_id === this.currentThreadId ? 'active' : ''}" 
-                 data-thread-id="${conv.thread_id}" 
-                 onclick="window.syntaxPrimeChat.loadThread('${conv.thread_id}')">
-                <div class="conversation-title">${conv.title || 'Untitled'}</div>
-                <div class="conversation-meta">
-                    <span>${conv.message_count || 0} messages</span>
-                    <span>${this.formatDate(conv.last_message_at)}</span>
+        sidebar.innerHTML = conversations.map(conv => {
+            // Find project for this conversation
+            const project = conv.primary_project_id ? this.projects.find(p => p.id === conv.primary_project_id) : null;
+            const projectBadge = project ? `
+                <div class="conversation-project-badge" style="background: ${project.color}22; border: 1px solid ${project.color}44;">
+                    <span class="project-badge-icon">${project.icon || '📁'}</span>
+                    <span class="project-badge-name">${project.display_name || project.name}</span>
                 </div>
-            </div>
-        `).join('');
+            ` : '';
+            
+            return `
+                <div class="conversation-item ${conv.thread_id === this.currentThreadId ? 'active' : ''}" 
+                     data-thread-id="${conv.thread_id}" 
+                     onclick="window.syntaxPrimeChat.loadThread('${conv.thread_id}')"
+                     oncontextmenu="window.syntaxPrimeChat.showConversationContextMenu(event, '${conv.thread_id}')">
+                    <div class="conversation-title">${conv.title || 'Untitled'}</div>
+                    <div class="conversation-meta">
+                        <span>${conv.message_count || 0} messages</span>
+                        <span>${this.formatDate(conv.last_message_at)}</span>
+                    </div>
+                    ${projectBadge}
+                    <button class="conversation-menu-btn" onclick="event.stopPropagation(); window.syntaxPrimeChat.showConversationContextMenu(event, '${conv.thread_id}');" title="More options">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="1"/>
+                            <circle cx="12" cy="5" r="1"/>
+                            <circle cx="12" cy="19" r="1"/>
+                        </svg>
+                    </button>
+                </div>
+            `;
+        }).join('');
     }
     
     async loadThread(threadId) {
