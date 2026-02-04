@@ -119,6 +119,9 @@ from modules.core.auth import AuthManager, get_current_user
 #-- Section 5a: Safe Logging Module Import - 01/13/26
 from modules.core.safe_logger import init_safe_logging, get_safe_logger, log_summary
 
+#-- Section 2L: Projects Router - added 2/4/26
+from modules.ai.projects_router import router as projects_router
+
 #-- Section 6: Logging Configuration - 9/30/25 (Updated 01/13/26 for thread-safe logging)
 # Initialize thread-safe logging to prevent log interleaving from concurrent async operations
 # This fixes the "stream of consciousness" log issue where multiple chat requests,
@@ -1339,6 +1342,7 @@ app.include_router(google_workspace_router)
 app.include_router(telegram_router, prefix="/integrations", tags=["telegram"])
 app.include_router(fathom_router)
 app.include_router(ios_router)
+app.include_router(projects_router)
 
 #-- Section 17: Development Server - 9/23/25
 if __name__ == "__main__":

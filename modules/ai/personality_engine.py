@@ -5,6 +5,7 @@ Integrates existing personality system with AI brain and feedback learning
 
 Updated: 2025 - Fixed critical nested method bug (_apply_realtime_adaptations),
                 removed unused imports, added bounded caches, added __all__ exports
+Updated: 2026-02-03 - Added project instructions injection for Claude-style project folders
 """
 
 import os
@@ -152,6 +153,9 @@ class PersonalityEngine:
         
         # Bounded adaptation history (max 100 entries per personality)
         self.adaptation_history = BoundedAdaptationHistory(max_entries_per_key=100)
+        
+        # Project instructions cache (5 min TTL for quick updates)
+        self.project_cache = TTLCache(max_size=50, ttl_seconds=300)
     
     def _load_personality_system(self):
         """Load the existing personalities.py module"""
@@ -233,10 +237,102 @@ class PersonalityEngine:
             'syntaxprime': {'name': 'SyntaxPrime', 'description': 'Default sarcastic assistant'}
         }
     
-    def get_personality_system_prompt(self,
+    # =========================================================================
+    # Project Instructions Support (Added 2026-02-03)
+    # =========================================================================
+    
+    async def _get_project_instructions(self, project_id: int) -> Optional[str]:
+        """
+        Fetch project-specific instructions from database.
+        
+        Args:
+            project_id: The knowledge_projects.id to fetch instructions for
+            
+        Returns:
+            Project instructions string or None if not found/empty
+        """
+        if not project_id:
+            return None
+        
+        # Check cache first
+        cache_key = f"project_instructions_{project_id}"
+        cached = self.project_cache.get(cache_key)
+        if cached is not None:
+            return cached if cached else None  # Handle empty string cache
+        
+        try:
+            from modules.core.database import db_manager
+            
+            result = await db_manager.fetch_one(
+                """
+                SELECT name, display_name, instructions 
+                FROM knowledge_projects 
+                WHERE id = $1 AND is_active = true
+                """,
+                project_id
+            )
+            
+            if result and result.get('instructions'):
+                instructions = result['instructions'].strip()
+                project_name = result.get('display_name') or result.get('name') or f"Project {project_id}"
+                
+                # Cache the result
+                self.project_cache.set(cache_key, instructions)
+                
+                logger.info(f"📂 Loaded project instructions for '{project_name}' ({len(instructions)} chars)")
+                return instructions
+            else:
+                # Cache empty result to avoid repeated DB queries
+                self.project_cache.set(cache_key, "")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch project instructions for project_id={project_id}: {e}")
+            return None
+    
+    async def get_project_info(self, project_id: int) -> Optional[Dict]:
+        """
+        Get full project information including instructions.
+        Useful for API endpoints that need project details.
+        
+        Args:
+            project_id: The knowledge_projects.id
+            
+        Returns:
+            Dict with project info or None if not found
+        """
+        if not project_id:
+            return None
+            
+        try:
+            from modules.core.database import db_manager
+            
+            result = await db_manager.fetch_one(
+                """
+                SELECT id, name, display_name, description, category, instructions, is_active, created_at
+                FROM knowledge_projects 
+                WHERE id = $1
+                """,
+                project_id
+            )
+            
+            if result:
+                return dict(result)
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch project info for project_id={project_id}: {e}")
+            return None
+    
+    # =========================================================================
+    # System Prompt Generation
+    # =========================================================================
+    
+    async def get_personality_system_prompt(self,
                                     personality_id: str = None,
                                     conversation_context: List[Dict] = None,
-                                    knowledge_context: List[Dict] = None) -> str:
+                                    knowledge_context: List[Dict] = None,
+                                    project_id: int = None) -> str:
         """
         Get enhanced personality system prompt with context and learning
         
@@ -244,6 +340,7 @@ class PersonalityEngine:
             personality_id: Which personality to use
             conversation_context: Recent conversation for adaptation
             knowledge_context: Relevant knowledge entries
+            project_id: Optional project ID for project-specific instructions
         """
         personality_id = personality_id or self.default_personality
         
@@ -255,24 +352,41 @@ class PersonalityEngine:
             # Use regular prompt
             base_prompt = self.learning_integration.get_personality_prompt(personality_id)
         
-        # Add context enhancements
-        enhanced_prompt = self._enhance_prompt_with_context(
+        # Add context enhancements (now async for project instructions)
+        enhanced_prompt = await self._enhance_prompt_with_context(
             base_prompt,
             personality_id,
             conversation_context,
-            knowledge_context
+            knowledge_context,
+            project_id
         )
         
         return enhanced_prompt
     
-    def _enhance_prompt_with_context(self,
+    async def _enhance_prompt_with_context(self,
                                    base_prompt: str,
                                    personality_id: str,
                                    conversation_context: List[Dict] = None,
-                                   knowledge_context: List[Dict] = None) -> str:
-        """Enhance the personality prompt with conversation and knowledge context"""
+                                   knowledge_context: List[Dict] = None,
+                                   project_id: int = None) -> str:
+        """Enhance the personality prompt with conversation, knowledge, and project context"""
         
         enhancements = []
+        
+        # =================================================================
+        # PROJECT INSTRUCTIONS (Added 2026-02-03)
+        # Injected FIRST - foundational context before conversation/knowledge
+        # =================================================================
+        if project_id:
+            project_instructions = await self._get_project_instructions(project_id)
+            if project_instructions:
+                enhancements.append(
+                    f"PROJECT CONTEXT INSTRUCTIONS:\n"
+                    f"This conversation belongs to a specific project. Follow these project-specific guidelines:\n\n"
+                    f"{project_instructions}\n\n"
+                    f"Apply these instructions throughout this conversation while maintaining your personality."
+                )
+                logger.info(f"📂 Injected project instructions for project_id={project_id}")
         
         # Add memory context
         if conversation_context and len(conversation_context) > 1:
@@ -626,9 +740,17 @@ class PersonalityEngine:
         self.learning_cache.clear()
         logger.info("Personality learning cache cleared")
     
+    def clear_project_cache(self):
+        """Clear the project instructions cache"""
+        self.project_cache.clear()
+        logger.info("Project instructions cache cleared")
+    
     def cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics for monitoring"""
-        return self.learning_cache.stats()
+        return {
+            "learning_cache": self.learning_cache.stats(),
+            "project_cache": self.project_cache.stats()
+        }
 
 
 # =============================================================================
@@ -651,7 +773,9 @@ def get_personality_engine() -> PersonalityEngine:
 # =============================================================================
 
 if __name__ == "__main__":
-    def test():
+    import asyncio
+    
+    async def test():
         print("Testing Personality Engine Integration...")
         
         engine = PersonalityEngine()
@@ -660,10 +784,13 @@ if __name__ == "__main__":
         personalities = engine.get_available_personalities()
         print(f"Available personalities: {list(personalities.keys())}")
         
-        # Test system prompt generation
-        prompt = engine.get_personality_system_prompt('syntaxprime')
+        # Test system prompt generation (now async)
+        prompt = await engine.get_personality_system_prompt('syntaxprime')
         print(f"SyntaxPrime prompt length: {len(prompt)} characters")
         print(f"Prompt preview: {prompt[:200]}...")
+        
+        # Test with project_id (would need DB connection)
+        # prompt_with_project = await engine.get_personality_system_prompt('syntaxprime', project_id=1)
         
         # Test response processing
         test_response = "Well, that's an interesting question. Let me think about this with the perfect amount of sarcasm."
@@ -683,9 +810,9 @@ if __name__ == "__main__":
         stats = engine.get_personality_stats()
         print(f"Personality stats: {stats}")
         
-        # Test cache stats
+        # Test cache stats (now includes project cache)
         print(f"Cache stats: {engine.cache_stats()}")
         
         print("Personality Engine test completed!")
     
-    test()
+    asyncio.run(test())

@@ -6,6 +6,7 @@ Integration Order: Weather → Bluesky → RSS → Scraper → Prayer → Google
 Date: 9/27/25 - Added extensive debugging and fixed critical bugs
 Date: 9/27/25 - Added prayer notifications, location detection, and Google Trends integration
 Date: 9/28/25 - Added Voice Synthesis and Image Generation to integration chain
+Date: 2/3/26 - Added project_id support for Claude-style project folders
 """
 
 __all__ = [
@@ -355,7 +356,9 @@ async def chat_with_ai(
             datetime_context = {"full_datetime": "Unknown time"}
         
         # Ensure thread exists or create it
+        # Also fetch project_id for project-specific instructions (2/3/26)
         logger.info("🧵 DEBUG: Managing conversation thread...")
+        project_id = None  # Initialize project_id
         try:
             if not thread_id:
                 logger.info("🆕 DEBUG: Creating new thread...")
@@ -363,6 +366,7 @@ async def chat_with_ai(
                     platform='web',
                     title=None  # Will be auto-generated from first message
                 )
+                project_id = None  # New threads start without a project
                 logger.info(f"✅ DEBUG: New thread created: {thread_id}")
                 
                 # NEW 10/20/25: For new conversations, automatically add recent meeting context
@@ -383,12 +387,12 @@ async def chat_with_ai(
                     logger.error(f"❌ Failed to add meeting context to new conversation: {e}")
                 
             else:
-                # Verify existing thread exists
+                # Verify existing thread exists and get project_id
                 logger.info(f"🔍 DEBUG: Verifying existing thread: {thread_id}")
                 try:
                     from ..core.database import db_manager
                     thread_check = await db_manager.fetch_one(
-                        "SELECT id FROM conversation_threads WHERE id = $1 AND user_id = $2",
+                        "SELECT id, primary_project_id FROM conversation_threads WHERE id = $1 AND user_id = $2",
                         thread_id, user_id
                     )
                     if not thread_check:
@@ -397,10 +401,12 @@ async def chat_with_ai(
                             platform='web',
                             title=None
                         )
+                        project_id = None  # Fallback thread has no project
                         logger.info(f"✅ DEBUG: Fallback thread created: {thread_id}")
                     else:
                         thread_id = thread_id
-                        logger.info(f"✅ DEBUG: Using existing thread: {thread_id}")
+                        project_id = thread_check.get('primary_project_id')  # May be None
+                        logger.info(f"✅ DEBUG: Using existing thread: {thread_id}, project_id: {project_id}")
                 except Exception as e:
                     logger.error(f"❌ DEBUG: Error checking thread: {e}")
                     # Create new thread as fallback
@@ -408,6 +414,7 @@ async def chat_with_ai(
                         platform='web',
                         title=None
                     )
+                    project_id = None  # Emergency fallback has no project
                     logger.info(f"✅ DEBUG: Emergency fallback thread created: {thread_id}")
         except Exception as e:
             logger.error(f"❌ DEBUG: Thread management failed: {e}")
@@ -878,14 +885,17 @@ All systems operational and ready to assist!"""
                         logger.error(f"❌ DEBUG: RSS context failed: {e}")
                         rss_context = ""
                 
-                # Build system prompt with personality
+                # Build system prompt with personality (now async with project support - 2/3/26)
                 logger.info("🎭 DEBUG: Building personality system prompt...")
                 try:
-                    personality_prompt = personality_engine.get_personality_system_prompt(
+                    personality_prompt = await personality_engine.get_personality_system_prompt(
                         personality_id,
-                        conversation_context=conversation_history
+                        conversation_context=conversation_history,
+                        project_id=project_id
                     )
                     logger.info(f"✅ DEBUG: Personality prompt generated (length: {len(personality_prompt)} chars)")
+                    if project_id:
+                        logger.info(f"📂 DEBUG: Project instructions included for project_id: {project_id}")
                 except Exception as e:
                     logger.error(f"❌ DEBUG: Personality prompt generation failed: {e}")
                     personality_prompt = "You are a helpful AI assistant."
@@ -1816,7 +1826,7 @@ def get_integration_info():
     """Get information about the AI brain router integration"""
     return {
         "name": "AI Brain Router with Full Integration Support + Voice & Image",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "description": "Complete AI chat with ordered integration processing including Voice Synthesis and Image Generation",
         "integration_order": "🌦️ Weather → 🔵 Bluesky → 📰 RSS → 🔍 Scraper → 🕌 Prayer → 📈 Google Trends → 🎤 Voice → 🎨 Image → 🏥 Health → 🧠 Chat/AI",
         "components": [
@@ -1835,7 +1845,8 @@ def get_integration_info():
             "Google Trends Analysis",
             "Voice Synthesis with ElevenLabs",
             "Image Generation with Replicate",
-            "Health Monitoring"
+            "Health Monitoring",
+            "Project Folders with Instructions"
         ],
         "endpoints": {
             "chat": "/ai/chat",
@@ -1861,6 +1872,7 @@ def get_integration_info():
             "🎨 AI image generation with inline display",
             "🏥 System health monitoring",
             "🧠 Advanced AI chat processing",
+            "📂 Project folders with custom instructions",
             "🔧 Extensive debug logging"
         ],
         "debug_features": [
@@ -1891,6 +1903,7 @@ def check_module_health():
         "debug_features_active": True,
         "voice_synthesis_integrated": True,
         "image_generation_integrated": True,
+        "project_folders_integrated": True,
         "default_user_id": DEFAULT_USER_ID,
         "note": "Complete AI router with Voice & Image integrations properly ordered and extensive debugging"
     }

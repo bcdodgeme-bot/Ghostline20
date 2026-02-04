@@ -1775,6 +1775,7 @@ class SyntaxPrimeChat {
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.*?)\*/g, '<em>$1</em>')
                 .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="download-link">$1</a>')
                 .replace(/\n/g, '<br>');
             
             // Add the image at the end with proper styling
@@ -1792,6 +1793,7 @@ class SyntaxPrimeChat {
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
             .replace(/`(.*?)`/g, '<code>$1</code>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="download-link">$1</a>')
             .replace(/\n/g, '<br>');
     }
     
