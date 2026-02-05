@@ -1579,7 +1579,7 @@ async def get_conversations(limit: int = 50):
         from ..core.database import db_manager
         conversations_query = """
         SELECT id, title, platform, status, message_count, 
-               created_at, updated_at, last_message_at
+               primary_project_id, created_at, updated_at, last_message_at
         FROM conversation_threads
         WHERE user_id = $1
         ORDER BY last_message_at DESC
@@ -1595,6 +1595,7 @@ async def get_conversations(limit: int = 50):
                 'platform': thread['platform'],
                 'status': thread['status'],
                 'message_count': thread['message_count'] or 0,
+                'primary_project_id': thread['primary_project_id'],
                 'created_at': thread['created_at'].isoformat() if thread['created_at'] else None,
                 'updated_at': thread['updated_at'].isoformat() if thread['updated_at'] else None,
                 'last_message_at': thread['last_message_at'].isoformat() if thread['last_message_at'] else None
