@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 # OpenRouter config (consistent with Syntax Prime V2 patterns)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-SCORING_MODEL = "anthropic/claude-sonnet-4-20250514"  # Cost-effective for bulk scoring
-FALLBACK_MODEL = "anthropic/claude-haiku-4-5-20251001"  # Ultra-cheap fallback
+SCORING_MODEL = "anthropic/claude-sonnet-4"
+FALLBACK_MODEL = "anthropic/claude-3-haiku"
 
 
 class JobScorer:
