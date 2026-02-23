@@ -29,6 +29,8 @@ from .halal_filter import get_halal_filter
 from .company_reviewer import get_company_reviewer
 from .profile_config import (
     NOTIFICATION_THRESHOLDS,
+    NOTIFICATION_CHANNEL,
+    NOTIFICATION_EMAIL,
     SEARCH_QUERIES,
     check_instant_reject,
 )
@@ -63,6 +65,7 @@ class ManualScanRequest(BaseModel):
 
 async def run_job_scan(
     telegram_service=None,
+    gmail_service=None,
     manual_queries: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -199,8 +202,32 @@ async def run_job_scan(
                     # Bridge to knowledge_entries
                     await db.bridge_to_knowledge(job_id)
 
-                    # Send immediate notification
-                    if telegram_service:
+                    # Send email notification
+                    if gmail_service and NOTIFICATION_CHANNEL == "email":
+                        try:
+                            html_body = _format_job_email(job, scores)
+                            subject = (
+                                f"🎯 Job Match {overall}/100: "
+                                f"{job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}"
+                            )
+                            # Use send_reply without thread_id = sends new email
+                            result = await gmail_service.send_reply(
+                                to_email=NOTIFICATION_EMAIL,
+                                subject=subject,
+                                body=html_body,
+                            )
+                            if result.get('success'):
+                                await db.mark_notification_sent(
+                                    job_id, 'immediate',
+                                    None
+                                )
+                                stats["notifications_sent"] += 1
+                        except Exception as e:
+                            logger.error(f"Email notification error: {e}")
+                            stats["errors"].append(f"Email notification: {e}")
+
+                    # Fallback to Telegram if configured
+                    elif telegram_service and NOTIFICATION_CHANNEL == "telegram":
                         try:
                             msg = _format_job_notification(job, scores)
                             buttons = _build_job_buttons(job_id)
@@ -224,8 +251,8 @@ async def run_job_scan(
                                 )
                                 stats["notifications_sent"] += 1
                         except Exception as e:
-                            logger.error(f"Notification error: {e}")
-                            stats["errors"].append(f"Notification: {e}")
+                            logger.error(f"Telegram notification error: {e}")
+                            stats["errors"].append(f"Telegram notification: {e}")
 
                 elif overall >= NOTIFICATION_THRESHOLDS['daily_digest']:
                     # Bridge good matches too
@@ -316,6 +343,133 @@ def _build_job_buttons(job_id: str) -> list:
             {"text": "❌ Not Interested", "callback_data": f"job:reject:{job_id}"},
         ],
     ]
+
+
+def _format_job_email(
+    job: Dict[str, Any],
+    scores: Dict[str, Any]
+) -> str:
+    """Format a high-scoring job match as an HTML email"""
+    overall = scores.get('overall_score', 0)
+    recommendation = scores.get('recommendation', 'UNKNOWN').replace('_', ' ').title()
+
+    # Score color
+    if overall >= 90:
+        score_color = "#22c55e"  # green
+    elif overall >= 80:
+        score_color = "#3b82f6"  # blue
+    else:
+        score_color = "#f59e0b"  # amber
+
+    # Salary
+    salary_html = ""
+    if job.get('salary_min') or job.get('salary_max'):
+        sal_min = f"${job['salary_min']:,.0f}" if job.get('salary_min') else "?"
+        sal_max = f"${job['salary_max']:,.0f}" if job.get('salary_max') else "?"
+        salary_html = f'<p style="margin:4px 0;">💰 <strong>{sal_min} - {sal_max}</strong></p>'
+
+    # Reasons
+    reasons = scores.get('top_3_reasons_for', [])
+    reasons_html = ""
+    if reasons:
+        reasons_html = '<h3 style="margin:16px 0 8px;">Why It Matches</h3><ul>'
+        for r in reasons[:3]:
+            reasons_html += f'<li>{r}</li>'
+        reasons_html += '</ul>'
+
+    # Concerns
+    concerns = scores.get('top_3_concerns', [])
+    concerns_html = ""
+    if concerns:
+        concerns_html = '<h3 style="margin:16px 0 8px;">Concerns</h3><ul>'
+        for c in concerns[:3]:
+            concerns_html += f'<li>{c}</li>'
+        concerns_html += '</ul>'
+
+    # Cover letter angle
+    cover = scores.get('cover_letter_angle', '')
+    cover_html = f'<p style="margin:12px 0;"><strong>💡 Cover Letter Angle:</strong> {cover}</p>' if cover else ""
+
+    # Resume highlights
+    highlights = scores.get('suggested_resume_highlights', [])
+    highlights_html = ""
+    if highlights:
+        highlights_html = '<h3 style="margin:16px 0 8px;">Resume Highlights to Emphasize</h3><ul>'
+        for h in highlights[:3]:
+            highlights_html += f'<li>{h}</li>'
+        highlights_html += '</ul>'
+
+    # Apply button
+    apply_html = ""
+    if job.get('apply_url'):
+        apply_html = f'''
+        <div style="text-align:center; margin:24px 0;">
+            <a href="{job['apply_url']}" 
+               style="background-color:#3b82f6; color:white; padding:14px 32px; 
+                      text-decoration:none; border-radius:8px; font-size:16px; font-weight:bold;">
+                Apply Now →
+            </a>
+        </div>'''
+
+    # Score breakdown
+    breakdown_html = f'''
+    <table style="width:100%; border-collapse:collapse; margin:16px 0;">
+        <tr style="background:#f1f5f9;">
+            <td style="padding:6px 12px;">Skills Match</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('skills_match', 'N/A')}/100</strong></td>
+        </tr>
+        <tr>
+            <td style="padding:6px 12px;">Culture Fit</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('culture_fit', 'N/A')}/100</strong></td>
+        </tr>
+        <tr style="background:#f1f5f9;">
+            <td style="padding:6px 12px;">Seniority Alignment</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('seniority_alignment', 'N/A')}/100</strong></td>
+        </tr>
+        <tr>
+            <td style="padding:6px 12px;">Strengths Utilization</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('strengths_utilization', 'N/A')}/100</strong></td>
+        </tr>
+        <tr style="background:#f1f5f9;">
+            <td style="padding:6px 12px;">Growth Potential</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('growth_potential', 'N/A')}/100</strong></td>
+        </tr>
+        <tr>
+            <td style="padding:6px 12px;">Company Reputation</td>
+            <td style="padding:6px 12px; text-align:right;"><strong>{scores.get('company_reputation_signals', 'N/A')}/100</strong></td>
+        </tr>
+    </table>'''
+
+    return f'''
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; max-width:600px; margin:0 auto; padding:20px;">
+        
+        <div style="background:{score_color}; color:white; padding:20px; border-radius:12px 12px 0 0; text-align:center;">
+            <h1 style="margin:0; font-size:28px;">{overall}/100</h1>
+            <p style="margin:4px 0 0; font-size:14px; opacity:0.9;">{recommendation}</p>
+        </div>
+        
+        <div style="border:1px solid #e2e8f0; border-top:none; padding:20px; border-radius:0 0 12px 12px;">
+            <h2 style="margin:0 0 4px;">{job.get('title', 'Unknown')}</h2>
+            <p style="margin:0; color:#64748b; font-size:16px;">🏢 {job.get('company', 'Unknown')}</p>
+            <p style="margin:4px 0;">📍 {job.get('location', 'Remote')}</p>
+            {salary_html}
+            <p style="margin:4px 0;">✅ Halal: {scores.get('halal_compliance', 'N/A')}</p>
+            
+            {reasons_html}
+            {concerns_html}
+            {cover_html}
+            {highlights_html}
+            
+            <h3 style="margin:16px 0 8px;">Score Breakdown</h3>
+            {breakdown_html}
+            
+            {apply_html}
+        </div>
+        
+        <p style="color:#94a3b8; font-size:12px; text-align:center; margin-top:16px;">
+            Sent by Syntax Prime V2 Job Radar
+        </p>
+    </div>'''
 
 
 # =============================================================================

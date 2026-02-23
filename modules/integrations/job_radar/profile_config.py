@@ -102,13 +102,16 @@ HALAL_FILTER = {
     
     # Nuance instructions for AI scorer
     "ai_scoring_notes": (
-        "Evaluate holistically. A hospital marketing role is fine even if a "
-        "nearby restaurant serves alcohol. But if the company's culture page "
-        "features wine receptions, cocktail hours, or brewery outings as core "
-        "team activities, that indicates haram is normalized in their culture "
-        "and should be rejected. The test: would Carl feel comfortable working "
-        "there during Ramadan without being pressured to participate in haram "
-        "social activities?"
+        "DEFAULT TO PASS. Only mark FAIL if you have strong, specific evidence "
+        "that the company's PRIMARY revenue comes from a haram source (banking, "
+        "lending, alcohol, gambling, pork, adult entertainment, weapons, tobacco). "
+        "A company name you don't recognize is NOT grounds for FAIL. "
+        "A marketing agency, consulting firm, tech company, SaaS company, "
+        "nonprofit, healthcare org, or education company is PASS unless proven "
+        "otherwise. Hospitality companies (hotels) are PASS. Fashion companies "
+        "are PASS. The only culture FAIL is if the job description explicitly "
+        "mentions alcohol-centered team activities (beer fridays, wine receptions, "
+        "brewery outings) as core culture — not just the existence of a holiday party."
     ),
 }
 
@@ -472,8 +475,8 @@ def build_scoring_prompt(job_data: Dict[str, Any]) -> str:
 - Exceptional metrics: 47-54% email open rates, $0.14 Google Ads CPC
 
 **Hard Requirements:**
-- Income must be halal (no alcohol, gambling, conventional banking/lending, pork, adult entertainment)
-- Company culture must not normalize haram (wine receptions, brewery outings = FAIL)
+- Income must be halal — DEFAULT TO PASS. Only FAIL if the company's PRIMARY revenue clearly comes from: conventional banking/lending, alcohol, gambling, pork, adult entertainment, weapons, or tobacco. Unknown companies = PASS. Agencies, tech, SaaS, healthcare, education, hospitality, fashion, consulting = PASS unless proven haram.
+- Company culture: only FAIL if the job description explicitly features alcohol-centered activities (beer fridays, brewery outings, wine receptions) as core culture
 - Fully remote with ≤10% travel
 - Base salary $95K+
 - Benefits: 401k, health insurance, PTO, sick leave
@@ -575,11 +578,15 @@ JOB_SCAN_STARTUP_DELAY = 1500  # 25 minutes — stagger after other tasks
 # =============================================================================
 
 NOTIFICATION_THRESHOLDS = {
-    "immediate_push": 80,    # Score 80+ → push notification NOW
-    "daily_digest": 60,      # Score 60-79 → include in daily digest
+    "immediate_push": 80,    # Score 80+ → email notification NOW
+    "daily_digest": 60,      # Score 60-79 → include in daily digest email
     "log_only": 40,          # Score 40-59 → log but don't notify
     "discard": 0,            # Score <40 → don't even store
 }
+
+# Notification delivery method
+NOTIFICATION_CHANNEL = "email"  # "email" or "telegram"
+NOTIFICATION_EMAIL = "carl@bcdodge.me"
 
 
 # =============================================================================

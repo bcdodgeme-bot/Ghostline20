@@ -621,8 +621,15 @@ async def job_radar_scan_task():
         try:
             if await app.state.telegram_kill_switch.is_enabled(DEFAULT_USER_ID):
                 logger.info("🔍 Running Job Radar scan...")
+                
+                # Get Gmail client for email notifications
+                from modules.integrations.google_workspace.gmail_client import get_gmail_client
+                gmail = get_gmail_client(DEFAULT_USER_ID)
+                await gmail.initialize(DEFAULT_USER_ID)
+                
                 result = await run_job_scan(
                     telegram_service=app.state.telegram_notification_manager,
+                    gmail_service=gmail,
                 )
                 logger.info(
                     f"✅ Job Radar scan complete: "
