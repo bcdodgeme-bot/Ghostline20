@@ -699,7 +699,7 @@ class GmailClient:
             headers = [
                 f"To: {to_email}",
                 f"Subject: {subject}",
-                "Content-Type: text/plain; charset=utf-8",
+                f"Content-Type: {'text/html' if '<html' in body or '<div' in body else 'text/plain'}; charset=utf-8",
                 "MIME-Version: 1.0",
             ]
             

@@ -586,7 +586,7 @@ NOTIFICATION_THRESHOLDS = {
 
 # Notification delivery method
 NOTIFICATION_CHANNEL = "email"  # "email" or "telegram"
-NOTIFICATION_EMAIL = "carl@bcdodge.me"
+NOTIFICATION_EMAIL = "bcdodgeme@gmail.com"
 
 
 # =============================================================================
