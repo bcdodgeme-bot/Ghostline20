@@ -106,6 +106,11 @@ from modules.intelligence.intelligence_orchestrator import get_intelligence_orch
 from modules.integrations.ios import router as ios_router
 from modules.integrations.ios import get_integration_info as ios_integration_info, check_module_health as ios_module_health
 
+#-- Section 2n: Job Radar Integration - added 02/23/26
+from modules.integrations.job_radar import router as job_radar_router
+from modules.integrations.job_radar import get_integration_info as job_radar_integration_info, check_module_health as job_radar_module_health
+from modules.integrations.job_radar.router import run_job_scan
+
 #-- Section 3: AI Brain Module Imports - 9/23/25
 from modules.ai import router as ai_router
 from modules.ai import get_integration_info as ai_integration_info, check_module_health as ai_module_health
@@ -160,6 +165,8 @@ TASK_INTERVALS = {
     'startup_delay_clickup': 1200,     # 20 minutes
     'error_retry': 60,                 # 1 minute
     'error_retry_short': 300,          # 5 minutes
+    'job_radar_scan': 14400,           # 4 hours
+    'startup_delay_job_radar': 1500,   # 25 minutes
 }
 
 # Single user ID (intentionally hardcoded for single-user system)
@@ -605,6 +612,32 @@ async def intelligence_cycle_task():
             logger.error(f"Intelligence cycle error: {e}")
             await asyncio.sleep(TASK_INTERVALS['error_retry_short'])
 
+async def job_radar_scan_task():
+    """Run job radar scan every 4 hours"""
+    await asyncio.sleep(TASK_INTERVALS['startup_delay_job_radar'])
+    logger.info("🔍 Job Radar scan task started")
+    
+    while True:
+        try:
+            if await app.state.telegram_kill_switch.is_enabled(DEFAULT_USER_ID):
+                logger.info("🔍 Running Job Radar scan...")
+                result = await run_job_scan(
+                    telegram_service=app.state.telegram_notification_manager,
+                )
+                logger.info(
+                    f"✅ Job Radar scan complete: "
+                    f"{result.get('total_results', 0)} found, "
+                    f"{result.get('ai_scored', 0)} scored, "
+                    f"{result.get('high_matches', 0)} high matches"
+                )
+            else:
+                logger.info("🔍 Job Radar scan skipped (kill switch disabled)")
+            
+            await asyncio.sleep(TASK_INTERVALS['job_radar_scan'])
+        except Exception as e:
+            logger.error(f"Job Radar scan error: {e}")
+            await asyncio.sleep(TASK_INTERVALS['error_retry_short'])
+
 async def daily_intelligence_digest_task():
     """Send daily intelligence digest at 8 AM Eastern Time"""
     logger.info("📊 Daily intelligence digest task started")
@@ -718,6 +751,8 @@ async def startup_event():
         asyncio.create_task(clickup_sync_cycle_task())
         asyncio.create_task(intelligence_cycle_task())
         asyncio.create_task(daily_intelligence_digest_task())
+        asyncio.create_task(job_radar_scan_task())
+        logger.info("🔍 Job Radar background scan task scheduled")
         
         # Google Workspace background tasks (token refresh, email/analytics/calendar sync)
         await start_google_background_tasks()
@@ -1343,6 +1378,7 @@ app.include_router(telegram_router, prefix="/integrations", tags=["telegram"])
 app.include_router(fathom_router)
 app.include_router(ios_router)
 app.include_router(projects_router)
+app.include_router(job_radar_router, tags=["Job Radar"])
 
 #-- Section 17: Development Server - 9/23/25
 if __name__ == "__main__":
