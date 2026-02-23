@@ -587,6 +587,46 @@ async def health_check() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
+@router.post("/jobs/{job_id}/send-email")
+async def test_send_email(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Send email notification for a specific job (manual trigger)"""
+    db = get_job_radar_db()
+    job = await db.get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    scores = job.get('scoring_details', {})
+    if isinstance(scores, str):
+        import json
+        scores = json.loads(scores)
+    
+    # Build email
+    html_body = _format_job_email(job, scores)
+    subject = (
+        f"🎯 Job Match {job.get('overall_score', 0)}/100: "
+        f"{job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}"
+    )
+    
+    # Send via Gmail
+    from modules.integrations.google_workspace.gmail_client import get_gmail_client
+    gmail = get_gmail_client()
+    await gmail.initialize(DEFAULT_USER_ID)
+    
+    result = await gmail.send_reply(
+        to_email=NOTIFICATION_EMAIL,
+        subject=subject,
+        body=html_body,
+    )
+    
+    if result.get('success'):
+        await db.mark_notification_sent(job_id, 'immediate')
+        return {"success": True, "message": f"Email sent to {NOTIFICATION_EMAIL}"}
+    else:
+        raise HTTPException(status_code=500, detail=result.get('error', 'Send failed'))
+
 # =============================================================================
 # TELEGRAM CALLBACK HANDLER
 # =============================================================================
