@@ -586,7 +586,17 @@ NOTIFICATION_THRESHOLDS = {
 
 # Notification delivery method
 NOTIFICATION_CHANNEL = "email"  # "email" or "telegram"
-NOTIFICATION_EMAIL = "bcdodgeme@gmail.com"
+NOTIFICATION_EMAIL = "carl@bcdodge.me"
+
+# SMTP settings for sending (bypasses Gmail API so emails arrive as inbound)
+SMTP_CONFIG = {
+    "host": "mail.damnitcarl.dev",
+    "port": 465,
+    "username": "bcdodgeme",
+    "from_address": "admin@mail.damnitcarl.dev",
+    "from_name": "Syntax Prime Job Radar",
+    "use_ssl": True,
+}
 
 
 # =============================================================================

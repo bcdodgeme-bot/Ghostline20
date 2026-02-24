@@ -31,6 +31,7 @@ from .profile_config import (
     NOTIFICATION_THRESHOLDS,
     NOTIFICATION_CHANNEL,
     NOTIFICATION_EMAIL,
+    SMTP_CONFIG,
     SEARCH_QUERIES,
     check_instant_reject,
 )
@@ -65,7 +66,6 @@ class ManualScanRequest(BaseModel):
 
 async def run_job_scan(
     telegram_service=None,
-    gmail_service=None,
     manual_queries: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -202,24 +202,20 @@ async def run_job_scan(
                     # Bridge to knowledge_entries
                     await db.bridge_to_knowledge(job_id)
 
-                    # Send email notification
-                    if gmail_service and NOTIFICATION_CHANNEL == "email":
+                    # Send email notification via SMTP
+                    if NOTIFICATION_CHANNEL == "email":
                         try:
                             html_body = _format_job_email(job, scores)
                             subject = (
                                 f"🎯 Job Match {overall}/100: "
                                 f"{job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}"
                             )
-                            # Use send_reply without thread_id = sends new email
-                            result = await gmail_service.send_reply(
-                                to_email=NOTIFICATION_EMAIL,
-                                subject=subject,
-                                body=html_body,
+                            result = await _send_smtp_email(
+                                NOTIFICATION_EMAIL, subject, html_body
                             )
                             if result.get('success'):
                                 await db.mark_notification_sent(
-                                    job_id, 'immediate',
-                                    None
+                                    job_id, 'immediate', None
                                 )
                                 stats["notifications_sent"] += 1
                         except Exception as e:
@@ -277,6 +273,51 @@ async def run_job_scan(
 # =============================================================================
 # TELEGRAM NOTIFICATION FORMATTING
 # =============================================================================
+
+async def _send_smtp_email(to_email: str, subject: str, html_body: str) -> Dict[str, Any]:
+    """Send email via SMTP (Stalwart mail server) so it arrives as inbound"""
+    import smtplib
+    import ssl
+    import os
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    try:
+        password = os.environ.get("SMTP_PASSWORD")
+        if not password:
+            return {"success": False, "error": "SMTP_PASSWORD not set"}
+
+        msg = MIMEMultipart("alternative")
+        msg["From"] = f"{SMTP_CONFIG['from_name']} <{SMTP_CONFIG['from_address']}>"
+        msg["To"] = to_email
+        msg["Subject"] = subject
+
+        # Attach HTML version
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        # Send via SSL
+        context = ssl.create_default_context()
+        loop = asyncio.get_event_loop()
+
+        def _send():
+            with smtplib.SMTP_SSL(
+                SMTP_CONFIG["host"],
+                SMTP_CONFIG["port"],
+                context=context,
+                timeout=30,
+            ) as server:
+                server.login(SMTP_CONFIG["username"], password)
+                server.send_message(msg)
+
+        await loop.run_in_executor(None, _send)
+
+        logger.info(f"✅ SMTP email sent to {to_email}: {subject[:60]}")
+        return {"success": True, "to": to_email, "subject": subject}
+
+    except Exception as e:
+        logger.error(f"❌ SMTP send failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
 
 def _format_job_notification(
     job: Dict[str, Any],
@@ -576,17 +617,6 @@ async def get_digest(
     return {"success": True, "count": len(jobs), "jobs": jobs}
 
 
-@router.get("/health")
-async def health_check() -> Dict[str, Any]:
-    """Health check endpoint — no auth required"""
-    try:
-        from .integration_info import check_module_health
-        health = await check_module_health()
-        return health
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
-
-
 @router.post("/jobs/{job_id}/send-email")
 async def test_send_email(
     job_id: str,
@@ -597,35 +627,37 @@ async def test_send_email(
     job = await db.get_job_by_id(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     scores = job.get('scoring_details', {})
     if isinstance(scores, str):
         import json
         scores = json.loads(scores)
-    
-    # Build email
+
     html_body = _format_job_email(job, scores)
     subject = (
         f"🎯 Job Match {job.get('overall_score', 0)}/100: "
         f"{job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}"
     )
-    
-    # Send via Gmail
-    from modules.integrations.google_workspace.gmail_client import get_gmail_client
-    gmail = get_gmail_client()
-    await gmail.initialize(DEFAULT_USER_ID)
-    
-    result = await gmail.send_reply(
-        to_email=NOTIFICATION_EMAIL,
-        subject=subject,
-        body=html_body,
-    )
-    
+
+    result = await _send_smtp_email(NOTIFICATION_EMAIL, subject, html_body)
+
     if result.get('success'):
         await db.mark_notification_sent(job_id, 'immediate')
         return {"success": True, "message": f"Email sent to {NOTIFICATION_EMAIL}"}
     else:
         raise HTTPException(status_code=500, detail=result.get('error', 'Send failed'))
+
+
+@router.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """Health check endpoint — no auth required"""
+    try:
+        from .integration_info import check_module_health
+        health = await check_module_health()
+        return health
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
 
 # =============================================================================
 # TELEGRAM CALLBACK HANDLER
