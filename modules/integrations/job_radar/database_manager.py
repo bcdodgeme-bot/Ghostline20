@@ -501,7 +501,7 @@ class JobRadarDatabaseManager:
         content = (
             f"Job Match: {job['title']} at {job['company']}\n"
             f"Location: {job.get('location', 'Remote')}\n"
-            f"Salary: ${job.get('salary_min', 'N/A'):,} - ${job.get('salary_max', 'N/A'):,}\n"
+            f"Salary: {('$' + f'{job[\"salary_min\"]:,.0f}') if job.get('salary_min') else 'N/A'} - {('$' + f'{job[\"salary_max\"]:,.0f}') if job.get('salary_max') else 'N/A'}\n"
             f"Overall Score: {job.get('overall_score', 'N/A')}/100\n"
             f"Recommendation: {job.get('recommendation', 'N/A')}\n"
             f"Halal: {job.get('halal_compliance', 'N/A')}\n\n"

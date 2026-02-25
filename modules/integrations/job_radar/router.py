@@ -200,7 +200,10 @@ async def run_job_scan(
                     stats["high_matches"] += 1
 
                     # Bridge to knowledge_entries
-                    await db.bridge_to_knowledge(job_id)
+                    try:
+                        await db.bridge_to_knowledge(job_id)
+                    except Exception as e:
+                        logger.error(f"Knowledge bridge error for {job_id}: {e}")
 
                     # Send email notification via SMTP
                     if NOTIFICATION_CHANNEL == "email":
@@ -252,7 +255,10 @@ async def run_job_scan(
 
                 elif overall >= NOTIFICATION_THRESHOLDS['daily_digest']:
                     # Bridge good matches too
-                    await db.bridge_to_knowledge(job_id)
+                    try:
+                        await db.bridge_to_knowledge(job_id)
+                    except Exception as e:
+                        logger.error(f"Knowledge bridge error for {job_id}: {e}")
 
     except Exception as e:
         logger.error(f"Job scan error: {e}", exc_info=True)
