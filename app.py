@@ -629,7 +629,6 @@ async def job_radar_scan_task():
                 
                 result = await run_job_scan(
                     telegram_service=app.state.telegram_notification_manager,
-                    gmail_service=gmail,
                 )
                 logger.info(
                     f"✅ Job Radar scan complete: "
