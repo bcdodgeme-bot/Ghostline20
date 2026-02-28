@@ -653,7 +653,17 @@ async def test_send_email(
     else:
         raise HTTPException(status_code=500, detail=result.get('error', 'Send failed'))
 
-
+@router.get("/test-smtp")
+async def test_smtp_connection():
+    """Test if SMTP is reachable from Railway"""
+    import socket
+    try:
+        s = socket.create_connection(('mail.damnitcarl.dev', 465), timeout=10)
+        s.close()
+        return {"status": "connected", "host": "mail.damnitcarl.dev", "port": 465}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+        
 @router.get("/health")
 async def health_check() -> Dict[str, Any]:
     """Health check endpoint — no auth required"""
