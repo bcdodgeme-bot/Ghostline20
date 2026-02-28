@@ -593,7 +593,7 @@ SMTP_CONFIG = {
     "host": "mail.damnitcarl.dev",
     "port": 465,
     "username": "bcdodgeme",
-    "from_address": "jobradar@mail.damnitcarl.dev",
+    "from_address": "admin@mail.damnitcarl.dev",
     "from_name": "Syntax Prime Job Radar",
     "use_ssl": True,
 }

@@ -35,6 +35,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_USER_ID = 'b7c60682-4815-4d9d-8ebe-66c6cd24eff9'
 
 
+def _fmt_salary(val):
+    """Format salary value safely"""
+    if val is None:
+        return "N/A"
+    try:
+        return f"${val:,.0f}"
+    except (TypeError, ValueError):
+        return str(val)
+
+
 class JobRadarDatabaseManager:
     """
     Manages all database operations for job radar system.
@@ -478,15 +488,6 @@ class JobRadarDatabaseManager:
             stats.get('duration_seconds', 0)
         )
 
-    def _fmt_salary(val):
-        """Format salary value safely"""
-        if val is None:
-            return "N/A"
-        try:
-            return f"${val:,.0f}"
-        except (TypeError, ValueError):
-            return str(val)
-            
     # =========================================================================
     # KNOWLEDGE ENTRIES BRIDGE
     # =========================================================================
