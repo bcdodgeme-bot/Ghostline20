@@ -591,7 +591,7 @@ NOTIFICATION_EMAIL = "carl@bcdodge.me"
 # SMTP settings for sending (bypasses Gmail API so emails arrive as inbound)
 SMTP_CONFIG = {
     "host": "mail.damnitcarl.dev",
-    "port": 8465,
+    "port": 465,
     "username": "bcdodgeme",
     "from_address": "admin@mail.damnitcarl.dev",
     "from_name": "Syntax Prime Job Radar",
