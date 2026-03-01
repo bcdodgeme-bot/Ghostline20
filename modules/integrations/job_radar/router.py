@@ -623,6 +623,24 @@ async def get_digest(
     return {"success": True, "count": len(jobs), "jobs": jobs}
 
 
+@router.get("/test-smtp")
+async def test_smtp_connection():
+    """Test if SMTP is reachable from Railway"""
+    import socket
+    try:
+        s = socket.create_connection(
+            (SMTP_CONFIG["host"], SMTP_CONFIG["port"]), timeout=10
+        )
+        s.close()
+        return {
+            "status": "connected",
+            "host": SMTP_CONFIG["host"],
+            "port": SMTP_CONFIG["port"],
+        }
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+
 @router.post("/jobs/{job_id}/send-email")
 async def test_send_email(
     job_id: str,
@@ -653,17 +671,7 @@ async def test_send_email(
     else:
         raise HTTPException(status_code=500, detail=result.get('error', 'Send failed'))
 
-@router.get("/test-smtp")
-async def test_smtp_connection():
-    """Test if SMTP is reachable from Railway"""
-    import socket
-    try:
-        s = socket.create_connection(('mail.damnitcarl.dev', 465), timeout=10)
-        s.close()
-        return {"status": "connected", "host": "mail.damnitcarl.dev", "port": 465}
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
-        
+
 @router.get("/health")
 async def health_check() -> Dict[str, Any]:
     """Health check endpoint — no auth required"""
