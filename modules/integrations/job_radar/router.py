@@ -638,7 +638,12 @@ async def test_smtp_connection():
             "port": SMTP_CONFIG["port"],
         }
     except Exception as e:
-        return {"status": "failed", "error": str(e)}
+        return {
+            "status": "failed",
+            "error": str(e),
+            "attempted_host": SMTP_CONFIG["host"],
+            "attempted_port": SMTP_CONFIG["port"],
+        }
 
 
 @router.post("/jobs/{job_id}/send-email")
